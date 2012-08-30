@@ -3,6 +3,9 @@
 ;; 2012-03-15
 (add-to-list 'load-path "~/.emacs.d/el-get/el-get")
 (unless (require 'el-get nil t)
+  ;;; @ponkore, force master branch.
+  (setq el-get-install-branch "master")
+  ;;;
   (with-current-buffer
       (url-retrieve-synchronously
        "https://raw.github.com/dimitri/el-get/master/el-get-install.el")
