@@ -2,7 +2,7 @@
 ;;; my prefer key binding
 ;;;
 (mapcar
- '(lambda (l) (global-set-key (car l) (car (cdr l))))
+ '(lambda (l) (global-set-key (first l) (second l)))
  '(("\C-h" delete-backward-char)
    ("\C-z" scroll-down)
    ("\e?" apropos)
@@ -16,8 +16,6 @@
    ("\C-x|" shell-command-on-region)
    ("\eh" backward-kill-word)
    ("%" my-match-paren)
-   ([?\C-,] my-previous-buffer)
-   ([?\C-.] my-next-buffer)
    ))
 
 
@@ -125,6 +123,20 @@
 ;;
 ;;
 (el-get 'sync '(yasnippet))
+
+
+;;; paredit
+;;
+;;
+(el-get 'sync '(paredit))
+(add-hook 'lisp-mode-hook (lambda () (paredit-mode)))
+(add-hook 'emacs-lisp-mode-hook (lambda () (paredit-mode)))
+(add-hook 'clojure-mode-hook (lambda () (paredit-mode)))
+
+;;; auto-complete
+;;
+;;
+(global-auto-complete-mode t)
 
 
 ;;;
