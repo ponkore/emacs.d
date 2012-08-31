@@ -136,17 +136,16 @@
 ;;; auto-complete
 ;;
 ;;
+(require 'auto-complete)
 (global-auto-complete-mode t)
 
 
 ;;;
 ;;; Japanese Calendar
 ;;;
-(add-to-list 'load-path (expand-file-name "packages"))
-(require 'japanese-holidays)
-(add-hook 'calendar-load-hook
+(load "config/packages/japanese-holidays")
+(add-hook 'calendar-mode-hook
           (lambda ()
-            (require 'japanese-holidays)
             (setq calendar-holidays
                   (append japanese-holidays local-holidays other-holidays))))
 (setq mark-holidays-in-calendar t)
