@@ -155,6 +155,11 @@
 (add-hook 'nrepl-mode-hook (lambda () (auto-complete-mode) (ac-nrepl-setup)))
 
 
+;;; cua-mode
+(cua-mode t)
+(setq cua-enable-cua-keys nil)
+
+
 ;;;
 ;;; Japanese Calendar
 ;;;
