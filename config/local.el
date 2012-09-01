@@ -146,6 +146,15 @@
 (add-hook 'clojure-mode-hook lisp-hook-fn)
 
 
+;;; ac-nrepl
+;;
+;;
+(el-get 'sync '(ac-nrepl))
+(require 'ac-nrepl)
+;; nREPL バッファも auto-complete したいので以下の hook を入れる
+(add-hook 'nrepl-mode-hook (lambda () (auto-complete-mode) (ac-nrepl-setup)))
+
+
 ;;;
 ;;; Japanese Calendar
 ;;;
