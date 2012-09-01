@@ -65,6 +65,8 @@
 (which-function-mode 0)
 ;;; scroll bar を表示しない
 (scroll-bar-mode 0)
+;;; startup message を表示しない
+(setq inhibit-startup-message t)
 ;;; 行番号の表示
 (global-linum-mode t)      ; デフォルトで linum-mode を有効にする
 (setq linum-format "%5d ") ; 5 桁分の領域を確保して行番号のあとにスペースを入れる
@@ -123,21 +125,25 @@
 ;;
 ;;
 (el-get 'sync '(yasnippet))
+(require 'yasnippet)
+(yas-reload-all)
+
+
+;;; auto-complete
+;;
+;;
+(require 'auto-complete-config)
+(ac-config-default)
 
 
 ;;; paredit
 ;;
 ;;
 (el-get 'sync '(paredit))
-(add-hook 'lisp-mode-hook (lambda () (paredit-mode)))
-(add-hook 'emacs-lisp-mode-hook (lambda () (paredit-mode)))
-(add-hook 'clojure-mode-hook (lambda () (paredit-mode)))
-
-;;; auto-complete
-;;
-;;
-(require 'auto-complete)
-(global-auto-complete-mode t)
+(setq lisp-hook-fn (lambda () (paredit-mode) (yas-minor-mode) (eldoc-mode)))
+(add-hook 'lisp-mode-hook lisp-hook-fn)
+(add-hook 'emacs-lisp-mode-hook lisp-hook-fn)
+(add-hook 'clojure-mode-hook lisp-hook-fn)
 
 
 ;;;
