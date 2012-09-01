@@ -154,6 +154,25 @@
 ;; nREPL バッファも auto-complete したいので以下の hook を入れる
 (add-hook 'nrepl-mode-hook (lambda () (auto-complete-mode) (ac-nrepl-setup)))
 
+;;; SLIME and ac-slime
+(el-get 'sync '(slime))
+(el-get 'sync '(ac-slime))
+;; Clozure CL (SLIME)
+(setq inferior-lisp-program "/opt/local/bin/ccl64 -K utf-8")
+(require 'slime-autoloads)
+(require 'hyperspec)
+(setq common-lisp-hyperspec-root
+      (concat "file://" (expand-file-name "/opt/local/share/doc/lisp/HyperSpec-7-0/HyperSpec/"))
+      common-lisp-hyperspec-symbol-table
+      (expand-file-name "/usr/local/share/doc/lisp/HyperSpec-7-0/HyperSpec/Data/Map_Sym.txt"))
+(setq slime-net-coding-system 'utf-8-unix)
+(require 'ac-slime)
+(add-hook 'slime-mode-hook 'set-up-slime-ac)
+(add-hook 'slime-repl-mode-hook 'set-up-slime-ac)
+(eval-after-load "auto-complete" '(add-to-list 'ac-modes 'slime-repl-mode))
+(slime-setup '(slime-repl slime-fancy slime-banner))
+(add-to-list 'auto-mode-alist '("\\.asd$" . common-lisp-mode))
+
 
 ;;; cua-mode
 (cua-mode t)
