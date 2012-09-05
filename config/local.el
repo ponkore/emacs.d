@@ -164,7 +164,7 @@
 (setq common-lisp-hyperspec-root
       (concat "file://" (expand-file-name "/opt/local/share/doc/lisp/HyperSpec-7-0/HyperSpec/"))
       common-lisp-hyperspec-symbol-table
-      (expand-file-name "/usr/local/share/doc/lisp/HyperSpec-7-0/HyperSpec/Data/Map_Sym.txt"))
+      (expand-file-name "/opt/local/share/doc/lisp/HyperSpec-7-0/HyperSpec/Data/Map_Sym.txt"))
 (setq slime-net-coding-system 'utf-8-unix)
 (require 'ac-slime)
 (add-hook 'slime-mode-hook 'set-up-slime-ac)
