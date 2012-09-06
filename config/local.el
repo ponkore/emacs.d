@@ -152,8 +152,11 @@
 (el-get 'sync '(ac-nrepl))
 (require 'ac-nrepl)
 ;; nREPL バッファも auto-complete したいので以下の hook を入れる
-(add-hook 'nrepl-mode-hook (lambda () (auto-complete-mode) (ac-nrepl-setup)))
+(add-hook 'nrepl-mode-hook 'ac-nrepl-setup)
+(add-hook 'clojure-nrepl-mode-hook 'ac-nrepl-setup)
+(eval-after-load "auto-complete" '(add-to-list 'ac-modes 'nrepl-mode))
 
+
 ;;; SLIME and ac-slime
 (el-get 'sync '(slime))
 (el-get 'sync '(ac-slime))
