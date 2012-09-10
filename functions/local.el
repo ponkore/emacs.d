@@ -24,8 +24,7 @@
     (set-fontset-font nil 'japanese-jisx0213-2 jp-fontspec)
     (set-fontset-font nil 'katakana-jisx0201 jp-fontspec)
     (set-fontset-font nil '(#x0080 . #x024F) fontspec)
-    (set-fontset-font nil '(#x0370 . #x03FF) fontspec))
-)
+    (set-fontset-font nil '(#x0370 . #x03FF) fontspec)))
 
 (defun cocoa-emacs-font-setting-old-version (size)
   "Set cocoa emacs japanese fonts(old-version)."
