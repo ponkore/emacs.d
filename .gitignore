@@ -3,5 +3,5 @@
 /history
 /ac-comphist.dat
 /filesets-cache.el
-/old.emacs.d/
+/.trash
 *.elc
