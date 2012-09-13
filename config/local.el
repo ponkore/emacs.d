@@ -12,6 +12,7 @@
    ("\C-x=" count-lines-page)
    ("\C-xl" goto-line)
    ("\C-xg" grep)
+   ("\e\C-g" keyboard-quit)              ; init.el の設定をもとに戻す
    ("\C-x!" shell-command)
    ("\C-x|" shell-command-on-region)
    ("\eh" backward-kill-word)
