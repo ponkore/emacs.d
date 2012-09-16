@@ -5,4 +5,5 @@
 /filesets-cache.el
 /.trash
 /var
+/url/cookies
 *.elc
