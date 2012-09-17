@@ -56,11 +56,9 @@
 ;;; clojure-mode
 ;; clojure 編集用のモード & nREPL インタフェース
 ;;
-(el-get 'sync '(clojure-mode))
-(el-get 'sync '(nrepl))
+(el-get 'sync '(clojure-mode nrepl))
 ;;; for compojure
 (require 'clojure-mode)
-
 (define-clojure-indent
   (defroutes 'defun)
   (GET 2)
@@ -150,8 +148,8 @@
 
 
 ;;; SLIME and ac-slime
-(el-get 'sync '(slime))
-(el-get 'sync '(ac-slime))
+(el-get 'sync '(slime ac-slime))
+
 ;; Clozure CL (SLIME)
 (setq inferior-lisp-program "/opt/local/bin/ccl64 -K utf-8")
 (require 'slime-autoloads)
@@ -172,6 +170,10 @@
 ;;; cua-mode
 (cua-mode t)
 (setq cua-enable-cua-keys nil)
+
+
+;;; gist
+(el-get 'sync '(logito pcache gh gist))
 
 
 ;;; expand-region
