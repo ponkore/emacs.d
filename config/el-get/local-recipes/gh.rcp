@@ -1,0 +1,5 @@
+(:name gh
+       :website "http://github.com/sigma/gh.el"
+       :description "This is a (very early) GitHub client library for Emacs."
+       :features gh
+       :type elpa)
