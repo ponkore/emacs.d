@@ -10,7 +10,9 @@
 ;; 便利関数の定義
 (load "functions/convenience")
 ;; 個別の関数定義があったら読み込む
-(load "functions/local" t)
+(condition-case err
+    (load "functions/local" t)
+  (error "load functions/local.el failed."))
 
 
 ;;; 日本語環境
@@ -232,4 +234,6 @@
 (load "config/packages")
 ;; 個別の設定があったら読み込む
 ;; 2012-02-15
-(load "config/local" t)
+(condition-case err
+    (load "config/local" t)
+  (error "load config/local.el failed."))
