@@ -19,6 +19,8 @@
    ("%" my-match-paren)
    ))
 
+(global-set-key (kbd "C-=") 'er/expand-region)
+
 
 ;;;
 ;;; バックスラッシュを入力したい(emacs-23.x on cocoa mac では ¥ が入力されてしまう)
