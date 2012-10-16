@@ -23,12 +23,22 @@
 
 
 ;;;
+;;; Windows 用設定はこちらにまとめる
+;;;
+(when (eq window-system 'w32)
+  (load "c:/Apps/gnupack/home/.emacs.d/init.el")
+  (tabbar-mode -1)
+  (global-set-key (kbd "M-`") 'toggle-input-method))
+
+
+;;;
 ;;; バックスラッシュを入力したい(emacs-23.x on cocoa mac では ¥ が入力されてしまう)
 ;;;
-(define-key global-map [?¥] [?\\])
-(define-key global-map [?\C-¥] [?\C-\\])
-(define-key global-map [?\M-¥] [?\M-\\])
-(define-key global-map [?\C-\M-¥] [?\C-\M-\\])
+(when (eq window-system 'ns)
+  (define-key global-map [?¥] [?\\])
+  (define-key global-map [?\C-¥] [?\C-\\])
+  (define-key global-map [?\M-¥] [?\M-\\])
+  (define-key global-map [?\C-\M-¥] [?\C-\M-\\]))
 
 
 ;;;
@@ -153,13 +163,18 @@
 (el-get 'sync '(slime ac-slime))
 
 ;; Clozure CL (SLIME)
-(setq inferior-lisp-program "/opt/local/bin/ccl64 -K utf-8")
+(setq ccl-root
+      (cond
+       ((eq window-system 'ns) "/opt/local")
+       ((eq system-type 'berkeley-unix) "/usr/local")
+       (t "C:/Apps/ccl")))
+(setq inferior-lisp-program (concat ccl-root "/bin/ccl64 -K utf-8"))
 (require 'slime-autoloads)
 (require 'hyperspec)
 (setq common-lisp-hyperspec-root
-      (concat "file://" (expand-file-name "/opt/local/share/doc/lisp/HyperSpec-7-0/HyperSpec/"))
+      (concat "file://" (expand-file-name (concat ccl-root "/share/doc/lisp/HyperSpec-7-0/HyperSpec/")))
       common-lisp-hyperspec-symbol-table
-      (expand-file-name "/opt/local/share/doc/lisp/HyperSpec-7-0/HyperSpec/Data/Map_Sym.txt"))
+      (expand-file-name (concat ccl-root "/share/doc/lisp/HyperSpec-7-0/HyperSpec/Data/Map_Sym.txt")))
 (setq slime-net-coding-system 'utf-8-unix)
 (require 'ac-slime)
 (add-hook 'slime-mode-hook 'set-up-slime-ac)
