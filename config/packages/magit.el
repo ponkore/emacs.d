@@ -8,7 +8,7 @@
   '((name . "Git Commit Messages")
     (candidates . anything-c-git-commit-messages-candidates)
     (action . (("Insert" . (lambda (str) (insert str)))))
-    (migemo)
+;    (migemo)
     (multiline))
   "Source for browsing and inserting commit messages.")
 
