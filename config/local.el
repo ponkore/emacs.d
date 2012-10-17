@@ -19,8 +19,6 @@
    ("%" my-match-paren)
    ))
 
-(global-set-key (kbd "C-=") 'er/expand-region)
-
 
 ;;;
 ;;; Windows 用設定はこちらにまとめる
