@@ -201,16 +201,16 @@
 ;; @ modeline
 
    ;; 行番号の表示
-   (line-number-mode t)
+;   (line-number-mode t)
 
    ;; 列番号の表示
-   (column-number-mode t)
+;   (column-number-mode t)
 
    ;; 時刻の表示
-   (require 'time)
-   (setq display-time-24hr-format t)
-   (setq display-time-string-forms '(24-hours ":" minutes))
-   (display-time-mode t)
+;   (require 'time)
+;   (setq display-time-24hr-format t)
+;   (setq display-time-string-forms '(24-hours ":" minutes))
+;   (display-time-mode t)
 
    ;; cp932エンコード時の表示を「P」とする
    (coding-system-put 'cp932 :mnemonic ?P)
@@ -338,7 +338,7 @@
 
 ;; ------------------------------------------------------------------------
 ;; @ hiwin-mode
-   (require 'hiwin)
+;   (require 'hiwin)
 
    ;; hiwin-modeを有効化
    ;; (hiwin-activate)
@@ -349,84 +349,84 @@
 ;; ------------------------------------------------------------------------
 ;; @ tabbar
 
-   (require 'tabbar)
-
-   ;; tabbar有効化
-   (tabbar-mode)
-
-   ;; タブ切替にマウスホイールを使用（0：有効，-1：無効）
-   (tabbar-mwheel-mode -1)
-
-   ;; タブグループを使用（t：有効，nil：無効）
-   (setq tabbar-buffer-groups-function nil)
-
-   ;; ボタン非表示
-   (dolist (btn '(tabbar-buffer-home-button
-                  tabbar-scroll-left-button
-                  tabbar-scroll-right-button))
-     (set btn (cons (cons "" nil) (cons "" nil))))
-
-   ;; タブ表示 一時バッファ一覧
-   (defvar tabbar-displayed-buffers
-     '("*scratch*" "*Messages*" "*Backtrace*" "*Colors*"
-       "*Faces*" "*Apropos*" "*Customize*" "*shell*" "*Help*")
-     "*Regexps matches buffer names always included tabs.")
-
-   ;; 作業バッファの一部を非表示
-   (setq tabbar-buffer-list-function
-         (lambda ()
-           (let* ((hides (list ?\  ?\*))
-                  (re (regexp-opt tabbar-displayed-buffers))
-                  (cur-buf (current-buffer))
-                  (tabs (delq
-                         nil
-                         (mapcar
-                          (lambda (buf)
-                            (let ((name (buffer-name buf)))
-                              (when (or (string-match re name)
-                                        (not (memq (aref name 0) hides)))
-                                buf)))
-                          (buffer-list)))))
-             (if (memq cur-buf tabs)
-                 tabs
-               (cons cur-buf tabs)))))
-
-   ;; キーバインド設定
-   (global-set-key (kbd "<C-tab>")   'tabbar-forward-tab)
-   (global-set-key (kbd "<C-S-tab>") 'tabbar-backward-tab)
-
-   ;; タブ表示欄の見た目（フェイス）
-   (set-face-attribute 'tabbar-default nil
-                       :background "SystemMenuBar")
-
-   ;; 選択タブの見た目（フェイス）
-   (set-face-attribute 'tabbar-selected nil
-                       :foreground "red3"
-                       :background "SystemMenuBar"
-                       :box (list
-                             :line-width 1
-                             :color "gray80"
-                             :style 'released-button)
-                       :overline "#F3F2EF"
-                       :weight 'bold
-                       :family "ＭＳ Ｐゴシック"
-                       )
-
-   ;; 非選択タブの見た目（フェイス）
-   (set-face-attribute 'tabbar-unselected nil
-                       :foreground "black"
-                       :background "SystemMenuBar"
-                       :box (list
-                             :line-width 1
-                             :color "gray80"
-                             :style 'released-button)
-                       :overline "#F3F2EF"
-                       :family "ＭＳ Ｐゴシック"
-                       )
-
-   ;; タブ間隔の調整
-   (set-face-attribute 'tabbar-separator nil
-                       :height 0.1)
+;   (require 'tabbar)
+;
+;   ;; tabbar有効化
+;   (tabbar-mode)
+;
+;   ;; タブ切替にマウスホイールを使用（0：有効，-1：無効）
+;   (tabbar-mwheel-mode -1)
+;
+;   ;; タブグループを使用（t：有効，nil：無効）
+;   (setq tabbar-buffer-groups-function nil)
+;
+;   ;; ボタン非表示
+;   (dolist (btn '(tabbar-buffer-home-button
+;                  tabbar-scroll-left-button
+;                  tabbar-scroll-right-button))
+;     (set btn (cons (cons "" nil) (cons "" nil))))
+;
+;   ;; タブ表示 一時バッファ一覧
+;   (defvar tabbar-displayed-buffers
+;     '("*scratch*" "*Messages*" "*Backtrace*" "*Colors*"
+;       "*Faces*" "*Apropos*" "*Customize*" "*shell*" "*Help*")
+;     "*Regexps matches buffer names always included tabs.")
+;
+;   ;; 作業バッファの一部を非表示
+;   (setq tabbar-buffer-list-function
+;         (lambda ()
+;           (let* ((hides (list ?\  ?\*))
+;                  (re (regexp-opt tabbar-displayed-buffers))
+;                  (cur-buf (current-buffer))
+;                  (tabs (delq
+;                         nil
+;                         (mapcar
+;                          (lambda (buf)
+;                            (let ((name (buffer-name buf)))
+;                              (when (or (string-match re name)
+;                                        (not (memq (aref name 0) hides)))
+;                                buf)))
+;                          (buffer-list)))))
+;             (if (memq cur-buf tabs)
+;                 tabs
+;               (cons cur-buf tabs)))))
+;
+;   ;; キーバインド設定
+;   (global-set-key (kbd "<C-tab>")   'tabbar-forward-tab)
+;   (global-set-key (kbd "<C-S-tab>") 'tabbar-backward-tab)
+;
+;   ;; タブ表示欄の見た目（フェイス）
+;   (set-face-attribute 'tabbar-default nil
+;                       :background "SystemMenuBar")
+;
+;   ;; 選択タブの見た目（フェイス）
+;   (set-face-attribute 'tabbar-selected nil
+;                       :foreground "red3"
+;                       :background "SystemMenuBar"
+;                       :box (list
+;                             :line-width 1
+;                             :color "gray80"
+;                             :style 'released-button)
+;                       :overline "#F3F2EF"
+;                       :weight 'bold
+;                       :family "ＭＳ Ｐゴシック"
+;                       )
+;
+;   ;; 非選択タブの見た目（フェイス）
+;   (set-face-attribute 'tabbar-unselected nil
+;                       :foreground "black"
+;                       :background "SystemMenuBar"
+;                       :box (list
+;                             :line-width 1
+;                             :color "gray80"
+;                             :style 'released-button)
+;                       :overline "#F3F2EF"
+;                       :family "ＭＳ Ｐゴシック"
+;                       )
+;
+;   ;; タブ間隔の調整
+;   (set-face-attribute 'tabbar-separator nil
+;                       :height 0.1)
 
 ;; ------------------------------------------------------------------------
 ;; @ setup-cygwin
@@ -467,38 +467,38 @@
 
 ;; ------------------------------------------------------------------------
 ;; @ menu-tree
-   (setq menu-tree-coding-system 'utf-8)
-   (require 'menu-tree)
+;   (setq menu-tree-coding-system 'utf-8)
+;   (require 'menu-tree)
 
 ;; ------------------------------------------------------------------------
 ;; @ migemo/cmigemo
-   (setq migemo-command (concat (getenv "INST_DIR")
-                                "\\app\\cmigemo\\cmigemo"))
-   (setq migemo-options '("-q" "--emacs"))
-   (setq migemo-dictionary (concat (getenv "INST_DIR")
-                                   "\\app\\cmigemo\\dict\\utf-8\\migemo-dict"))
-   (setq migemo-user-dictionary nil)
-   (setq migemo-regex-dictionary nil)
-   (setq migemo-use-pattern-alist t)
-   (setq migemo-use-frequent-pattern-alist t)
-   (setq migemo-pattern-alist-length 1024)
-   (setq migemo-coding-system 'utf-8-unix)
-   (load-library "migemo")
-   (migemo-init)
+;   (setq migemo-command (concat (getenv "INST_DIR")
+;                                "\\app\\cmigemo\\cmigemo"))
+;   (setq migemo-options '("-q" "--emacs"))
+;   (setq migemo-dictionary (concat (getenv "INST_DIR")
+;                                   "\\app\\cmigemo\\dict\\utf-8\\migemo-dict"))
+;   (setq migemo-user-dictionary nil)
+;   (setq migemo-regex-dictionary nil)
+;   (setq migemo-use-pattern-alist t)
+;   (setq migemo-use-frequent-pattern-alist t)
+;   (setq migemo-pattern-alist-length 1024)
+;   (setq migemo-coding-system 'utf-8-unix)
+;   (load-library "migemo")
+;   (migemo-init)
 
 ;; ------------------------------------------------------------------------
 ;; @ color-theme
-   (require 'color-theme)
-   (color-theme-initialize)
+;   (require 'color-theme)
+;   (color-theme-initialize)
 
 ;; ------------------------------------------------------------------------
 ;; @ package manager
-   (require 'package)
-   (add-to-list 'package-archives
-                '("melpa" . "http://melpa.milkbox.net/packages/") t)
-   (add-to-list 'package-archives
-                '("marmalade" . "http://marmalade-repo.org/packages/"))
-   (package-initialize)
+;   (require 'package)
+;   (add-to-list 'package-archives
+;                '("melpa" . "http://melpa.milkbox.net/packages/") t)
+;   (add-to-list 'package-archives
+;                '("marmalade" . "http://marmalade-repo.org/packages/"))
+;   (package-initialize)
 
 ;; ------------------------------------------------------------------------
 ;; @ w32-symlinks
