@@ -205,6 +205,12 @@
 (el-get 'sync '(expand-region))
 (require 'expand-region)
 (global-set-key (kbd "C-=") 'er/expand-region)
+
+
+;;; for SQL mode (My Office PC Oracle setting)
+(when (eq system-type 'windows-nt)
+  (setq sql-oracle-program "c:/Apps/Oracle/instantclient_11_2/sqlplus.exe"))
+
 
 ;;;
 ;;; Japanese Calendar
