@@ -94,11 +94,6 @@
 ; なぜか余計な flymake がついてくるので一旦とりやめ。
 
 
-;;; markdown-mode
-;; markdown 編集用のモード
-(el-get 'sync '(markdown-mode))
-
-
 ;;; ntcmd
 ;; .cmd, .bat 編集用のモード
 ;;
