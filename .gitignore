@@ -6,4 +6,5 @@
 /.trash
 /var
 /url/cookies
+/server/*
 *.elc
