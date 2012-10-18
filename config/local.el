@@ -24,8 +24,20 @@
 ;;; Windows 用設定はこちらにまとめる
 ;;;
 (when (eq window-system 'w32)
+  ;; cygwin mount initialize
   (load (expand-file-name "~/.emacs.d/config/builtins/gnupack-init.el"))
-  (global-set-key (kbd "M-`") 'toggle-input-method))
+  ;; IME on/off key bind
+  (global-set-key (kbd "M-`") 'toggle-input-method)
+  ;; Windows dired quick hack: open any documents with external command.
+  (defvar cygwin-start-command "cygstart.exe" "Open a file with suitable windows command.")
+  (defun dired-open-external ()
+    "Open current line of dired buffer with external (windows) command."
+    (interactive)
+    (let ((file (dired-get-filename nil t)))
+      (if (file-directory-p file)
+          (start-process "explorer" nil "explorer.exe" file)
+        (start-process "cygstart" nil cygwin-start-command file))))
+  (add-hook 'dired-mode-hook (lambda () (define-key dired-mode-map " " 'dired-open-external))))
 
 
 ;;;
