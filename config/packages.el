@@ -64,7 +64,7 @@
 ;; ローマ字で日本語をインクリメンタルサーチする。
 ;; 2012-03-19
 ;; インストールされていたら有効にする。
-(require 'migemo nil t)
+;(require 'migemo nil t)
 
 
 ;;; ruby-mode
@@ -74,7 +74,7 @@
 
 ;;; rabbit-mode
 ;; 2012-03-16
-(el-get 'sync '(rabbit-mode))
+;(el-get 'sync '(rabbit-mode))
 
 
 ;;; run-test
@@ -84,7 +84,7 @@
 
 ;;; Magit
 ;; 2012-03-24
-(load "config/packages/magit")
+;(load "config/packages/magit")
 
 
 ;;; rst-mode
