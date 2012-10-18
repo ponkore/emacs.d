@@ -25,7 +25,6 @@
 ;;;
 (when (eq window-system 'w32)
   (load (expand-file-name "~/.emacs.d/config/builtins/gnupack-init.el"))
-  (tabbar-mode -1)
   (global-set-key (kbd "M-`") 'toggle-input-method))
 
 
