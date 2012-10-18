@@ -432,7 +432,8 @@
 ;; @ setup-cygwin
    (setq cygwin-mount-cygwin-bin-directory
          (concat (getenv "CYGWIN_DIR") "\\bin"))
-   (require 'setup-cygwin)
+  ;(require 'setup-cygwin)
+   (load "config/builtins/setup-cygwin")
    (file-name-shadow-mode -1)
 
 ;; ------------------------------------------------------------------------
