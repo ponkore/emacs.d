@@ -24,7 +24,7 @@
 ;;; Windows 用設定はこちらにまとめる
 ;;;
 (when (eq window-system 'w32)
-  (load "c:/Apps/gnupack/home/.emacs.d/init.el")
+  (load (expand-file-name "~/.emacs.d/config/builtins/gnupack-init.el"))
   (tabbar-mode -1)
   (global-set-key (kbd "M-`") 'toggle-input-method))
 
@@ -101,7 +101,7 @@
 ;;; scheme-complete
 ;;
 ;;
-(el-get 'sync '(scheme-complete))
+;(el-get 'sync '(scheme-complete))
 
 
 ;;; ssh
