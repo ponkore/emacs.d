@@ -84,7 +84,7 @@
 
 ;;; Magit
 ;; 2012-03-24
-;(load "config/packages/magit")
+(load "config/packages/magit")
 
 
 ;;; rst-mode
