@@ -8,3 +8,8 @@
 (add-hook 'visual-basic-mode-hook
           '(lambda () (setq mode-name "vb")))
 
+
+;;; psvn-mode
+;;
+;; 2012-10-25
+(el-get 'sync '(psvn))
