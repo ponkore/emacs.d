@@ -175,7 +175,7 @@
 (setq inferior-lisp-program
       (cond
        ((eq window-system 'ns) (concat ccl-root "/bin/ccl64 -K utf-8"))
-       ((eq system-type 'berkeley-unix) (concat ccl-root "/bin/ccl64 -K utf-8"))
+       ((eq system-type 'berkeley-unix) (concat ccl-root "/bin/ccl -K utf-8"))
        (t (concat ccl-root "/wx86cl.exe -K utf-8"))))
 (setq hyperspec-root
       (cond
