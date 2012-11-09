@@ -214,9 +214,10 @@
 ;;; for SQL mode (My Office PC Oracle setting)
 (when (eq system-type 'windows-nt)
   (setq sql-oracle-program "c:/Apps/Oracle/instantclient_11_2/sqlplus.exe"))
-(when (eq system-type 'darwin)
+(when (or (eq system-type 'berkeley-unix) (eq system-type 'darwin))
   (let ((oracle-home (expand-file-name "~/Applications/Oracle/instantclient_10_2")))
     (setenv "DYLD_LIBRARY_PATH" oracle-home)
+    (setenv "LD_LIBRARY_PATH" oracle-home)
     (setq sql-oracle-program (concat oracle-home "/sqlplus"))))
 
 
