@@ -8,3 +8,4 @@
 /url/cookies
 /server/*
 *.elc
+/abbrev_defs
