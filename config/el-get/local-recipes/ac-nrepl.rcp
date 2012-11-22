@@ -1,4 +1,4 @@
 (:name ac-nrepl
        :type git
-       :url "https://ponkore@github.com/ponkore/ac-nrepl.git"
+       :url "https://github.com/purcell/ac-nrepl.git"
        :features (ac-nrepl))
