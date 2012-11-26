@@ -82,6 +82,8 @@
 ;;
 (el-get 'sync '(clojure-mode nrepl))
 ;;; for compojure
+(define-key clojure-mode-map (kbd "C-c M-j") 'nrepl-jack-in)
+
 (require 'clojure-mode)
 (define-clojure-indent
   (defroutes 'defun)
