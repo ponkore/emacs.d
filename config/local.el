@@ -41,9 +41,12 @@
 
 
 ;;;
-;;; バックスラッシュを入力したい(emacs-23.x on cocoa mac では ¥ が入力されてしまう)
+;;; Mac 用設定
 ;;;
 (when (eq window-system 'ns)
+  ;; process-coding-system を utf-8 にする。(その他は設定不要？)
+  (setq default-process-coding-system '(utf-8-unix . utf-8-unix))
+  ;; バックスラッシュを入力したい(emacs-23.x on cocoa mac では ¥ が入力されてしまう)
   (define-key global-map [?¥] [?\\])
   (define-key global-map [?\C-¥] [?\C-\\])
   (define-key global-map [?\M-¥] [?\M-\\])
