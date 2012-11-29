@@ -81,9 +81,7 @@
 ;; clojure 編集用のモード & nREPL インタフェース
 ;;
 (el-get 'sync '(clojure-mode nrepl))
-;;; for compojure
-(define-key clojure-mode-map (kbd "C-c M-j") 'nrepl-jack-in)
-
+;;; for compojure indent
 (require 'clojure-mode)
 (define-clojure-indent
   (defroutes 'defun)
@@ -94,6 +92,8 @@
   (HEAD 2)
   (ANY 2)
   (context 2))
+;;; easy to use (nrepl-jack-in)
+(define-key clojure-mode-map (kbd "C-c M-j") 'nrepl-jack-in)
 
 ;;; color-theme
 ;;
