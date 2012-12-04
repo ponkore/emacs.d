@@ -9,3 +9,4 @@
 /server/*
 *.elc
 /abbrev_defs
+/config-proxy.el
