@@ -20,6 +20,17 @@
    ))
 
 
+;; Windows/Mac dired quick hack: open any documents with external command.
+(defvar open-directory-command "explorer.exe" "Open a directory with suitable windows/mac command.")
+(defvar open-file-command "cygstart.exe" "Open a file with suitable windows/mac command.")
+(defun dired-open-external ()
+  "Open current line of dired buffer with external (windows) command."
+  (interactive)
+  (let ((file (dired-get-filename nil t)))
+    (if (file-directory-p file)
+        (start-process "dir" nil open-directory-command file)
+      (start-process "file" nil open-file-command file))))
+
 ;;;
 ;;; Windows 用設定はこちらにまとめる
 ;;;
@@ -28,15 +39,7 @@
   (load (expand-file-name "~/.emacs.d/config/builtins/gnupack-init.el"))
   ;; IME on/off key bind
   (global-set-key (kbd "M-`") 'toggle-input-method)
-  ;; Windows dired quick hack: open any documents with external command.
-  (defvar cygwin-start-command "cygstart.exe" "Open a file with suitable windows command.")
-  (defun dired-open-external ()
-    "Open current line of dired buffer with external (windows) command."
-    (interactive)
-    (let ((file (dired-get-filename nil t)))
-      (if (file-directory-p file)
-          (start-process "explorer" nil "explorer.exe" file)
-        (start-process "cygstart" nil cygwin-start-command file))))
+  ;; dired hack
   (add-hook 'dired-mode-hook (lambda () (define-key dired-mode-map " " 'dired-open-external))))
 
 
@@ -45,7 +48,11 @@
 ;;;
 (when (eq window-system 'ns)
   ;; process-coding-system を utf-8 にする。(その他は設定不要？)
-  (setq default-process-coding-system '(utf-8-unix . utf-8-unix)))
+  (setq default-process-coding-system '(utf-8-unix . utf-8-unix))
+  ;; dired hack
+  (setq open-directory-command "open")
+  (setq open-file-command "open")
+  (add-hook 'dired-mode-hook (lambda () (define-key dired-mode-map " " 'dired-open-external))))
 
 
 ;;;
