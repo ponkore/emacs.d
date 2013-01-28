@@ -34,7 +34,7 @@
 ;;;
 ;;; Windows 用設定はこちらにまとめる
 ;;;
-(when (eq window-system 'w32)
+(when (eq system-type 'windows-nt)
   ;; cygwin mount initialize
   (load (expand-file-name "~/.emacs.d/config/builtins/gnupack-init.el"))
   ;; IME on/off key bind
@@ -46,7 +46,7 @@
 ;;;
 ;;; Mac 用設定
 ;;;
-(when (eq window-system 'ns)
+(when (eq system-type 'darwin)
   ;; process-coding-system を utf-8 にする。(その他は設定不要？)
   (setq default-process-coding-system '(utf-8-unix . utf-8-unix))
   ;; dired hack
