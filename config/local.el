@@ -288,6 +288,8 @@
     (setenv "DYLD_LIBRARY_PATH" oracle-home)
     (setenv "LD_LIBRARY_PATH" oracle-home)
     (setq sql-oracle-program (concat oracle-home "/sqlplus"))))
+;;; set Oracle as default SQL product.
+(setq sql-product 'oracle)
 
 
 ;;;
