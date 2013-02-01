@@ -290,6 +290,7 @@
     (setq sql-oracle-program (concat oracle-home "/sqlplus"))))
 ;;; set Oracle as default SQL product.
 (setq sql-product 'oracle)
+(add-to-list 'auto-mode-alist '("\\.ddl$" . sql-mode))
 
 
 ;;;
