@@ -207,10 +207,11 @@
 ;   (column-number-mode t)
 
    ;; 時刻の表示
-;   (require 'time)
-;   (setq display-time-24hr-format t)
-;   (setq display-time-string-forms '(24-hours ":" minutes))
-;   (display-time-mode t)
+   (when (eq system-type 'windows-nt)
+     (require 'time)
+     (setq display-time-24hr-format t)
+     (setq display-time-string-forms '(24-hours ":" minutes))
+     (display-time-mode t))
 
    ;; cp932エンコード時の表示を「P」とする
    (coding-system-put 'cp932 :mnemonic ?P)
