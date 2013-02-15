@@ -35,8 +35,6 @@
 ;;; Windows 用設定はこちらにまとめる
 ;;;
 (when (eq system-type 'windows-nt)
-  ;; cygwin mount initialize
-  (load (expand-file-name "~/.emacs.d/config/builtins/gnupack-init.el"))
   ;; IME on/off key bind
   (global-set-key (kbd "M-`") 'toggle-input-method)
   ;; dired hack
