@@ -60,6 +60,12 @@
   (cocoa-emacs-font-setting 12))
 
 
+;;;
+;;; Emacs24 以上でテーマを変えてみる
+;;;
+(when (string< "24" emacs-version)
+  (load-theme 'dichromacy))
+
 ;;; modeline に column-number は表示しない
 (column-number-mode 0)
 ;;; modeline に line-number は表示しない
@@ -145,6 +151,9 @@
 ;;
 (require 'auto-complete-config)
 (ac-config-default)
+;; customize...
+(setq ac-auto-show-menu 0.4)
+(setq ac-quick-help-delay 1.0)
 
 
 ;;; paredit
