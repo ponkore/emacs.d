@@ -100,8 +100,8 @@
 ;;; color-theme
 ;;
 ;;
-(el-get 'sync '(color-theme))
-(color-theme-dark-laptop)
+;(el-get 'sync '(color-theme))
+;(color-theme-dark-laptop)
 
 
 ;;; csharp-mode
