@@ -65,7 +65,11 @@
 ;;;
 (when (string< "24" emacs-version)
   (load-theme 'dichromacy))
+
 
+(el-get 'sync '(dired-details))
+(dired-details-install)
+
 ;;; modeline に column-number は表示しない
 (column-number-mode 0)
 ;;; modeline に line-number は表示しない
