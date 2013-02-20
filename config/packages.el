@@ -126,6 +126,7 @@
 ;; Markdown編集用のモード
 ;; 2012-10-15
 (el-get 'sync '(markdown-mode))
+(add-to-list 'auto-mode-alist '("\\.\\(markdown\\|md\\)\\.txt\\'" . markdown-mode))
 
 
 ;;; 追加の設定
