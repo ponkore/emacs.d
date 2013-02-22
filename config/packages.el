@@ -51,7 +51,7 @@
   (global-set-key (kbd "C-c h") 'helm-mini)
   (helm-mode)
   (define-key global-map (kbd "C-x b") 'helm-for-files)
-  (define-key global-map (kbd "C-x g") 'helm-imenu) ; experimental
+  (define-key global-map (kbd "C-x C-b") 'helm-for-files)
   (define-key global-map (kbd "M-y") 'helm-show-kill-ring)
   (define-key helm-map (kbd "C-z") 'helm-previous-page)
   (define-key helm-map (kbd "C-l") 'helm-execute-persistent-action)
