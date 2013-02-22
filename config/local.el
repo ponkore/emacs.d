@@ -67,9 +67,24 @@
   (load-theme 'dichromacy))
 
 
+;;;
+;;; customize dired
+;;;
 (el-get 'sync '(dired-details))
 (dired-details-install)
 
+
+;;;
+;;; for helm
+;;;
+(setq helm-for-files-preferred-list
+      '(helm-c-source-buffers-list
+        helm-c-source-bookmarks         ; bookmark の順位を上げた
+        helm-c-source-recentf
+        helm-c-source-file-cache
+        helm-c-source-files-in-current-dir
+        helm-c-source-locate))
+
 ;;; modeline に column-number は表示しない
 (column-number-mode 0)
 ;;; modeline に line-number は表示しない
