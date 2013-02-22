@@ -54,3 +54,15 @@
           (".*monaco cy-bold-.*-mac-cyrillic" . 0.9)
           (".*monaco-bold-.*-mac-roman" . 0.9)
           ("-cdac$" . 1.3))))
+
+;;; read plain file
+(defun read-file-and-list-each-lines (filename)
+  (save-excursion
+    (let* ((buffer (find-file-noselect filename))
+           (ret nil))
+      (set-buffer buffer)
+      (goto-char (point-min))
+      (while (re-search-forward "^.+$" nil t)
+        (setq ret (append ret (list (match-string-no-properties 0)))))
+      (kill-buffer buffer)
+      ret)))
