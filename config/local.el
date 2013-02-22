@@ -382,3 +382,6 @@
     "http://www.google.com/search?q="
     (my-url-encode-string str 'shift_jis)
     "&hl=ja&ie=Shift_JIS&lr=lang_ja")))
+
+;;;
+(load "config/packages/helm-hosen.el" t)
