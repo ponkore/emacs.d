@@ -68,11 +68,6 @@
 ;(require 'migemo nil t)
 
 
-;;; ruby-mode
-;; 2012-03-15
-(load "config/packages/ruby-mode")
-
-
 ;;; rabbit-mode
 ;; 2012-03-16
 ;(el-get 'sync '(rabbit-mode))
