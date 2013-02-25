@@ -13,6 +13,8 @@
 (defvar helm-senmei-source nil)
 (defvar helm-eki-zai-source nil)
 (defvar helm-kanrishitsu-eki-zai-source nil)
+(defvar helm-senmei-eki-zai-source nil)
+(defvar helm-kanrishitsu-kyokai-zai-source nil)
 
 (defun helm-hosen-config ()
   (interactive)
@@ -31,7 +33,13 @@
                                       "C:/repo/hosen-tools/helm-駅.txt"))
     (setq helm-kanrishitsu-eki-zai-source
           (make-helm-source-from-file "管理室＿駅(在)"
-                              "C:/repo/hosen-tools/helm-管理室駅.txt"))
+                                      "C:/repo/hosen-tools/helm-管理室駅.txt"))
+    (setq helm-senmei-eki-zai-source
+          (make-helm-source-from-file "線名＿駅(在)"
+                                      "C:/repo/hosen-tools/helm-線名-駅.txt"))
+    (setq helm-kanrishitsu-kyokai-zai-source
+          (make-helm-source-from-file "管理室境界(在)"
+                                      "C:/repo/hosen-tools/helm-管理室境界.txt"))
     (setq helm-hosen-configured t)))
 
 (defun helm-root-user ()
@@ -45,7 +53,9 @@
   (helm-other-buffer
    '(helm-senmei-source
      helm-eki-zai-source
-     helm-kanrishitsu-eki-zai-source)
+     helm-kanrishitsu-kyokai-zai-source
+     helm-kanrishitsu-eki-zai-source
+     helm-senmei-eki-zai-source)
    "*helm zai*"))
 
 (helm-hosen-config)
