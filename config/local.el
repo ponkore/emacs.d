@@ -71,8 +71,8 @@
 ;;;
 ;;; customize dired
 ;;;
-(el-get 'sync '(dired-details))
-(dired-details-install)
+;(el-get 'sync '(dired-details))
+;(dired-details-install)
 
 
 ;;;
