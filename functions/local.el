@@ -1,6 +1,11 @@
 ;;; only for my office environment
 (load "config-proxy.el" t)
 
+;;;
+;;;
+(if (eq system-type 'windows-nt)
+    (load "config/builtins/gnupack-init"))
+
 ;;; match-paren
 (defun my-match-paren (arg)
   "Go to the matching parenthesis if on parenthesis otherwise insert %."
