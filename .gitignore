@@ -10,3 +10,4 @@
 *.elc
 /abbrev_defs
 /config-proxy.el
+/hosen-tools
