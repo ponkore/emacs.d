@@ -386,3 +386,7 @@
 
 ;;;
 (load "config/packages/helm-hosen.el" t)
+
+;;;
+(if (eq system-type 'windows-nt)
+    (load "config/builtins/gnupack-init"))

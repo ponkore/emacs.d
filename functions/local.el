@@ -3,8 +3,8 @@
 
 ;;;
 ;;;
-(if (eq system-type 'windows-nt)
-    (load "config/builtins/gnupack-init"))
+;; (if (eq system-type 'windows-nt)
+;;     (load "config/builtins/gnupack-init"))
 
 ;;; match-paren
 (defun my-match-paren (arg)
