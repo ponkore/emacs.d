@@ -68,6 +68,6 @@
       (set-buffer buffer)
       (goto-char (point-min))
       (while (re-search-forward "^.+$" nil t)
-        (setq ret (append ret (list (match-string-no-properties 0)))))
+        (setq ret (cons (match-string-no-properties 0) ret)))
       (kill-buffer buffer)
-      ret)))
+      (reverse ret))))
