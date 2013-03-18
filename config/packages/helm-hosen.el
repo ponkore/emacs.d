@@ -27,6 +27,8 @@
 (defvar helm-kanrishitsu-eki-zai-source nil)
 (defvar helm-senmei-eki-zai-source nil)
 (defvar helm-kanrishitsu-kyokai-zai-source nil)
+;; 論物変換辞書
+(defvar helm-ronbutsu-henkan-source nil)
 
 (defun helm-hosen-config ()
   (interactive)
@@ -44,7 +46,9 @@
     (setq helm-senmei-eki-zai-source
           (make-helm-source-from-file "線名＿駅(在)" (concat helm-tools-dir "/helm-線名-駅.txt")))
     (setq helm-kanrishitsu-kyokai-zai-source
-          (make-helm-source-from-file "管理室境界(在)" (concat helm-tools-dir "/helm-管理室境界.txt")))))
+          (make-helm-source-from-file "管理室境界(在)" (concat helm-tools-dir "/helm-管理室境界.txt")))
+    (setq helm-ronbutsu-henkan-source
+          (make-helm-source-from-file "論物変換" (concat helm-tools-dir "/helm-dict.txt")))))
 
 (defun helm-root-user ()
   (interactive)
@@ -61,6 +65,12 @@
      helm-kanrishitsu-eki-zai-source
      helm-senmei-eki-zai-source)
    "*helm zai*"))
+
+(defun helm-ronbutsu-henkan ()
+  (interactive)
+  (helm-other-buffer
+   '(helm-ronbutsu-henkan-source)
+   "*helm ronbutsu henkan*"))
 
 (helm-hosen-config)
 
