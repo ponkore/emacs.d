@@ -71,3 +71,8 @@
         (setq ret (cons (match-string-no-properties 0) ret)))
       (kill-buffer buffer)
       (reverse ret))))
+
+;;; insert current datetime
+(defun my-insert-datetime ()
+  (interactive)
+  (insert (format-time-string "%Y/%m/%d %T")))

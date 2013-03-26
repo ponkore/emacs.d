@@ -18,6 +18,7 @@
    ("\C-x|" shell-command-on-region)
    ("\eh" backward-kill-word)
    ("%" my-match-paren)
+   ("\C-x\C-;" my-insert-datetime)
    ))
 
 
