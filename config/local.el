@@ -18,8 +18,10 @@
    ("\C-x|" shell-command-on-region)
    ("\eh" backward-kill-word)
    ("%" my-match-paren)
-   ("\C-x\C-;" my-insert-datetime)
    ))
+
+(defmacro foo (key fun) `(global-set-key (kbd ,key) (function ,fun)))
+(foo "C-x C-;" my-insert-datetime)
 
 
 ;; Windows/Mac dired quick hack: open any documents with external command.
