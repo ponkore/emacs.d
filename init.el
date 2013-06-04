@@ -226,7 +226,7 @@
 ;;; Emacsサーバー
 ;; emacsclientで接続できるようにする。
 ;; 2011-06-14
-(server-start)
+;(server-start)
 
 
 ;;; 追加の設定
