@@ -113,6 +113,10 @@
 ;;; for compojure indent
 (require 'clojure-mode)
 (require 'clojure-test-mode)
+;;(add-to-list 'load-path "~/.emacs.d/el-get/midje-mode")
+;;(require 'midje-mode)
+;;(require 'clojure-jump-to-file)
+
 (define-clojure-indent
   (defroutes 'defun)
   (GET 2)
@@ -121,7 +125,9 @@
   (DELETE 2)
   (HEAD 2)
   (ANY 2)
-  (context 2))
+  (context 2)
+  (fact 'defun)
+  (facts 'defun))
 ;;; easy to use (nrepl-jack-in)
 (define-key clojure-mode-map (kbd "C-c M-j") 'nrepl-jack-in)
 
