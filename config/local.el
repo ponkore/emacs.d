@@ -256,7 +256,7 @@
 
 
 ;;; gist
-(el-get 'sync '(logito pcache gh gist))
+;;(el-get 'sync '(logito pcache gh gist))
 
 
 ;;; expand-region
