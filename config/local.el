@@ -109,25 +109,22 @@
 ;;; clojure-mode
 ;; clojure 編集用のモード & nREPL インタフェース
 ;;
-(el-get 'sync '(clojure-mode nrepl))
+(el-get 'sync '(clojure-mode nrepl midje-mode))
 ;;; for compojure indent
 (require 'clojure-mode)
-(require 'clojure-test-mode)
-;;(add-to-list 'load-path "~/.emacs.d/el-get/midje-mode")
-;;(require 'midje-mode)
-;;(require 'clojure-jump-to-file)
+(require 'midje-mode)
+(require 'clojure-jump-to-file)
 
 (define-clojure-indent
   (defroutes 'defun)
+  (tabular 'defun)
   (GET 2)
   (POST 2)
   (PUT 2)
   (DELETE 2)
   (HEAD 2)
   (ANY 2)
-  (context 2)
-  (fact 'defun)
-  (facts 'defun))
+  (context 2))
 ;;; easy to use (nrepl-jack-in)
 (define-key clojure-mode-map (kbd "C-c M-j") 'nrepl-jack-in)
 
@@ -406,7 +403,3 @@
 
 ;;;
 (load "config/packages/helm-hosen.el" t)
-
-;;;
-(if (eq system-type 'windows-nt)
-    (load "config/builtins/gnupack-init"))
