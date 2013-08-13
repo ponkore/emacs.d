@@ -1,3 +1,6 @@
+;;;
+(if (eq system-type 'windows-nt)
+    (load "config/builtins/gnupack-init"))
 ;;; el-get
 ;; 複数のソースからパッケージをインストールできるパッケージ管理システム
 ;; 2012-03-15
@@ -6,11 +9,13 @@
   ;;; @ponkore, force master branch.
   (setq el-get-install-branch "master")
   ;;;
-  (with-current-buffer
-      (url-retrieve-synchronously
-       "https://raw.github.com/dimitri/el-get/master/el-get-install.el")
-    (end-of-buffer)
-    (eval-print-last-sexp)))
+  ;; (with-current-buffer
+  ;;     (url-retrieve-synchronously
+  ;;      "https://raw.github.com/dimitri/el-get/master/el-get-install.el")
+  ;;   (end-of-buffer)
+  ;;   (eval-print-last-sexp))
+  (load "~/.emacs.d/el-get-install.el")
+  )
 ;; レシピ置き場
 (add-to-list 'el-get-recipe-path
              (concat (file-name-directory load-file-name) "/el-get/recipes"))
