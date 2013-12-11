@@ -1,5 +1,0 @@
-(:name pcache
-       :website "http://github.com/sigma/pcache"
-       :description "persistent caching for Emacs"
-       :features pcache
-       :type elpa)

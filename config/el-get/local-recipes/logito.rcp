@@ -1,5 +1,0 @@
-(:name logito
-       :website "http://github.com/sigma/logito"
-       :description "tiny logging framework for Emacs"
-       :features logito
-       :type elpa)

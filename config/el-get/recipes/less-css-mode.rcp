@@ -1,3 +1,0 @@
-(:name less-css-mode
-       :type git
-       :url "https://github.com/purcell/less-css-mode.git")
