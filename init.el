@@ -38,6 +38,8 @@
     git-rebase-mode
     haml-mode
     helm
+    helm-ag
+    helm-gtags
     init-loader
     japanese-holidays
     javap-mode
