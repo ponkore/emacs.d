@@ -2,7 +2,11 @@
 ;; 再帰的にgrep
 ;; 2011-02-18
 (require 'grep)
-(setq grep-command-before-query "grep -nH -r -e ")
+
+(if (eq window-system 'w32)
+    (setq grep-command-before-query "yagrep -nH -r -e ")
+  (setq grep-command-before-query "grep -nH -r -e "))
+
 (defun grep-default-command ()
   (if current-prefix-arg
       (let ((grep-command-before-target
