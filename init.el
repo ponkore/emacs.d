@@ -30,6 +30,7 @@
     clojure-mode
     clojure-test-mode
     clojure-snippets
+    csharp-mode
     dash
     dired-details
     epl
