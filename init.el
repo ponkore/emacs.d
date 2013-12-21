@@ -35,6 +35,7 @@
     dired-details
     epl
     expand-region
+    fsharp-mode
     git-commit-mode
     git-rebase-mode
     haml-mode
