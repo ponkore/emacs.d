@@ -29,8 +29,8 @@
 (require 'ac-nrepl)
 
 ;; nREPL バッファも auto-complete したいので以下の hook を入れる
-(add-hook 'cider-mode-hook 'ac-nrepl-setup)
-(eval-after-load "auto-complete" '(add-to-list 'ac-modes 'cider-mode))
+(add-hook 'cider-repl-mode-hook 'ac-nrepl-setup)
+(eval-after-load "auto-complete" '(add-to-list 'ac-modes 'cider-repl-mode))
 
 (defun set-auto-complete-as-completion-at-point-function ()
   (setq completion-at-point-functions '(auto-complete)))
