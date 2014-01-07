@@ -23,6 +23,7 @@
   '(;; ここに使っているパッケージを書く。
     ac-js2
     ac-nrepl
+    anzu
     auto-compile
     cider
     cider-decompile
