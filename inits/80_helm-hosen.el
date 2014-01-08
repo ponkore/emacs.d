@@ -9,6 +9,9 @@
     (with-current-buffer (get-buffer-create "*hosen*")
       (erase-buffer)
       (insert msg)
+      (let ((start (goto-char (point-min)))
+            (end (goto-char (point-max))))
+        (copy-region-as-kill start end))
       (message (format "%s" msg)))))
 
 (defun make-helm-source-from-file (source-name filename)
