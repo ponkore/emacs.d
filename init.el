@@ -43,6 +43,7 @@
     helm
     helm-ag
     helm-gtags
+    helm-package
     init-loader
     japanese-holidays
     javap-mode
