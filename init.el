@@ -58,6 +58,7 @@
     packed
     page-break-lines
     paredit
+    pastels-on-dark-theme
     pkg-info
     popup
     popwin
