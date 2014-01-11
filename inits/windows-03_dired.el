@@ -8,3 +8,4 @@
     (if (file-directory-p file)
         (start-process "dir" nil open-directory-command file)
       (start-process "file" nil open-file-command file))))
+(add-hook 'dired-mode-hook (lambda () (define-key dired-mode-map " " 'dired-open-external)))
