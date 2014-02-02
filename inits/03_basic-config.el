@@ -138,3 +138,7 @@
 ;;; cua-mode
 (cua-mode t)
 (setq cua-enable-cua-keys nil)
+
+
+;;; M-kanji is undefined に対する対策
+(global-set-key [M-kanji] 'ignore)
