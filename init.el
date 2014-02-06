@@ -87,3 +87,19 @@
 
 (setq init-loader-show-log-after-init nil)
 (init-loader-load "~/.emacs.d/inits")
+
+(custom-set-variables
+ ;; custom-set-variables was added by Custom.
+ ;; If you edit it by hand, you could mess it up, so be careful.
+ ;; Your init file should contain only one such instance.
+ ;; If there is more than one, they won't work right.
+ '(w32-symlinks-handle-shortcuts t)
+ '(yas-prompt-functions (quote (my-yas/prompt))))
+(custom-set-faces
+ ;; custom-set-faces was added by Custom.
+ ;; If you edit it by hand, you could mess it up, so be careful.
+ ;; Your init file should contain only one such instance.
+ ;; If there is more than one, they won't work right.
+ '(font-lock-function-name-face ((t (:foreground "DodgerBlue1"))))
+ '(font-lock-variable-name-face ((t (:foreground "DodgerBlue1"))))
+ '(hl-line ((t (:underline "textBackgroundColor")))))
