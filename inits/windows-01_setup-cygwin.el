@@ -172,6 +172,22 @@ loaded as such.)"
   (setq w32-quote-process-args nil))
 
 ;;;;;;;;;;;;;;;;;;;;;;;
+;; 
+;; (setq w32-quote-process-args t)
+;;
+;; ;; shell-quote-argumentの問題回避
+;; (defvar quote-argument-for-windows-p t "enables `shell-quote-argument' workaround for windows.")
+;; (defadvice shell-quote-argument (around shell-quote-argument-for-win activate)
+;;   "workaround for windows."
+;;   (if (and quote-argument-for-windows-p
+;;            (not (w32-shell-dos-semantics))) ;;el-get利用時の場合は無効にするための判定
+;;       (let ((argument (ad-get-arg 0)))
+;;         (setq argument (replace-regexp-in-string "\\\\" "\\\\" argument nil t))
+;;         (setq argument (replace-regexp-in-string "'" "'\\''" argument nil t))
+;;         (setq ad-return-value (concat "'" argument "'")))
+;;     ad-do-it))
+;;
+;;;;;;;;;;;;;;;;;;;;;;;
 
 (provide 'setup-cygwin)
 
