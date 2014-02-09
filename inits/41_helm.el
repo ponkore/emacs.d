@@ -23,3 +23,20 @@
         helm-c-source-file-cache
         helm-c-source-files-in-current-dir
         helm-c-source-locate))
+
+(defun helm-action-copy-selected (msg)
+  (save-excursion
+    (with-temp-buffer
+      (erase-buffer)
+      (insert msg)
+      (let ((start (goto-char (point-min)))
+            (end (goto-char (point-max))))
+        (copy-region-as-kill start end))
+      (message (format "%s" msg)))))
+
+(defun make-helm-source-from-file (source-name filename execute-action)
+  (when (file-exists-p filename)
+    (let ((l (mapcar (lambda (v) (list v)) (read-file-and-list-each-lines filename))))
+      `((name . ,source-name)
+        (candidates . ,l)
+        (action . execute-action)))))
