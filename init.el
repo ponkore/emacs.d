@@ -101,5 +101,6 @@
  ;; Your init file should contain only one such instance.
  ;; If there is more than one, they won't work right.
  '(font-lock-function-name-face ((t (:foreground "DodgerBlue1"))))
+ '(font-lock-preprocessor-face ((t (:foreground "steel blue"))))
  '(font-lock-variable-name-face ((t (:foreground "DodgerBlue1"))))
  '(hl-line ((t (:underline "textBackgroundColor")))))
