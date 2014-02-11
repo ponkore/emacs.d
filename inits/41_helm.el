@@ -39,4 +39,4 @@
     (let ((l (mapcar (lambda (v) (list v)) (read-file-and-list-each-lines filename))))
       `((name . ,source-name)
         (candidates . ,l)
-        (action . execute-action)))))
+        (action . ,execute-action)))))

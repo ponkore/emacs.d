@@ -5,7 +5,7 @@
 (defvar helm-hosen-tools-dir (expand-file-name "~/.emacs.d/hosen-tools"))
 
 (defun make-helm-hosen-source-from-file (source-name filename)
-  (make-helm-source-from-file source-name (concat helm-hosen-tools-dir "/" filename) (function helm-action-copy-selected)))
+  (make-helm-source-from-file source-name (concat helm-hosen-tools-dir "/" filename) 'helm-action-copy-selected))
 
 (defvar helm-root-user-zai-source          (make-helm-hosen-source-from-file "rootユーザ(在)" "helm-root-user-zai.txt"))
 (defvar helm-root-user-kan-source          (make-helm-hosen-source-from-file "rootユーザ(幹)" "helm-root-user-kan.txt"))
