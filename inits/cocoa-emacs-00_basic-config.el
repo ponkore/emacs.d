@@ -12,3 +12,9 @@
         (start-process "dir" nil open-directory-command file)
       (start-process "file" nil open-file-command file))))
 (add-hook 'dired-mode-hook (lambda () (define-key dired-mode-map " " 'dired-open-external)))
+
+(defun cd-to-homedir-all-buffers ()
+  "Change every current directory of all buffers to the home directory."
+  (mapc
+   (lambda (buf) (set-buffer buf) (cd (expand-file-name "~"))) (buffer-list)))
+(add-hook 'after-init-hook 'cd-to-homedir-all-buffers)
