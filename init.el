@@ -21,16 +21,17 @@
 
 (defvar installing-package-list
   '(;; ここに使っているパッケージを書く。
-    ac-js2
-    ac-nrepl
     anzu
-    auto-compile
     cider
     cider-decompile
     cider-tracing
     clojure-mode
     clojure-test-mode
     clojure-snippets
+    company
+    company-cider
+    company-inf-python
+    company-inf-ruby
     csharp-mode
     dash
     dired-details
@@ -57,7 +58,6 @@
     midje-test-mode
     packed
     page-break-lines
-    paredit
     pastels-on-dark-theme
     pkg-info
     popup
@@ -65,6 +65,7 @@
     psvn
     sass-mode
     scss-mode
+    smartparens
     sql-indent
     ssh
     ssh-config-mode

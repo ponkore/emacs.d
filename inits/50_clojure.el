@@ -1,6 +1,13 @@
 (require 'cider)
 (require 'clojure-mode)
 (require 'midje-mode)
+(require 'smartparens)
+
+(setq cider-popup-stacktraces t)
+(setq cider-repl-popup-stacktraces t)
+(setq cider-auto-select-error-buffer t)
+(setq cider-repl-print-length 50)       ; the default is nil, no limit
+(setq cider-repl-result-prefix ";; => ")
 
 (define-clojure-indent
   (defroutes 'defun)
@@ -12,8 +19,6 @@
   (HEAD 2)
   (ANY 2)
   (context 2))
-;;; easy to use (cider-jack-in)
-(define-key clojure-mode-map (kbd "C-c M-j") 'cider-jack-in)
 
 ;;; when windows, remove ^M in nrepl buffer
 ;;; thanx http://takeisamemo.blogspot.jp/2013/10/clojureemacs-windowsnreplm.html
@@ -25,17 +30,6 @@
     (aset buffer-display-table ?\^M []))
   (add-hook 'cider-mode-hook 'remove-dos-eol))
 
-;; ac-nrepl
-(require 'ac-nrepl)
-
-;; nREPL バッファも auto-complete したいので以下の hook を入れる
-(add-hook 'cider-repl-mode-hook 'ac-nrepl-setup)
-(eval-after-load "auto-complete" '(add-to-list 'ac-modes 'cider-repl-mode))
-
-(defun set-auto-complete-as-completion-at-point-function ()
-  (setq completion-at-point-functions '(auto-complete)))
-(add-hook 'auto-complete-mode-hook 'set-auto-complete-as-completion-at-point-function)
-
-(add-hook 'cider-mode-hook 'set-auto-complete-as-completion-at-point-function)
-(add-hook 'cider-repl-mode-hook 'set-auto-complete-as-completion-at-point-function)
-(define-key cider-repl-mode-map (kbd "C-c C-d") 'ac-nrepl-popup-doc)
+;; smartparens
+(add-hook 'cider-mode-hook 'smartparens-strict-mode)
+(add-hook 'cider-repl-mode-hook 'smartparens-strict-mode)
