@@ -10,3 +10,11 @@
 ;;; set Oracle as default SQL product.
 (setq sql-product 'oracle)
 (add-to-list 'auto-mode-alist '("\\.ddl$" . sql-mode))
+
+(defun sql-set-sqli-oracle-hook ()
+  ""
+  (interactive)
+  ;; `truncate-lines' is automatically became buffer-local
+  (setq truncate-lines t))
+
+(add-hook 'sql-interactive-mode-hook 'sql-set-sqli-oracle-hook)
