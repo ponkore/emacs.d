@@ -21,6 +21,8 @@
 
 (defvar installing-package-list
   '(;; ここに使っているパッケージを書く。
+    auto-complete
+    ac-cider-compliment
     anzu
     cider
     cider-decompile
@@ -28,10 +30,6 @@
     clojure-mode
     clojure-test-mode
     clojure-snippets
-    company
-    company-cider
-    company-inf-python
-    company-inf-ruby
     csharp-mode
     dash
     dired-details
