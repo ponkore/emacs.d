@@ -20,18 +20,13 @@
   (ANY 2)
   (context 2))
 
-;;; when windows, remove ^M in nrepl buffer
-;;; thanx http://takeisamemo.blogspot.jp/2013/10/clojureemacs-windowsnreplm.html
-;; (when (eq system-type 'windows-nt)
-;;   (defun remove-dos-eol ()
-;;     "Do not show ^M in files containing mixed UNIX and DOS line endings."
-;;     (interactive)
-;;     (setq buffer-display-table (make-display-table))
-;;     (aset buffer-display-table ?\^M []))
-;;   (add-hook 'cider-mode-hook 'remove-dos-eol))
+(add-hook 'clojure-mode-hook 'paredit-mode)
 
-;; smartparens
-(add-hook 'cider-mode-hook 'smartparens-strict-mode)
-
-(add-hook 'clojure-mode-hook (lambda () (paredit-mode) (yas-minor-mode)))
-(add-hook 'cider-repl-mode-hook (lambda () (paredit-mode) (smartparens-strict-mode)))
+(add-hook 'cider-mode-hook (lambda ()
+                               (auto-complete-mode)
+                               (ac-cider-compliment-setup)
+                               (smartparens-strict-mode)
+                               (yas-minor-mode)))
+(add-hook 'cider-repl-mode-hook (lambda ()
+                                  (auto-complete-mode)
+                                  (ac-cider-compliment-repl-setup)))
