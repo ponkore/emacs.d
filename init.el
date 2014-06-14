@@ -32,7 +32,6 @@
     clojure-snippets
     csharp-mode
     dash
-    dired-details
     dired-k
     epl
     expand-region

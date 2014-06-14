@@ -12,9 +12,6 @@
            (magit-status (file-name-directory path))))))
 (define-key dired-mode-map "V" 'dired-vc-status)
 
-;;(require 'dired-details)
-(dired-details-install)
-
 ;;
 ;; http://qiita.com/l3msh0@github/items/8665122e01f6f5ef502f
 ;;
