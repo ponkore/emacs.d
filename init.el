@@ -28,11 +28,12 @@
     cider-decompile
     cider-tracing
     clojure-mode
-    clojure-test-mode
     clojure-snippets
     csharp-mode
     dash
     dired-k
+    direx
+    direx-grep
     epl
     expand-region
     fsharp-mode
