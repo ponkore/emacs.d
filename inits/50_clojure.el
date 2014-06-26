@@ -3,6 +3,8 @@
 (require 'midje-mode)
 (require 'smartparens)
 
+(add-to-list 'auto-mode-alist '("\\(default\\|user\\|emacs\\)\.\\(behaviors\\|keymap\\)" . clojure-mode))
+
 (setq cider-popup-stacktraces t)
 (setq cider-repl-popup-stacktraces t)
 (setq cider-auto-select-error-buffer t)
