@@ -29,6 +29,8 @@
     cider-tracing
     clojure-mode
     clojure-snippets
+    clojure-cheatsheet
+    clojure-mode-extra-font-locking
     csharp-mode
     dash
     dired-k
@@ -53,8 +55,6 @@
     magit-log-edit
     magit-push-remote
     markdown-mode
-    midje-mode
-    midje-test-mode
     packed
     page-break-lines
     paredit
