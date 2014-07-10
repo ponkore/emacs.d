@@ -29,7 +29,6 @@
     cider-tracing
     clojure-mode
     clojure-snippets
-    clojure-cheatsheet
     clojure-mode-extra-font-locking
     csharp-mode
     dash
