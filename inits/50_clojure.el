@@ -3,7 +3,11 @@
 (eval-after-load "clojure-mode"
   '(progn
      (require 'smartparens)
-     (add-hook 'clojure-mode-hook 'paredit-mode)
+     (require 'midje-mode)
+     (require 'midje-test-mode)
+     (add-hook 'clojure-mode-hook (lambda ()
+                                    (paredit-mode)
+                                    (yas-minor-mode)))
      (define-clojure-indent
        (defroutes 'defun)
        (tabular 'defun)
@@ -13,8 +17,7 @@
        (DELETE 2)
        (HEAD 2)
        (ANY 2)
-       (context 2))
-     ))
+       (context 2))))
 
 (eval-after-load "cider"
   '(progn
@@ -22,13 +25,15 @@
                                   (auto-complete-mode)
                                   (ac-cider-compliment-setup)
                                   (smartparens-strict-mode)
-                                  (yas-minor-mode)))
+                                  (yas-minor-mode)
+                                  (midje-mode)
+                                  (midje-test-mode)))
      (add-hook 'cider-repl-mode-hook (lambda ()
                                        (auto-complete-mode)
                                        (ac-cider-compliment-repl-setup)))
      (setq cider-popup-stacktraces t)
      (setq cider-repl-popup-stacktraces t)
      (setq cider-auto-select-error-buffer t)
-     (setq cider-repl-print-length 50)       ; the default is nil, no limit
+     (setq cider-repl-print-length 50)  ; the default is nil, no limit
      (setq cider-repl-result-prefix ";; => ")
      (setq nrepl-sync-request-timeout 20)))
