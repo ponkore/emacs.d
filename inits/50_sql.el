@@ -18,3 +18,4 @@
   (setq truncate-lines t))
 
 (add-hook 'sql-interactive-mode-hook 'sql-set-sqli-oracle-hook)
+(add-hook 'sql-mode-hook (lambda () (yas-minor-mode-on)))
