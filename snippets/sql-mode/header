@@ -6,7 +6,7 @@
 alter session set NLS_DATE_FORMAT = 'YYYY/MM/DD HH24:MI:SS';
 column log_date new_value log_date_text noprint
 select to_char(sysdate,'mmdd_hh24miss') log_date from dual;
-spool ${1:filename}_&log_date_text..log
+spool `(buffer-file-name)`_&log_date_text..log
 show user
 set echo on
 set timing on
