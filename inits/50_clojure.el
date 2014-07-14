@@ -36,4 +36,4 @@
      (setq cider-auto-select-error-buffer t)
      (setq cider-repl-print-length 50)  ; the default is nil, no limit
      (setq cider-repl-result-prefix ";; => ")
-     (setq nrepl-sync-request-timeout 20)))
+     (setq nrepl-sync-request-timeout 40)))
