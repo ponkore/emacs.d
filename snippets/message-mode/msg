@@ -1,0 +1,13 @@
+# -*- mode: snippet; require-final-newline: nil -*-
+# name: msg
+# key: msg
+# binding: direct-keybinding
+# --
+${1:宛先さん}
+
+加藤（眞）です。
+おつかれさまです。
+
+$0下記件、了解しました。
+
+以上、よろしくお願いします。
