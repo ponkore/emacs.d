@@ -92,7 +92,7 @@
 ;; 自動保存
 (when (require 'recentf-ext nil t)
   ;; 最近開いたファイルを保存する数を増やす
-  (setq recentf-max-saved-items 500)
+  (setq recentf-max-saved-items 1000)
   (setq recentf-exclude '(".recentf"))
   (setq recentf-auto-cleanup 10)
   (setq recentf-auto-save-timer (run-with-idle-timer 30 t 'recentf-save-list))
@@ -149,3 +149,6 @@
 
 ;;; M-kanji is undefined に対する対策
 (global-set-key [M-kanji] 'ignore)
+
+
+(add-hook 'message-mode-hook (lambda () (yas-minor-mode)))
