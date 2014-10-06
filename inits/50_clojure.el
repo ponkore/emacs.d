@@ -31,8 +31,7 @@
      (add-hook 'cider-repl-mode-hook (lambda ()
                                        (auto-complete-mode)
                                        (ac-cider-compliment-repl-setup)))
-     (setq cider-popup-stacktraces t)
-     (setq cider-repl-popup-stacktraces t)
+     (setq cider-show-error-buffer t)
      (setq cider-auto-select-error-buffer t)
      (setq cider-repl-print-length 50)  ; the default is nil, no limit
      (setq cider-repl-result-prefix ";; => ")
