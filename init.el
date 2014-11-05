@@ -22,11 +22,11 @@
 (defvar installing-package-list
   '(;; ここに使っているパッケージを書く。
     auto-complete
-    ac-cider-compliment
+    ac-cider
     anzu
     cider
     cider-decompile
-    cider-tracing
+    cider-spy
     clojure-mode
     clojure-snippets
     clojure-mode-extra-font-locking
@@ -50,7 +50,6 @@
     javap-mode
     js2-mode
     magit
-    magit-commit-training-wheels
     magit-log-edit
     magit-push-remote
     markdown-mode
