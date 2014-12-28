@@ -2,6 +2,7 @@
 (add-hook 'c-mode-hook 'helm-gtags-mode)
 (add-hook 'c++-mode-hook 'helm-gtags-mode)
 (add-hook 'asm-mode-hook 'helm-gtags-mode)
+(add-hook 'csharp-mode-hook 'helm-gtags-mode)
 
 ;; Set key bindings
 (eval-after-load "helm-gtags"
