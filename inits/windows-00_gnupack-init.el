@@ -8,7 +8,8 @@
 
    (prefer-coding-system 'utf-8-dos)
    (set-file-name-coding-system 'cp932)
-   (setq default-process-coding-system '(cp932 . cp932))
+;;   (setq default-process-coding-system '(cp932 . cp932))
+   (setq default-process-coding-system '(utf-8 . utf-8))
 
 ;; ------------------------------------------------------------------------
 ;; @ ime

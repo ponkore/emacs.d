@@ -21,8 +21,6 @@
 
 (defvar installing-package-list
   '(;; ここに使っているパッケージを書く。
-    auto-complete
-    ac-cider
     anzu
     cider
     cider-decompile
@@ -30,6 +28,7 @@
     clojure-mode
     clojure-snippets
     clojure-mode-extra-font-locking
+    company
     csharp-mode
     dash
     dired-k
@@ -55,7 +54,6 @@
     markdown-mode
     packed
     page-break-lines
-    paredit
     pastels-on-dark-theme
     pkg-info
     popup

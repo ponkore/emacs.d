@@ -1,2 +1,2 @@
-(require 'auto-complete)
-(add-hook 'after-init-hook 'global-auto-complete-mode)
+(require 'company)
+(add-hook 'after-init-hook 'global-company-mode)
