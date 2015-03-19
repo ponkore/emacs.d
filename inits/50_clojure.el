@@ -15,7 +15,7 @@
        (HEAD 2)
        (ANY 2)
        (context 2)
-       (fact 2))))
+       (fact 'defun))))
 
 (eval-after-load "cider"
   '(progn
