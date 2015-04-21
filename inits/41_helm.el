@@ -58,9 +58,17 @@
         (copy-region-as-kill start end))
       (message (format "%s" msg)))))
 
+(defun read-buf-string (fname)
+  (save-excursion
+    (with-temp-buffer
+      (let* ((buf (set-buffer (find-file-noselect fname)))
+             (ret (buffer-string)))
+        (kill-buffer buf)
+        ret))))
+
 (defun make-helm-source-from-file (source-name filename execute-action)
   (when (file-exists-p filename)
-    (let ((l (mapcar (lambda (v) (list v)) (read-file-and-list-each-lines filename))))
-      `((name . ,source-name)
-        (candidates . ,l)
-        (action . ,execute-action)))))
+    `((name . ,source-name)
+      (candidates-in-buffer)
+      (init . (lambda () (helm-init-candidates-in-buffer 'global (read-buf-string ,filename))))
+      (action . ,execute-action))))

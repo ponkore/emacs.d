@@ -34,8 +34,13 @@
     dired-k
     direx
     direx-grep
+    elpy
     epl
     expand-region
+    flymake
+    flymake-cursor
+    flymake-easy
+    flymake-python-pyflakes
     fsharp-mode
     git-commit-mode
     git-rebase-mode
@@ -49,8 +54,6 @@
     javap-mode
     js2-mode
     magit
-    magit-log-edit
-    magit-push-remote
     markdown-mode
     packed
     page-break-lines
@@ -59,6 +62,7 @@
     popup
     popwin
     psvn
+    py-autopep8
     sass-mode
     scss-mode
     smartparens
