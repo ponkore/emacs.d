@@ -30,4 +30,27 @@
    (list (make-helm-hosen-source-from-file "論物変換" "helm-dict.txt"))
    "*helm ronbutsu henkan*"))
 
+;;
+;; start system
+;;
+
+(defvar internet-explore-program "C:/Program Files/Internet Explorer/iexplore.exe")
+(defvar hgs-app-line-re "^\\([^\s]+\\)\s+\\([^\s]+\\)\s+\\([^\s]+\\)$")
+
+(defun invoke-hgs-app (msg)
+  (if (string-match hgs-app-line-re msg)
+      (let* ((m1 (substring msg (match-beginning 1) (match-end 1)))
+             (m2 (substring msg (match-beginning 2) (match-end 2)))
+             (url (substring msg (match-beginning 3) (match-end 3))))
+        (start-process "Internet Explore" nil internet-explore-program url)
+        (message (concat "running " url)))
+    (message msg)))
+
+(defun helm-hgs-app ()
+  (interactive)
+  (helm-other-buffer
+   (list (make-helm-source-from-file "保線業務管理システム" (concat helm-hosen-tools-dir "/" "helm-hosen-app-url.txt")
+                                     'invoke-hgs-app))
+   "*helm hgs app"))
+
 (provide 'helm-hosen)
