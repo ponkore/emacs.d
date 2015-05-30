@@ -1,6 +1,8 @@
 ;;; Magit
 ;;; 2012-03-23
 
+(setq magit-last-seen-setup-instructions "1.4.0")
+
 (eval-after-load "magit"
   '(progn
      (defun magit-expand-git-file-name--msys (args)
