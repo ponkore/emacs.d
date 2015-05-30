@@ -24,6 +24,39 @@
          (make-helm-hosen-source-from-file "線名＿駅(在)"   "helm-線名-駅.txt"))
    "*helm zai*"))
 
+;;
+;; table info selection
+;;
+
+(defvar hgs-tables-line-re "^\\([^\s]+\\)\s+")
+(defvar hgs-tables-base-dir "C:/repo/hgs/Tables")
+
+(defun helm-table-select-action (zaikan msg)
+  (if (string-match hgs-tables-line-re msg)
+      (let* ((table-name (substring msg (match-beginning 1) (match-end 1)))
+             (file-path (concat hgs-tables-base-dir "/" zaikan "/" table-name ".table.txt")))
+        (if (file-exists-p file-path)
+            (find-file-other-window file-path)
+          (message (concat file-path " not found."))))
+    (message msg)))
+
+(defun helm-tables ()
+  (interactive)
+  (helm-other-buffer
+   (list (make-helm-source-from-file "テーブル(在)"
+                                     (concat helm-hosen-tools-dir "/" "helm-tables-zai.txt")
+                                     (lambda (msg) (helm-table-select-action "zai" msg)))
+         (make-helm-source-from-file "テーブル(幹)"
+                                     (concat helm-hosen-tools-dir "/" "helm-tables-kan.txt")
+                                     (lambda (msg) (helm-table-select-action "kan" msg))))
+   "*helm tables*"))
+
+(defun helm-hanyo-kubun ()
+  (interactive)
+  (helm-other-buffer
+   (list (make-helm-hosen-source-from-file "汎用区分" "helm-hanyo-kubun.txt"))
+   "*helm hanyo kubun*"))
+
 (defun helm-ronbutsu-henkan ()
   (interactive)
   (helm-other-buffer

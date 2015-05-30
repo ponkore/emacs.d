@@ -37,6 +37,8 @@
     elpy
     epl
     expand-region
+    flx
+    flx-ido
     flymake
     flymake-cursor
     flymake-easy
@@ -49,6 +51,7 @@
     helm-ag
     helm-gtags
     helm-package
+    helm-projectile
     init-loader
     japanese-holidays
     javap-mode
@@ -61,6 +64,8 @@
     pkg-info
     popup
     popwin
+    powerline
+    projectile
     psvn
     py-autopep8
     sass-mode

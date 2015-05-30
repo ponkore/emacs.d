@@ -1,6 +1,17 @@
 ;;; Magit
 ;;; 2012-03-23
 
+(eval-after-load "magit"
+  '(progn
+     (defun magit-expand-git-file-name--msys (args)
+       "Handle Msys directory names such as /c/* by changing them to C:/*"
+       (let ((filename (car args)))
+         (when (string-match "^/\\([a-z]\\)/\\(.*\\)" filename)
+           (setq filename (concat (match-string 1 filename) ":/"
+                                  (match-string 2 filename))))
+         (list filename)))
+     (advice-add 'magit-expand-git-file-name :filter-args #'magit-expand-git-file-name--msys)))
+
 ;; コミットメッセージをhelmで挿入できるようにする
 (defvar helm-c-source-git-commit-messages
   '((name . "Git Commit Messages")
@@ -27,11 +38,11 @@
   (helm-other-buffer 'helm-c-source-git-commit-messages
                      "*helm commit messages*"))
 
-(defun magit-enable-helm ()
-  ;; 過去のコミットメッセージを挿入
-  (define-key magit-log-edit-mode-map (kbd "C-c i") 'helm-git-commit-messages))
+;; (defun magit-enable-helm ()
+;;   ;; 過去のコミットメッセージを挿入
+;;   (define-key magit-log-edit-mode-map (kbd "C-c i") 'helm-git-commit-messages))
 
-(add-hook 'magit-mode-hook 'magit-enable-helm)
+;; (add-hook 'magit-mode-hook 'magit-enable-helm)
 
 ;; diff関連の設定
 ;; 2012-04-02
