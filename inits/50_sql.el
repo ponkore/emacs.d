@@ -13,10 +13,11 @@
 (setq sql-product 'oracle)
 (add-to-list 'auto-mode-alist '("\\.ddl$" . sql-mode))
 
+;; does not work below.
+;; (when (eq system-type 'windows-nt)
+;;   (add-to-list 'process-coding-system-alist '("sqlplus" cp932 . cp932)))
 (defun sql-set-sqli-oracle-hook ()
   ""
-  ;; ;; `truncate-lines' is automatically became buffer-local
-  ;; (setq truncate-lines t)
   (setq comint-output-filter-functions 'comint-truncate-buffer)
   (when (eq system-type 'windows-nt) (set-buffer-process-coding-system 'cp932 'cp932)))
 

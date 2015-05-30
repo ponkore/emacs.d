@@ -72,3 +72,6 @@
       (candidates-in-buffer)
       (init . (lambda () (helm-init-candidates-in-buffer 'global (read-buf-string ,filename))))
       (action . ,execute-action))))
+;;
+(custom-set-variables
+ '(helm-truncate-lines t))
