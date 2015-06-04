@@ -11,4 +11,5 @@
 /.DS_Store
 /abbrev_defs
 /config-proxy.el
+/config-sqlplus.el
 /hosen-tools
