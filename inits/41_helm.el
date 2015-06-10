@@ -41,12 +41,12 @@
 (define-key helm-find-files-map (kbd "TAB") 'helm-execute-persistent-action)
 
 (setq helm-for-files-preferred-list
-      '(helm-c-source-buffers-list
-        helm-c-source-bookmarks         ; bookmark の順位を上げた
-        helm-c-source-recentf
-        helm-c-source-file-cache
-        helm-c-source-files-in-current-dir
-        helm-c-source-locate))
+      '(helm-source-buffers-list
+        helm-source-bookmarks         ; bookmark の順位を上げた
+        helm-source-recentf
+        helm-source-file-cache
+        helm-source-files-in-current-dir
+        helm-source-locate))
 
 (defun helm-action-copy-selected (msg)
   (save-excursion

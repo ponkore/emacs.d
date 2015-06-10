@@ -21,3 +21,17 @@
     (car grep-command)))
 (setq grep-command (cons (concat grep-command-before-query " .")
                          (+ (length grep-command-before-query) 1)))
+
+;; (defadvice grep (around grep-coding-system-setup compile)
+;;   "When a prefix argument given, specify coding-system-for-read."
+;;   (let ((coding-system-for-read
+;;          (if current-prefix-arg
+;;              (read-coding-system "coding system: ")
+;;            coding-system-for-read)))
+;;     ad-do-it))
+
+(defadvice grep (around grep-coding-system-setup compile)
+  "When a prefix argument given, specify coding-system-for-read."
+  (let ((coding-system-for-read 'utf-8))
+    ad-do-it))
+(ad-activate-regexp "grep-coding-system-setup")

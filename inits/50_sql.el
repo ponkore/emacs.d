@@ -1,6 +1,7 @@
 ;;; for SQL mode (My Office PC Oracle setting)
 (when (eq system-type 'windows-nt)
-  (setq sql-oracle-program "c:/Apps/Oracle/sqlplus.exe"))
+  (setq sql-oracle-program "c:/Apps/Oracle/sqlplus.exe")
+  (add-to-list 'file-coding-system-alist '("\\.sql" . cp932)))
 
 (when (or (eq system-type 'berkeley-unix) (eq system-type 'darwin))
   (let ((oracle-home (expand-file-name "~/Applications/Oracle/instantclient_10_2")))

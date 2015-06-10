@@ -68,6 +68,7 @@
     projectile
     psvn
     py-autopep8
+    recentf-ext
     sass-mode
     scss-mode
     smartparens

@@ -65,74 +65,20 @@
 ;;
 ;;; Code:
 
-;; (require 'cygwin-mount)
-
-;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-;; ;;; Make Cygwin paths accessible
-;; (cygwin-mount-activate)
-
-;; ;;; Follow Cygwin symlinks.
-;; ;;; Handles old-style (text file) symlinks and new-style (.lnk file) symlinks.
-;; ;;; (Non-Cygwin-symlink .lnk files, such as desktop shortcuts, are still loaded as such.)
-;; (defun follow-cygwin-symlink ()
-;;   "Follow Cygwin symlinks.
-;; Handles old-style (text file) and new-style (.lnk file) symlinks.
-;; \(Non-Cygwin-symlink .lnk files, such as desktop shortcuts, are still
-;; loaded as such.)"
-;;   (save-excursion
-;;     (goto-char 0)
-;;     (if (looking-at
-;;          "L\x000\x000\x000\x001\x014\x002\x000\x000\x000\x000\x000\x0C0\x000\x000\x000\x000\x000\x000\x046\x00C")
-;;         (progn
-;;           (re-search-forward
-;;            "\x000\\([-A-Za-z0-9_\\.\\\\\\$%@(){}~!#^'`][-A-Za-z0-9_\\.\\\\\\$%@(){}~!#^'`]+\\)")
-;;           (find-alternate-file (match-string 1)))
-;;       (if (looking-at "!<symlink>")
-;;           (progn
-;;             (re-search-forward "!<symlink>\\(.*\\)\0")
-;;             (find-alternate-file (match-string 1))))
-;;       )))
-;; (add-hook 'find-file-hooks 'follow-cygwin-symlink)
-
 ;;; Use Unix-style line endings.
 (setq-default buffer-file-coding-system 'undecided-unix)
 
 
 ;;; Add Cygwin Info pages
-;(setq Info-default-directory-list (append Info-default-directory-list (list "c:/cygwin/usr/info/")))
 (setq Info-default-directory-list (append Info-default-directory-list (list "/usr/share/info/")))
 
-
-;;; TO DO: have an option for the Cygwin installation directory, instead of fiddling this way.
-;; (unless (or (file-directory-p "C:/cygwin/bin") (file-directory-p "C:/bin"))
-;;   (error "Edit `setup-cygwin.el' - not known where Cygwin is installed"))
-
 ;;; Use `bash' as the default shell in Emacs.
-;(push (if (file-directory-p "C:/cygwin/bin") "C:/cygwin/bin" "C:/bin") exec-path)
-;(setq shell-file-name  (concat (if (file-directory-p "C:/cygwin/bin") "C:/cygwin/bin" "C:/bin")
-;                               "/bash.exe")) ; Subprocesses invoked via the shell.
-;(setenv "SHELL" shell-file-name)
-;(setenv "PATH" (concat (getenv "PATH") (if (file-directory-p "C:/cygwin/bin") ";C:\\cygwin\\bin" ";C:\\bin" )))
 (setq explicit-shell-file-name  shell-file-name) ; Interactive shell
 (setq ediff-shell               shell-file-name)    ; Ediff shell
 (setq explicit-shell-args       '("--login" "-i"))
 
 ;;;;; (setq shell-command-switch "-ic") ; SHOULD THIS BE "-c" or "-ic"?
 (setq w32-quote-process-args ?\") ;; " @@@ IS THIS BETTER? ;@@@ WAS THIS BEFORE: (setq w32-quote-process-args t)
-
-;; These don't seem to be needed.
-;; They were recommended by http://www.khngai.com/emacs/cygwin.php
-;;;;; (add-hook 'comint-output-filter-functions
-;;;;;     'shell-strip-ctrl-m nil t)
-;;;;; ;; Removes unsightly ^M characters that would otherwise appear in output of java applications.
-;;;;; (add-hook 'comint-output-filter-functions
-;;;;;     'comint-watch-for-password-prompt nil t)
-;;;;; (setq explicit-shell-file-name "bash.exe")
-;;;;; ;; For subprocesses invoked via the shell
-;;;;; ;; (e.g., "shell -c command")
-;;;;; (setq shell-file-name explicit-shell-file-name)
-
 
 ;;;###autoload
 (defun bash ()
@@ -142,9 +88,7 @@
         (binary-process-output nil))
     (shell)))
 
-(setq process-coding-system-alist
-      (cons '("bash" . (raw-text-dos . raw-text-unix)) process-coding-system-alist))
-
+(add-to-list 'process-coding-system-alist '("bash" . (raw-text-dos . raw-text-unix)))
 
 ;; From: http://www.dotfiles.com/files/6/235_.emacs
 ;;;###autoload
@@ -156,9 +100,7 @@
   (setq shell-command-switch "-c")      ; SHOULD IT BE (setq shell-command-switch "-ic")?
   (setq explicit-shell-file-name "bash")
   (setenv "SHELL" explicit-shell-file-name)
-  ;;;;;(setq explicit-sh-args '("-login" "-i")) ; Undefined?
   (setq w32-quote-process-args ?\") ;; "
-  ;;;;;(setq mswindows-quote-process-args t)) ; Undefined?
   )
 
 ;;;###autoload
@@ -168,26 +110,7 @@
   (setq shell-file-name "cmdproxy")
   (setq explicit-shell-file-name "cmdproxy")
   (setenv "SHELL" explicit-shell-file-name)
-  ;;;;;(setq explicit-sh-args nil)           ; Undefined?
   (setq w32-quote-process-args nil))
-
-;;;;;;;;;;;;;;;;;;;;;;;
-;; 
-;; (setq w32-quote-process-args t)
-;;
-;; ;; shell-quote-argumentの問題回避
-;; (defvar quote-argument-for-windows-p t "enables `shell-quote-argument' workaround for windows.")
-;; (defadvice shell-quote-argument (around shell-quote-argument-for-win activate)
-;;   "workaround for windows."
-;;   (if (and quote-argument-for-windows-p
-;;            (not (w32-shell-dos-semantics))) ;;el-get利用時の場合は無効にするための判定
-;;       (let ((argument (ad-get-arg 0)))
-;;         (setq argument (replace-regexp-in-string "\\\\" "\\\\" argument nil t))
-;;         (setq argument (replace-regexp-in-string "'" "'\\''" argument nil t))
-;;         (setq ad-return-value (concat "'" argument "'")))
-;;     ad-do-it))
-;;
-;;;;;;;;;;;;;;;;;;;;;;;
 
 (provide 'setup-cygwin)
 
