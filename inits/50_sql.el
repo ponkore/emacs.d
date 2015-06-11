@@ -1,7 +1,11 @@
 ;;; for SQL mode (My Office PC Oracle setting)
 (when (eq system-type 'windows-nt)
   (setq sql-oracle-program "c:/Apps/Oracle/sqlplus.exe")
-  (add-to-list 'file-coding-system-alist '("\\.sql" . cp932)))
+  ;; 新規作成のときだけ cp932 にする
+  (add-hook 'sql-mode-hook (lambda ()
+                             (unless (file-exists-p (buffer-file-name (current-buffer)))
+                               (set-buffer-file-coding-system 'cp932)
+                               (set-buffer-modified-p nil)))))
 
 (when (or (eq system-type 'berkeley-unix) (eq system-type 'darwin))
   (let ((oracle-home (expand-file-name "~/Applications/Oracle/instantclient_10_2")))
