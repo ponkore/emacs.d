@@ -49,6 +49,7 @@
     haml-mode
     helm
     helm-ag
+    helm-c-yasnippet
     helm-gtags
     helm-package
     helm-projectile
