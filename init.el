@@ -44,8 +44,6 @@
     flymake-easy
     flymake-python-pyflakes
     fsharp-mode
-    git-commit-mode
-    git-rebase-mode
     haml-mode
     helm
     helm-ag
@@ -56,6 +54,7 @@
     japanese-holidays
     javap-mode
     js2-mode
+    less-css-mode
     magit
     markdown-mode
     packed
