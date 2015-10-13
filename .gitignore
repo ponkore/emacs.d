@@ -13,3 +13,7 @@
 /config-proxy.el
 /config-sqlplus.el
 /hosen-tools
+/.org-id-locations
+/dict
+/projectile-bookmarks.eld
+/projectile.cache
