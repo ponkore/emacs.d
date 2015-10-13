@@ -22,3 +22,49 @@
           nil
         (let ((parent-directory (substring directory 0 -1)))
           (find-path-in-parents parent-directory base-names)))))
+
+;;
+;; http://qiita.com/ShingoFukuyama/items/62269c4904ca085f9149
+;;
+(defun my-goto-line-beginning-or-indent (&optional $position)
+  (interactive)
+  (or $position (setq $position (point)))
+  (let (($starting-position (progn (back-to-indentation) (point))))
+    (if (eq $starting-position $position)
+        (move-beginning-of-line 1))))
+(global-set-key (kbd "C-a") 'my-goto-line-beginning-or-indent)
+
+;;
+;;
+;;
+(defun wrap-double-quote-thing-at-symbol ()
+  (interactive)
+  (let* ((bounds (bounds-of-thing-at-point 'symbol))
+         (start (car bounds))
+         (end (cdr bounds))
+         (str (thing-at-point 'symbol))
+         (wrapped (format "\"%s\"" str)))
+    (delete-region start end)
+    (insert wrapped)
+    (goto-char (+ 2 end))))
+
+;;
+;;
+;;
+(defun move-trailing-comma-to-line-start ()
+  (interactive)
+  (let* ((eol (save-excursion (end-of-line) (point)))
+         (pt (re-search-forward ",[ \t]*$" eol t)))
+    (when pt
+      (goto-char (- pt 1))
+      (delete-char 1)
+      (forward-line)
+      (let* ((eol (save-excursion (end-of-line) (point)))
+             (pt (re-search-forward "^[ \t]*--" eol t)))
+        (when pt (forward-line)))
+      (let* ((eol (save-excursion (end-of-line) (point))))
+        (when (= eol pt) (forward-line)))
+      (insert "  ,")
+      (just-one-space)
+      )
+    ))

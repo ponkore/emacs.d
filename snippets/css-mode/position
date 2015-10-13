@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+# name: position
+# key: pos
+# expand-env: ((yas/indent-line 'fixed) (yas/wrap-around-region 'nil))
+# --
+position: ${1:$$(yas-choose-value '("relative" "absolute" "fixed" "static"))};

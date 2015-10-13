@@ -461,14 +461,13 @@
    (autoload 'ansi-color-for-comint-mode-on "ansi-color"
              "Set `ansi-color-for-comint-mode' to t." t)
 
-   (setq shell-mode-hook
-         (function
-          (lambda ()
-
-            ;; シェルモードの入出力文字コード
-            (set-buffer-process-coding-system 'sjis-dos 'sjis-unix)
-            (set-buffer-file-coding-system    'sjis-unix)
-            )))
+   (add-hook 'shell-mode-hook (lambda ()
+                                ;; シェルモードの入出力文字コード
+                                ;; (set-buffer-process-coding-system 'sjis-dos 'sjis-unix)
+                                ;; (set-buffer-file-coding-system    'sjis-unix)
+                                (set-buffer-process-coding-system 'cp932-dos 'cp932-unix)
+                                (set-buffer-file-coding-system    'cp932-unix)
+                                ))
 
 ;; ------------------------------------------------------------------------
 ;; @ menu-tree

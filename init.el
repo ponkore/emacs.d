@@ -48,6 +48,7 @@
     helm
     helm-ag
     helm-gtags
+    helm-migemo
     helm-package
     helm-projectile
     init-loader
@@ -57,6 +58,8 @@
     less-css-mode
     magit
     markdown-mode
+    migemo
+    open-junk-file
     packed
     page-break-lines
     pastels-on-dark-theme
@@ -72,9 +75,11 @@
     scss-mode
     smartparens
     sql-indent
+    sqlup-mode
     ssh
     ssh-config-mode
     yasnippet
+    yesql-ghosts
     ))
 
 (let ((not-installed (loop for x in installing-package-list

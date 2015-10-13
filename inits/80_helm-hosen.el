@@ -51,6 +51,12 @@
                                      (lambda (msg) (helm-table-select-action "kan" msg))))
    "*helm tables*"))
 
+(defun helm-table-alias ()
+  (interactive)
+  (helm-other-buffer
+   (list (make-helm-hosen-source-from-file "テーブル別名" "SX080_010_テーブル別名.txt"))
+   "*helm table alias*"))
+
 (defun helm-hanyo-kubun ()
   (interactive)
   (helm-other-buffer

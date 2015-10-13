@@ -11,8 +11,10 @@
    ("\C-x\C-f" helm-find-files)
    ("\C-x\C-v" find-file-other-window)
    ("\C-x=" count-lines-page)
+   ("\C-xj" open-junk-file)
    ("\C-xl" goto-line)
    ("\C-xg" grep)
+   ("\C-xt" toggle-truncate-lines)
    ("\e\C-g" keyboard-quit)              ; init.el の設定をもとに戻す
    ("\C-x!" shell-command)
    ("\C-x|" shell-command-on-region)

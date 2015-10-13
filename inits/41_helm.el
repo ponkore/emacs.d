@@ -58,13 +58,18 @@
         (copy-region-as-kill start end))
       (message (format "%s" msg)))))
 
+(defvar helm-string-cache (make-hash-table :test 'equal))
+
 (defun read-buf-string (fname)
-  (save-excursion
-    (with-temp-buffer
-      (let* ((buf (set-buffer (find-file-noselect fname)))
-             (ret (buffer-string)))
-        (kill-buffer buf)
-        ret))))
+  (let ((result (gethash fname helm-string-cache)))
+    (if result result
+      (save-excursion
+        (with-temp-buffer
+          (let* ((buf (set-buffer (find-file-noselect fname)))
+                 (ret (buffer-string)))
+            (kill-buffer buf)
+            (puthash fname ret helm-string-cache)
+            ret))))))
 
 (defun make-helm-source-from-file (source-name filename execute-action)
   (when (file-exists-p filename)
@@ -72,6 +77,44 @@
       (candidates-in-buffer)
       (init . (lambda () (helm-init-candidates-in-buffer 'global (read-buf-string ,filename))))
       (action . ,execute-action))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;  helm-git-project (http://syohex.hatenablog.com/entry/20121207/1354885367)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defun helm-c-sources-git-project-for (pwd)
+  (loop for elt in
+        '(("Modified files" . "--modified")
+          ("Untracked files" . "--others --exclude-standard")
+          ("All controlled files in this project" . nil))
+        for title  = (format "%s (%s)" (car elt) pwd)
+        for option = (cdr elt)
+        for cmd    = (format "git ls-files %s" (or option ""))
+        collect
+        `((name . ,title)
+          (init . (lambda ()
+                    (unless (and (not ,option) (helm-candidate-buffer))
+                      (with-current-buffer (helm-candidate-buffer 'global)
+                        (call-process-shell-command ,cmd nil t nil)))))
+          (candidates-in-buffer)
+          (type . file))))
+
+(defun helm-git-project-topdir ()
+  (file-name-as-directory
+   (let* ((one-line (replace-regexp-in-string
+                     "\n" ""
+                     (shell-command-to-string "git rev-parse --show-toplevel"))))
+     (replace-regexp-in-string "^/\\([a-z]\\)/" "\\1:/" one-line))))
+
+(defun helm-git-project ()
+  (interactive)
+  (let ((topdir (helm-git-project-topdir)))
+    (unless (file-directory-p topdir)
+      (error "I'm not in Git Repository!!"))
+    (let* ((default-directory topdir)
+           (sources (helm-c-sources-git-project-for default-directory)))
+      (helm-other-buffer sources "*helm git project*"))))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 ;;
 (custom-set-variables
  '(helm-truncate-lines t))

@@ -38,7 +38,16 @@ set pagesize 1000
   )
 
 (add-hook 'sql-interactive-mode-hook 'sql-set-sqli-oracle-hook)
-(add-hook 'sql-mode-hook (lambda () (yas-minor-mode-on)))
+(add-hook 'sql-mode-hook (lambda ()
+                           (yas-minor-mode-on)
+                           (setq indent-tabs-mode nil)
+                           (define-key sql-mode-map (kbd "C-c \"") 'wrap-double-quote-thing-at-symbol)
+                           (define-key sql-mode-map (kbd "C-c ,") 'move-trailing-comma-to-line-start)))
 
 ;; only for my office environment
 (load (expand-file-name "~/.emacs.d/config-sqlplus.el") t)
+
+;; customize font-lock
+(font-lock-add-keywords 'sql-mode '(("\"\\([^\"]*\\)\"" . 'font-lock-constant-face)
+                                    ("\\<Hgs\\w+\\>\.\\<\\w+\\>" . 'font-lock-builtin-face)
+                                    ("\\<R[LSC][0-9][A-Z]\\w+\\>\.\\<\\w+\\>" . 'font-lock-builtin-face)))
