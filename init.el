@@ -39,10 +39,9 @@
     expand-region
     flx
     flx-ido
-    flymake
-    flymake-cursor
-    flymake-easy
-    flymake-python-pyflakes
+    flycheck
+    flycheck-pos-tip
+    flycheck-pyflakes
     fsharp-mode
     haml-mode
     helm
@@ -61,7 +60,6 @@
     migemo
     open-junk-file
     packed
-    page-break-lines
     pastels-on-dark-theme
     pkg-info
     popup
@@ -104,8 +102,16 @@
  ;; If you edit it by hand, you could mess it up, so be careful.
  ;; Your init file should contain only one such instance.
  ;; If there is more than one, they won't work right.
+ '(helm-truncate-lines t t)
  '(safe-local-variable-values (quote ((emacs-lisp-docstring-fill-column . 75))))
  '(w32-symlinks-handle-shortcuts t)
+ '(yas-new-snippet-default
+   "# -*- mode: snippet -*-
+# name: $1
+# key: ${2:${1:$(yas--key-from-desc yas-text)}}
+# expand-env: ((yas/indent-line 'fixed) (yas/wrap-around-region 'nil))
+# --
+$0")
  '(yas-prompt-functions (quote (my-yas/prompt))))
 (custom-set-faces
  ;; custom-set-faces was added by Custom.
@@ -116,3 +122,4 @@
  '(font-lock-preprocessor-face ((t (:foreground "steel blue"))))
  '(font-lock-variable-name-face ((t (:foreground "DodgerBlue1"))))
  '(hl-line ((t (:underline "textBackgroundColor")))))
+(put 'narrow-to-region 'disabled nil)
