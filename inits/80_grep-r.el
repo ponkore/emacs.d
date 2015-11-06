@@ -30,8 +30,15 @@
 ;;            coding-system-for-read)))
 ;;     ad-do-it))
 
+;; (defadvice grep (around grep-coding-system-setup compile)
+;;   "When a prefix argument given, specify coding-system-for-read."
+;;   (let ((coding-system-for-read 'utf-8))
+;;     ad-do-it))
 (defadvice grep (around grep-coding-system-setup compile)
-  "When a prefix argument given, specify coding-system-for-read."
-  (let ((coding-system-for-read 'utf-8))
-    ad-do-it))
-(ad-activate-regexp "grep-coding-system-setup")
+  ""
+  (let ((old-default-process-coding-system default-process-coding-system))
+    (setq default-process-coding-system '(utf-8 . cp932))
+    ad-do-it
+    (setq default-process-coding-system old-default-process-coding-system)))
+;; (ad-activate-regexp "grep-coding-system-setup")
+;; (ad-deactivate-regexp "grep-coding-system-setup")
