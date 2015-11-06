@@ -88,7 +88,7 @@ static char * arrow_right[] = {
 
 (make-face 'mode-line-color-2)
 (set-face-attribute 'mode-line-color-2 nil
-                    :foreground "fff"
+                    :foreground "#fff"
                     :background color2)
 
 (set-face-attribute 'mode-line nil
