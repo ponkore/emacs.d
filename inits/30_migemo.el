@@ -28,7 +28,7 @@
   (migemo-init)
 
   ;; emacs 24.3 で C-s を働かせるための設定
-  (setq search-whitespace-regexp nil)
+;;  (setq search-whitespace-regexp nil)
 
   ;; (eval-after-load "migemo"
   ;;   '(defadvice isearch-search (around migemo-search-ad activate)
