@@ -40,6 +40,15 @@
           (message (concat file-path " not found."))))
     (message msg)))
 
+(add-hook
+ 'text-mode-hook
+ (lambda ()
+   ;; .table.txt の場合は truncate-line する
+   (when (and (buffer-file-name)
+              (string= (substring-no-properties (buffer-file-name) -10) ".table.txt"))
+     (toggle-truncate-lines 1)
+     (setq buffer-read-only t))))
+
 (defun helm-tables ()
   (interactive)
   (helm-other-buffer
