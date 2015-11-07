@@ -151,22 +151,6 @@
       '(utf-8 cp932 utf-16le)))
 
 ;; ------------------------------------------------------------------------
-;; @ font
-
-   ;; 標準フォントの設定
-   ;; (set-default-font "M+2VM+IPAG circle-12")
-
-   ;; IME変換時フォントの設定（テストバージョンのみ）
-   ;; (setq w32-ime-font-face "MigMix 1M")
-   ;; (setq w32-ime-font-height 22)
-
-   ;; 固定等幅フォントの設定
-   ;; (set-face-attribute 'fixed-pitch    nil :family "M+2VM+IPAG circle")
-
-   ;; 可変幅フォントの設定
-   ;; (set-face-attribute 'variable-pitch nil :family "M+2VM+IPAG circle")
-
-;; ------------------------------------------------------------------------
 ;; @ frame
 
    ;; フレームタイトルの設定
@@ -248,20 +232,6 @@
    (setq inhibit-startup-echo-area-message -1)
 
 ;; ------------------------------------------------------------------------
-;; @ image-library
-   ;; (setq image-library-alist
-   ;;       '((xpm "libxpm.dll")
-   ;;         (png "libpng14.dll")
-   ;;         (jpeg "libjpeg.dll")
-   ;;         (tiff "libtiff3.dll")
-   ;;         (gif "libungif4.dll")
-   ;;         (svg "librsvg-2-2.dll")
-   ;;         (gdk-pixbuf "libgdk_pixbuf-2.0-0.dll")
-   ;;         (glib "libglib-2.0-0.dll")
-   ;;         (gobject "libgobject-2.0-0.dll"))
-   ;;       )
-
-;; ------------------------------------------------------------------------
 ;; @ backup
 
    ;; 変更ファイルのバックアップ
@@ -293,12 +263,6 @@
 
    ;; 古いバックアップファイルの削除
    (setq delete-old-versions t)
-
-;; ------------------------------------------------------------------------
-;; @ key bind
-
-   ;; 標準キーバインド変更
-   (global-set-key "\C-z"          'scroll-down)
 
 ;; ------------------------------------------------------------------------
 ;; @ scroll
@@ -341,98 +305,6 @@
          )
 
 ;; ------------------------------------------------------------------------
-;; @ hiwin-mode
-;   (require 'hiwin)
-
-   ;; hiwin-modeを有効化
-   ;; (hiwin-activate)
-
-   ;; 非アクティブウィンドウの背景色を設定
-   ;; (set-face-background 'hiwin-face "gray80")
-
-;; ------------------------------------------------------------------------
-;; @ tabbar
-
-;   (require 'tabbar)
-;
-;   ;; tabbar有効化
-;   (tabbar-mode)
-;
-;   ;; タブ切替にマウスホイールを使用（0：有効，-1：無効）
-;   (tabbar-mwheel-mode -1)
-;
-;   ;; タブグループを使用（t：有効，nil：無効）
-;   (setq tabbar-buffer-groups-function nil)
-;
-;   ;; ボタン非表示
-;   (dolist (btn '(tabbar-buffer-home-button
-;                  tabbar-scroll-left-button
-;                  tabbar-scroll-right-button))
-;     (set btn (cons (cons "" nil) (cons "" nil))))
-;
-;   ;; タブ表示 一時バッファ一覧
-;   (defvar tabbar-displayed-buffers
-;     '("*scratch*" "*Messages*" "*Backtrace*" "*Colors*"
-;       "*Faces*" "*Apropos*" "*Customize*" "*shell*" "*Help*")
-;     "*Regexps matches buffer names always included tabs.")
-;
-;   ;; 作業バッファの一部を非表示
-;   (setq tabbar-buffer-list-function
-;         (lambda ()
-;           (let* ((hides (list ?\  ?\*))
-;                  (re (regexp-opt tabbar-displayed-buffers))
-;                  (cur-buf (current-buffer))
-;                  (tabs (delq
-;                         nil
-;                         (mapcar
-;                          (lambda (buf)
-;                            (let ((name (buffer-name buf)))
-;                              (when (or (string-match re name)
-;                                        (not (memq (aref name 0) hides)))
-;                                buf)))
-;                          (buffer-list)))))
-;             (if (memq cur-buf tabs)
-;                 tabs
-;               (cons cur-buf tabs)))))
-;
-;   ;; キーバインド設定
-;   (global-set-key (kbd "<C-tab>")   'tabbar-forward-tab)
-;   (global-set-key (kbd "<C-S-tab>") 'tabbar-backward-tab)
-;
-;   ;; タブ表示欄の見た目（フェイス）
-;   (set-face-attribute 'tabbar-default nil
-;                       :background "SystemMenuBar")
-;
-;   ;; 選択タブの見た目（フェイス）
-;   (set-face-attribute 'tabbar-selected nil
-;                       :foreground "red3"
-;                       :background "SystemMenuBar"
-;                       :box (list
-;                             :line-width 1
-;                             :color "gray80"
-;                             :style 'released-button)
-;                       :overline "#F3F2EF"
-;                       :weight 'bold
-;                       :family "ＭＳ Ｐゴシック"
-;                       )
-;
-;   ;; 非選択タブの見た目（フェイス）
-;   (set-face-attribute 'tabbar-unselected nil
-;                       :foreground "black"
-;                       :background "SystemMenuBar"
-;                       :box (list
-;                             :line-width 1
-;                             :color "gray80"
-;                             :style 'released-button)
-;                       :overline "#F3F2EF"
-;                       :family "ＭＳ Ｐゴシック"
-;                       )
-;
-;   ;; タブ間隔の調整
-;   (set-face-attribute 'tabbar-separator nil
-;                       :height 0.1)
-
-;; ------------------------------------------------------------------------
 ;; @ setup-cygwin
    (setq cygwin-mount-cygwin-bin-directory
          (concat (getenv "CYGWIN_DIR") "\\bin"))
@@ -462,47 +334,10 @@
              "Set `ansi-color-for-comint-mode' to t." t)
 
    (add-hook 'shell-mode-hook (lambda ()
-                                ;; シェルモードの入出力文字コード
-                                ;; (set-buffer-process-coding-system 'sjis-dos 'sjis-unix)
-                                ;; (set-buffer-file-coding-system    'sjis-unix)
-                                (set-buffer-process-coding-system 'cp932-dos 'cp932-unix)
-                                (set-buffer-file-coding-system    'cp932-unix)
+                                ;; シェルモードの入出力文字コード(cp932 -> utf-8)
+                                (set-buffer-process-coding-system 'utf-8-dos 'utf-8-unix)
+                                (set-buffer-file-coding-system    'utf-8-unix)
                                 ))
-
-;; ------------------------------------------------------------------------
-;; @ menu-tree
-;   (setq menu-tree-coding-system 'utf-8)
-;   (require 'menu-tree)
-
-;; ------------------------------------------------------------------------
-;; @ migemo/cmigemo
-;   (setq migemo-command (concat (getenv "INST_DIR")
-;                                "\\app\\cmigemo\\cmigemo"))
-;   (setq migemo-options '("-q" "--emacs"))
-;   (setq migemo-dictionary (concat (getenv "INST_DIR")
-;                                   "\\app\\cmigemo\\dict\\utf-8\\migemo-dict"))
-;   (setq migemo-user-dictionary nil)
-;   (setq migemo-regex-dictionary nil)
-;   (setq migemo-use-pattern-alist t)
-;   (setq migemo-use-frequent-pattern-alist t)
-;   (setq migemo-pattern-alist-length 1024)
-;   (setq migemo-coding-system 'utf-8-unix)
-;   (load-library "migemo")
-;   (migemo-init)
-
-;; ------------------------------------------------------------------------
-;; @ color-theme
-;   (require 'color-theme)
-;   (color-theme-initialize)
-
-;; ------------------------------------------------------------------------
-;; @ package manager
-;   (require 'package)
-;   (add-to-list 'package-archives
-;                '("melpa" . "http://melpa.milkbox.net/packages/") t)
-;   (add-to-list 'package-archives
-;                '("marmalade" . "http://marmalade-repo.org/packages/"))
-;   (package-initialize)
 
 ;; ------------------------------------------------------------------------
 ;; @ w32-symlinks
