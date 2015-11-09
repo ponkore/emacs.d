@@ -26,7 +26,5 @@
         ("[ =][-/]+\\([A-Za-z0-9_]\\)"
          (1 font-lock-type-face append))
         (,(concat "\\_<" (regexp-opt COMMANDS) "\\_>") . font-lock-builtin-face)
-        (,(concat "\\_<" (regexp-opt CONTROLFLOW) "\\_>")
-         . font-lock-keyword-face)
-        (,(concat "\\_<" (regexp-opt UNIX) "\\_>")
-         . font-lock-warning-face)))))
+        (,(concat "\\_<" (regexp-opt CONTROLFLOW) "\\_>") . font-lock-keyword-face)
+        (,(concat "\\_<" (regexp-opt UNIX) "\\_>") . font-lock-warning-face)))))
