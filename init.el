@@ -29,6 +29,7 @@
     clojure-snippets
     clojure-mode-extra-font-locking
     company
+    company-quickhelp
     csharp-mode
     dash
     dired-k
@@ -55,6 +56,7 @@
     javap-mode
     js2-mode
     less-css-mode
+    lua-mode
     magit
     markdown-mode
     migemo
