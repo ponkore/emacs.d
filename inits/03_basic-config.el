@@ -152,3 +152,7 @@
 
 
 (add-hook 'message-mode-hook (lambda () (yas-minor-mode)))
+
+
+;;; lock file を作らない
+(setq create-lockfiles nil)
