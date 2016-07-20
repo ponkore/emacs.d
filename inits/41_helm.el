@@ -91,13 +91,11 @@
         for option = (cdr elt)
         for cmd    = (format "git ls-files %s" (or option ""))
         collect
-        `((name . ,title)
-          (init . (lambda ()
-                    (unless (and (not ,option) (helm-candidate-buffer))
-                      (with-current-buffer (helm-candidate-buffer 'global)
-                        (call-process-shell-command ,cmd nil t nil)))))
-          (candidates-in-buffer)
-          (type . file))))
+        (helm-build-sync-source title
+          :candidates (unless (and (not option) (helm-candidate-buffer))
+                        (with-current-buffer (helm-candidate-buffer 'global)
+                          (call-process-shell-command cmd nil t nil)
+                          (list (buffer-string)))))))
 
 (defun helm-git-project-topdir ()
   (file-name-as-directory
@@ -111,9 +109,9 @@
   (let ((topdir (helm-git-project-topdir)))
     (unless (file-directory-p topdir)
       (error "I'm not in Git Repository!!"))
-    (let* ((default-directory topdir)
-           (sources (helm-c-sources-git-project-for default-directory)))
-      (helm-other-buffer sources "*helm git project*"))))
+    (let* ((default-directory topdir))
+      (helm :sources (helm-c-sources-git-project-for default-directory)
+            :buffer "*helm git project*"))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;;
