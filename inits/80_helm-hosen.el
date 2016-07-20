@@ -5,7 +5,8 @@
 (defvar helm-hosen-tools-dir (expand-file-name "~/.emacs.d/hosen-tools"))
 
 (defun make-helm-hosen-source-from-file (source-name filename)
-  (make-helm-source-from-file source-name (concat helm-hosen-tools-dir "/" filename) 'helm-action-copy-selected))
+  (helm-build-in-file-source source-name (concat helm-hosen-tools-dir "/" filename)
+                             :action 'helm-action-copy-selected))
 
 (defun helm-root-user ()
   (interactive)
@@ -51,32 +52,35 @@
 
 (defun helm-tables ()
   (interactive)
-  (helm-other-buffer
-   (list (make-helm-source-from-file "テーブル(在)"
-                                     (concat helm-hosen-tools-dir "/" "helm-tables-zai.txt")
-                                     (lambda (msg) (helm-table-select-action "zai" msg)))
-         (make-helm-source-from-file "テーブル(幹)"
-                                     (concat helm-hosen-tools-dir "/" "helm-tables-kan.txt")
-                                     (lambda (msg) (helm-table-select-action "kan" msg))))
-   "*helm tables*"))
+  (helm
+   :sources (list (helm-build-in-file-source "テーブル(在)"
+                    (concat helm-hosen-tools-dir "/" "helm-tables-zai.txt")
+                    :action (lambda (msg) (helm-table-select-action "zai" msg)))
+                  (helm-build-in-file-source "テーブル(幹)"
+                    (concat helm-hosen-tools-dir "/" "helm-tables-kan.txt")
+                    :action (lambda (msg) (helm-table-select-action "kan" msg))))
+   :buffer "*helm tables*"))
 
 (defun helm-table-alias ()
   (interactive)
-  (helm-other-buffer
-   (list (make-helm-hosen-source-from-file "テーブル別名" "SX080_010_テーブル別名.txt"))
-   "*helm table alias*"))
+  (helm
+   :sources (list (helm-build-in-file-source "テーブル別名"
+                    (concat helm-hosen-tools-dir "/" "SX080_010_テーブル別名.txt")))
+   :buffer "*helm table alias*"))
 
 (defun helm-hanyo-kubun ()
   (interactive)
-  (helm-other-buffer
-   (list (make-helm-hosen-source-from-file "汎用区分" "helm-hanyo-kubun.txt"))
-   "*helm hanyo kubun*"))
+  (helm
+   :sources (list (helm-build-in-file-source "汎用区分"
+                    (concat helm-hosen-tools-dir "/" "helm-hanyo-kubun.txt")))
+   :buffer "*helm hanyo kubun*"))
 
 (defun helm-ronbutsu-henkan ()
   (interactive)
-  (helm-other-buffer
-   (list (make-helm-hosen-source-from-file "論物変換" "helm-dict.txt"))
-   "*helm ronbutsu henkan*"))
+  (helm
+   :sources (list (helm-build-in-file-source "論物変換"
+                    (concat helm-hosen-tools-dir "/" "helm-dict.txt")))
+   :buffer "*helm ronbutsu henkan*"))
 
 ;;
 ;; start system
@@ -96,9 +100,10 @@
 
 (defun helm-hgs-app ()
   (interactive)
-  (helm-other-buffer
-   (list (make-helm-source-from-file "保線業務管理システム" (concat helm-hosen-tools-dir "/" "helm-hosen-app-url.txt")
-                                     'invoke-hgs-app))
-   "*helm hgs app"))
+  (helm
+   :sources (list (helm-build-in-file-source "保線業務管理システム"
+                    (concat helm-hosen-tools-dir "/" "helm-hosen-app-url.txt")
+                    :action 'invoke-hgs-app))
+   :buffer "*helm hgs app"))
 
 (provide 'helm-hosen)

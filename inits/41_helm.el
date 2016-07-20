@@ -71,12 +71,13 @@
             (puthash fname ret helm-string-cache)
             ret))))))
 
-(defun make-helm-source-from-file (source-name filename execute-action)
-  (when (file-exists-p filename)
-    `((name . ,source-name)
-      (candidates-in-buffer)
-      (init . (lambda () (helm-init-candidates-in-buffer 'global (read-buf-string ,filename))))
-      (action . ,execute-action))))
+;; deprecated, don't work.
+;; (defun make-helm-source-from-file (source-name filename execute-action)
+;;   (when (file-exists-p filename)
+;;     `((name . ,source-name)
+;;       (candidates-in-buffer)
+;;       (init . (lambda () (helm-init-candidates-in-buffer 'global (read-buf-string ,filename))))
+;;       (action . ,execute-action))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;  helm-git-project (http://syohex.hatenablog.com/entry/20121207/1354885367)
