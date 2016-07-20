@@ -53,9 +53,7 @@
     (with-temp-buffer
       (erase-buffer)
       (insert msg)
-      (let ((start (goto-char (point-min)))
-            (end (goto-char (point-max))))
-        (copy-region-as-kill start end))
+      (copy-region-as-kill (point-min) (point-max))
       (message (format "%s" msg)))))
 
 (defvar helm-string-cache (make-hash-table :test 'equal))
