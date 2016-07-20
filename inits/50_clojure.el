@@ -5,6 +5,7 @@
      (require 'smartparens)
      (add-hook 'clojure-mode-hook 'yas-minor-mode)
      (add-hook 'clojure-mode-hook 'smartparens-strict-mode)
+     (add-hook 'clojure-mode-hook (lambda () (define-key clojure-mode-map (kbd "C-c t") 'projectile-find-test-file)))
      (define-clojure-indent
        (defroutes 'defun)
        (tabular 'defun)
