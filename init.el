@@ -22,6 +22,7 @@
 (defvar installing-package-list
   '(;; ここに使っているパッケージを書く。
     anzu
+    cargo
     cider
     cider-decompile
     cider-spy
@@ -43,6 +44,7 @@
     flycheck
     flycheck-pos-tip
     flycheck-pyflakes
+    flycheck-rust
     fsharp-mode
     haml-mode
     helm
@@ -71,6 +73,8 @@
     psvn
     py-autopep8
     recentf-ext
+    rust-mode
+    rustfmt
     sass-mode
     scss-mode
     smartparens
