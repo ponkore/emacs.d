@@ -1,0 +1,12 @@
+# -*- mode: snippet -*-
+# name: defui
+# key: defui
+# expand-env: ((yas/indent-line 'fixed) (yas/wrap-around-region 'nil))
+# --
+(defui $1
+  Object
+  (render [this]
+    (let [_ (om/props this)]
+      (html
+       [:div
+        $0]))))

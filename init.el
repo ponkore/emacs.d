@@ -11,7 +11,7 @@
 ;;
 (require 'package)
 (add-to-list 'package-archives '("melpa" . "https://melpa.org/packages/"))
-(add-to-list 'package-archives '("marmalade" . "http://marmalade-repo.org/packages/"))
+(add-to-list 'package-archives '("marmalade" . "https://marmalade-repo.org/packages/"))
 (package-initialize)
 
 ;;
@@ -27,7 +27,7 @@
     cider-decompile
     cider-spy
     clojure-mode
-    clojure-snippets
+    ;;clojure-snippets
     clojure-mode-extra-font-locking
     company
     company-quickhelp
@@ -109,7 +109,15 @@
  ;; Your init file should contain only one such instance.
  ;; If there is more than one, they won't work right.
  '(helm-truncate-lines t t)
- '(safe-local-variable-values (quote ((emacs-lisp-docstring-fill-column . 75))))
+ '(package-selected-packages
+   (quote
+    (yesql-ghosts yaml-mode swiper ssh-config-mode ssh sqlup-mode sql-indent smartparens smart-tabs-mode scss-mode sass-mode rustfmt recentf-ext rainbow-delimiters py-autopep8 psvn projectile-codesearch powerline popwin pastels-on-dark-theme paredit packed ox-gfm ox-asciidoc open-junk-file markdown-mode magit lua-mode less-css-mode js2-mode japanese-holidays init-loader helm-projectile helm-package helm-migemo helm-gtags helm-ag groovy-mode fsharp-mode flycheck-rust flycheck-pyflakes flycheck-pos-tip flx-ido expand-region evalator-clojure elscreen-buffer-group elpy direx-grep dired-k csharp-mode clojure-mode-extra-font-locking cider-spy cider-decompile cargo auto-complete anzu adoc-mode)))
+ '(safe-local-variable-values
+   (quote
+    ((cider-cljs-lein-repl . "(do (dev) (go) (cljs-repl))")
+     (cider-refresh-after-fn . "reloaded.repl/resume")
+     (cider-refresh-before-fn . "reloaded.repl/suspend")
+     (emacs-lisp-docstring-fill-column . 75))))
  '(w32-symlinks-handle-shortcuts t)
  '(yas-new-snippet-default
    "# -*- mode: snippet -*-

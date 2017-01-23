@@ -82,6 +82,12 @@
                     (concat helm-hosen-tools-dir "/" "helm-dict.txt")))
    :buffer "*helm ronbutsu henkan*"))
 
+(defun helm-hosen-function-list ()
+  (interactive)
+  (helm
+   :sources (list (helm-build-in-file-source "画面一覧"
+                    (concat helm-hosen-tools-dir "/" "B010_180_画面一覧(工事).txt")))))
+
 ;;
 ;; start system
 ;;
@@ -105,5 +111,13 @@
                     (concat helm-hosen-tools-dir "/" "helm-hosen-app-url.txt")
                     :action 'invoke-hgs-app))
    :buffer "*helm hgs app"))
+
+(setq recentf-exclude '("r:/.+$"
+                        "c:/repo/hgs/10_サブ内環境構築.+$"
+                        "c:/repo/hgs/Patches.+$"
+                        "c:/repo/hgs/メッセージ申請"
+                        "p:/.+$" "c:/repo/hgs/src-arch.+*"
+                        "c:/Users/NI5130/.emacs.d/elpa/.*$"
+                        "c:/Users/NI5130/.recentf"))
 
 (provide 'helm-hosen)
