@@ -112,12 +112,4 @@
                     :action 'invoke-hgs-app))
    :buffer "*helm hgs app"))
 
-(setq recentf-exclude '("r:/.+$"
-                        "c:/repo/hgs/10_サブ内環境構築.+$"
-                        "c:/repo/hgs/Patches.+$"
-                        "c:/repo/hgs/メッセージ申請"
-                        "p:/.+$" "c:/repo/hgs/src-arch.+*"
-                        "c:/Users/NI5130/.emacs.d/elpa/.*$"
-                        "c:/Users/NI5130/.recentf"))
-
 (provide 'helm-hosen)

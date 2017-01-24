@@ -91,13 +91,26 @@
 ;; ミニバッファの履歴を保存する
 (savehist-mode 1)
 
+;; from http://qiita.com/itiut@github/items/d917eafd6ab255629346
+(defmacro with-suppressed-message (&rest body)
+  "Suppress new messages temporarily in the echo area and the `*Messages*' buffer while BODY is evaluated."
+  (declare (indent 0))
+  (let ((message-log-max nil))
+    `(with-temp-message (or (current-message) "") ,@body)))
+
 ;; 自動保存
 (when (require 'recentf-ext nil t)
   ;; 最近開いたファイルを保存する数を増やす
-  (setq recentf-max-saved-items 1000)
-  (setq recentf-exclude '(".recentf"))
+  (setq recentf-max-saved-items 200)
+  (setq recentf-exclude `("r:/.+$"
+                          "c:/repo/hgs/10_サブ内環境構築.+$"
+                          "c:/repo/hgs/Patches.+$"
+                          "c:/repo/hgs/メッセージ申請"
+                          "p:/.+$" "c:/repo/hgs/src-arch.+*"
+                          ,(concat (expand-file-name "~/") ".emacs.d/elpa/.*$")
+                          ,(concat (expand-file-name "~/") ".emacs.d/recentf")))
   (setq recentf-auto-cleanup 10)
-  (setq recentf-auto-save-timer (run-with-idle-timer 120 t 'recentf-save-list))
+  (setq recentf-auto-save-timer (run-with-idle-timer 120 t '(lambda () (with-suppressed-message (recentf-save-list)))))
   (recentf-mode 1))
 
 
