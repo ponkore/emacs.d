@@ -102,13 +102,14 @@
 (when (require 'recentf-ext nil t)
   ;; 最近開いたファイルを保存する数を増やす
   (setq recentf-max-saved-items 200)
+  (setq recentf-save-file (expand-file-name "~/.emacs.d/recentf"))
   (setq recentf-exclude `("r:/.+$"
                           "c:/repo/hgs/10_サブ内環境構築.+$"
                           "c:/repo/hgs/Patches.+$"
                           "c:/repo/hgs/メッセージ申請"
                           "p:/.+$" "c:/repo/hgs/src-arch.+*"
                           ,(concat (expand-file-name "~/") ".emacs.d/elpa/.*$")
-                          ,(concat (expand-file-name "~/") ".emacs.d/recentf")))
+                          ,(expand-file-name "~/.emacs.d/recentf")))
   (setq recentf-auto-cleanup 10)
   (setq recentf-auto-save-timer (run-with-idle-timer 120 t '(lambda () (with-suppressed-message (recentf-save-list)))))
   (recentf-mode 1))
