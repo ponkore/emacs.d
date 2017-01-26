@@ -72,6 +72,7 @@
     projectile
     psvn
     py-autopep8
+    racer
     recentf-ext
     rust-mode
     rustfmt
@@ -111,7 +112,7 @@
  '(helm-truncate-lines t t)
  '(package-selected-packages
    (quote
-    (yesql-ghosts yaml-mode swiper ssh-config-mode ssh sqlup-mode sql-indent smartparens smart-tabs-mode scss-mode sass-mode rustfmt recentf-ext rainbow-delimiters py-autopep8 psvn projectile-codesearch powerline popwin pastels-on-dark-theme paredit packed ox-gfm ox-asciidoc open-junk-file markdown-mode magit lua-mode less-css-mode js2-mode japanese-holidays init-loader helm-projectile helm-package helm-migemo helm-gtags helm-ag groovy-mode fsharp-mode flycheck-rust flycheck-pyflakes flycheck-pos-tip flx-ido expand-region evalator-clojure elscreen-buffer-group elpy direx-grep dired-k csharp-mode clojure-mode-extra-font-locking cider-spy cider-decompile cargo auto-complete anzu adoc-mode)))
+    (racer yesql-ghosts yaml-mode swiper ssh-config-mode ssh sqlup-mode sql-indent smartparens smart-tabs-mode scss-mode sass-mode rustfmt recentf-ext rainbow-delimiters py-autopep8 psvn projectile-codesearch powerline popwin pastels-on-dark-theme paredit packed ox-gfm ox-asciidoc open-junk-file markdown-mode magit lua-mode less-css-mode js2-mode japanese-holidays init-loader helm-projectile helm-package helm-migemo helm-gtags helm-ag groovy-mode fsharp-mode flycheck-rust flycheck-pyflakes flycheck-pos-tip flx-ido expand-region evalator-clojure elscreen-buffer-group elpy direx-grep dired-k csharp-mode clojure-mode-extra-font-locking cider-spy cider-decompile cargo auto-complete anzu adoc-mode)))
  '(safe-local-variable-values
    (quote
     ((cider-cljs-lein-repl . "(do (dev) (go) (cljs-repl))")

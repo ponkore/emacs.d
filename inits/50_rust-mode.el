@@ -1,8 +1,8 @@
 ;;
 ;; setup racer (see https://github.com/racer-rust/emacs-racer)
 ;;
-(setq racer-cmd "/Users/masao/.cargo/bin/racer")
-(setq racer-rust-src-path "/Users/masao/.rust-src/src/")
+(setq racer-cmd (expand-file-name "~/.cargo/bin/racer"))
+(setq racer-rust-src-path (expand-file-name "~/.rust-src/src/"))
 (add-hook 'rust-mode-hook #'racer-mode)
 (add-hook 'racer-mode-hook #'eldoc-mode)
 (add-hook 'racer-mode-hook #'company-mode)
