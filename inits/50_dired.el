@@ -3,7 +3,7 @@
 (defun dired-vc-status (&rest args)
   (interactive)
   (let ((path (find-path-in-parents (dired-current-directory)
-                                    '(".svn" ".git"))))
+                                    '(".git" ".svn"))))
     (cond ((null path)
            (message "not version controlled."))
           ((string-match-p "\\.svn$" path)
