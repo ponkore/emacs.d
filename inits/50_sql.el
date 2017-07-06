@@ -32,7 +32,6 @@ ALTER SESSION SET NLS_DATE_FORMAT='YYYY/MM/DD'
 set linesize 1000
 set trimspool on
 set timing on
-set time on
 set pagesize 1000
 ")
   )
