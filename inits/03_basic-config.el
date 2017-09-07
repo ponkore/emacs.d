@@ -104,6 +104,7 @@
   (setq recentf-max-saved-items 200)
   (setq recentf-save-file (expand-file-name "~/.emacs.d/recentf"))
   (setq recentf-exclude `("r:/.+$"
+                          "s:/.+$"
                           "c:/repo/hgs/10_サブ内環境構築.+$"
                           "c:/repo/hgs/Patches.+$"
                           "c:/repo/hgs/メッセージ申請"

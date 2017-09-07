@@ -1,6 +1,8 @@
 ;;
 ;; ~/.emacs.d/init.el
 ;;
+(if (eq window-system 'w32)
+    (setq w32-get-true-file-attributes nil))
 
 ;; only for my office environment
 (load (expand-file-name "~/.emacs.d/config-proxy.el") t)
