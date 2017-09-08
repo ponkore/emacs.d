@@ -1,4 +1,5 @@
-(require 'rst)
+(use-package rst
+  :defer t)
 
 ;; (let ((i 1))
 ;;   (while (<= i rst-level-face-max)

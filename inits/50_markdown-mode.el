@@ -1,2 +1,2 @@
-(require 'markdown-mode)
-(add-to-list 'auto-mode-alist '("\\.\\(markdown\\|md\\)\\.txt\\'" . markdown-mode))
+(use-package markdown-mode
+  :mode (("\\.\\(markdown\\|md\\)\\.txt\\'" . markdown-mode)))

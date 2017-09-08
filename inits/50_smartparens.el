@@ -1,3 +1,4 @@
 ;; smartparens に移行してみる
-(require 'smartparens-config)
-(smartparens-global-mode t)
+(use-package smartparens-config
+  :config
+  (smartparens-global-mode t))

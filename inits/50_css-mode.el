@@ -7,41 +7,39 @@
 ;;   (add-to-list 'ac-sources 'ac-source-css-property-names))
 ;; (add-hook 'css-mode-hook 'my-css-mode-hook)
 
-;;; scss-mode
-(require 'scss-mode)
-;; ;; CSS
+;; CSS
 (defun my-css-electric-pair-brace ()
   (interactive)
-  (insert "{")(newline-and-indent)
+  (insert "{")
+  (newline-and-indent)
   (newline-and-indent)
   (insert "}")
   (indent-for-tab-command)
-  (previous-line)(indent-for-tab-command)
-  )
+  (previous-line)
+  (indent-for-tab-command))
 
 (defun my-semicolon-ret ()
   (interactive)
   (insert ";")
   (newline-and-indent))
 
-;; ;; scss-mode
-;; ;; https://github.com/antonj/scss-mode
-(autoload 'scss-mode "scss-mode")
-(setq scss-compile-at-save nil) ;; 自動コンパイルをオフにする
-(add-to-list 'auto-mode-alist '("\\.\\(scss\\|css\\)\\'" . scss-mode))
-;; (add-to-list 'ac-modes 'scss-mode)
-(add-hook 'scss-mode-hook
-          (lambda ()
-            ;; (ac-css-mode-setup)
-            (define-key scss-mode-map "\M-{" 'my-css-electric-pair-brace)
-            (define-key scss-mode-map ";" 'my-semicolon-ret)
-            (setq css-indent-offset 2)
-            (setq scss-compile-at-save nil)
-            ;; (setq ac-sources '(ac-source-css-property
-            ;;                    ac-source-css-property-names
-            ;;                    ac-source-yasnippet
-            ;;                    ;; ac-source-words-in-same-mode-buffers
-            ;;                    ac-source-words-in-all-buffer
-            ;;                    ac-source-dictionary))
-;            (flymake-mode nil) ;; flymake は日をあらためてちゃんと設定しよう
-            (yas-minor-mode)))
+;; scss-mode
+;; https://github.com/antonj/scss-mode
+(use-package scss-mode
+  :defer t
+  :mode (("\\.\\(scss\\|css\\)\\'" . scss-mode))
+  :config
+  (setq scss-compile-at-save nil) ;; 自動コンパイルをオフにする
+  ;; (ac-css-mode-setup)
+  (define-key scss-mode-map "\M-{" 'my-css-electric-pair-brace)
+  (define-key scss-mode-map ";" 'my-semicolon-ret)
+  (setq css-indent-offset 2)
+  (setq scss-compile-at-save nil)
+  ;; (setq ac-sources '(ac-source-css-property
+  ;;                    ac-source-css-property-names
+  ;;                    ac-source-yasnippet
+  ;;                    ;; ac-source-words-in-same-mode-buffers
+  ;;                    ac-source-words-in-all-buffer
+  ;;                    ac-source-dictionary))
+  ;; (flymake-mode nil) ;; flymake は日をあらためてちゃんと設定しよう
+  (yas-minor-mode))
