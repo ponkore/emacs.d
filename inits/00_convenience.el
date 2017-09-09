@@ -68,3 +68,19 @@
       (just-one-space)
       )
     ))
+
+;;
+;; see http://d.hatena.ne.jp/kitokitoki/20100225/p1
+;;
+(defun my-pp-macroexpand-last-sexp ()
+  (interactive)
+  (if (thing-at-point-looking-at "\(")
+      (save-excursion
+        (forward-list)
+        (pp-macroexpand-last-sexp nil))
+    (pp-macroexpand-last-sexp nil)))
+
+(add-hook 'lisp-interaction-mode-hook
+          (lambda() (define-key lisp-interaction-mode-map (kbd "C-c RET") 'my-pp-macroexpand-last-sexp)))
+(add-hook 'emacs-lisp-mode-hook
+          (lambda() (define-key emacs-lisp-mode-map (kbd "C-c RET") 'my-pp-macroexpand-last-sexp)))
