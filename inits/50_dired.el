@@ -15,7 +15,6 @@
   (add-hook 'dired-mode-hook
             (lambda ()
               (define-key dired-mode-map "V" 'dired-vc-status)))
-  :config
   ;;
   ;; http://qiita.com/l3msh0@github/items/8665122e01f6f5ef502f
   ;;
@@ -29,11 +28,6 @@
   ;; dired-k
   ;;
   (require 'dired-k)
-  (add-hook 'dired-initial-position-hook 'dired-k))
-
-;; dired-k
-(use-package dired-k
-  :config
-  (require 'dired)
+  (add-hook 'dired-initial-position-hook 'dired-k)
   (define-key dired-mode-map "K" 'dired-k)
   (define-key dired-mode-map "g" 'dired-k))
