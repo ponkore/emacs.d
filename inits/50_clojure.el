@@ -1,12 +1,12 @@
-(add-to-list 'auto-mode-alist '("\\(default\\|user\\|emacs\\)\.\\(behaviors\\|keymap\\)" . clojure-mode))
-
-(eval-after-load "clojure-mode"
-  '(progn
-     (require 'smartparens)
-     (add-hook 'clojure-mode-hook 'yas-minor-mode)
-     (add-hook 'clojure-mode-hook 'smartparens-strict-mode)
-     (add-hook 'clojure-mode-hook (lambda () (define-key clojure-mode-map (kbd "C-c t") 'projectile-find-test-file)))
-     (define-clojure-indent
+(use-package clojure-mode
+  :defer t
+  :mode (("\\(default\\|user\\|emacs\\)\.\\(behaviors\\|keymap\\)" . clojure-mode))
+  :config
+  (require 'smartparens)
+  (add-hook 'clojure-mode-hook 'yas-minor-mode)
+  (add-hook 'clojure-mode-hook 'smartparens-strict-mode)
+  (add-hook 'clojure-mode-hook (lambda () (define-key clojure-mode-map (kbd "C-c t") 'projectile-find-test-file)))
+  (define-clojure-indent
        (defroutes 'defun)
        (tabular 'defun)
        (GET 2)
@@ -17,16 +17,16 @@
        (ANY 2)
        (context 2)
        (fact 'defun)
-       (do-transaction 'defun))))
+       (do-transaction 'defun)))
 
-(eval-after-load "cider"
-  '(progn
-     (require 'company)
-     (add-hook 'cider-repl-mode-hook #'company-mode)
-     (add-hook 'cider-mode-hook #'company-mode)
-
-     (setq cider-show-error-buffer t)
-     (setq cider-auto-select-error-buffer t)
-     (setq cider-repl-result-prefix ";; => ")
-     (setq nrepl-sync-request-timeout 40)
-     (setq nrepl-hide-special-buffers t)))
+(use-package cider
+  :defer t
+  :config
+  (require 'company)
+  (add-hook 'cider-repl-mode-hook #'company-mode)
+  (add-hook 'cider-mode-hook #'company-mode)
+  (setq cider-show-error-buffer t)
+  (setq cider-auto-select-error-buffer t)
+  (setq cider-repl-result-prefix ";; => ")
+  (setq nrepl-sync-request-timeout 40)
+  (setq nrepl-hide-special-buffers t))
