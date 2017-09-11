@@ -1,4 +1,4 @@
-(use-package dired-mode
+(use-package dired
   :init
   ;; バージョン管理システム
   ;; diredから適切なバージョン管理システムの*-statusを起動
