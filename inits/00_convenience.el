@@ -84,3 +84,13 @@
           (lambda() (define-key lisp-interaction-mode-map (kbd "C-c RET") 'my-pp-macroexpand-last-sexp)))
 (add-hook 'emacs-lisp-mode-hook
           (lambda() (define-key emacs-lisp-mode-map (kbd "C-c RET") 'my-pp-macroexpand-last-sexp)))
+
+;;
+;; いちいち消すのも面倒なので、内容が 0 ならファイルごと削除する
+;;
+(defun delete-file-if-no-contents ()
+    (let ((file (buffer-file-name (current-buffer))))
+      (when (= (point-min) (point-max))
+        (delete-file file)
+        (message (concat "File: " file " deleted.")))))
+(add-hook 'after-save-hook 'delete-file-if-no-contents)
