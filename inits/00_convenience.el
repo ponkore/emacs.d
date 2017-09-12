@@ -94,3 +94,27 @@
         (delete-file file)
         (message (concat "File: " file " deleted.")))))
 (add-hook 'after-save-hook 'delete-file-if-no-contents)
+
+;;
+;; for myblog-hugo content create helper
+;;
+;; (setq myblog-hugo-content-filename-format "~/blog/myblog-hugo/content/post/%Y-%m/%d/%Y-%m-%d-")
+;; (setq myblog-hugo-url-format "%Y-%m/%d/%Y-%m-%d-")
+;; (setq myblog-hugo-archives-format "%Y-%m")
+;; (format-time-string myblog-hugo-content-filename-format (current-time))
+
+
+;; +++
+;; title = "hugo でブログ書くことにしました"
+;; description = ""
+;; date = "2017-09-09T18:02:36+09:00"
+;; categories = ["Programming"]
+;; tags = ["hugo", "雑記"]
+;; archives = ["2017-09"]
+;; url = "2017-09/02/hugo-first-post"
+;; thumbnail = "https://raw.githubusercontent.com/gohugoio/hugoDocs/master/static/img/hugo-logo.png"
+;; +++
+;;
+;; 今まで放置していたブログですが、リニューアルして久しぶりに復活させることにしました。
+;;
+;; <!--more-->
