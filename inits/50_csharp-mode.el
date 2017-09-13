@@ -9,7 +9,6 @@
     (turn-on-auto-revert-mode) ;; helpful when also using Visual Studio
     (setq indent-tabs-mode nil) ;; tabs are evil
     (yas-minor-mode-on)
-    (my-csharp-mode-fn)
     (setq comment-column 40)
     (setq c-basic-offset 4)
     ;; (font-lock-add-magic-number)
