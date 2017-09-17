@@ -26,6 +26,7 @@
 (define-key emacs-lisp-mode-map (kbd "C-M-i") 'company-complete)
 
 (setq company-tooltip-limit 20)
+(setq company-tooltip-align-annotations t)
 (setq company-idle-delay .3)
 (setq company-echo-delay 0)
 (setq company-begin-commands '(self-insert-command))
