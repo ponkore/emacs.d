@@ -1,8 +1,10 @@
 ;;
 ;; ~/.emacs.d/init.el
 ;;
-(if (eq window-system 'w32)
-    (setq w32-get-true-file-attributes nil))
+(when (eq window-system 'w32)
+  (setq w32-get-true-file-attributes nil)
+  ;; for my home's win10 environment.
+  (setenv "HOME" (getenv "USERPROFILE")))
 
 ;; only for my office environment
 (load (expand-file-name "~/.emacs.d/config-proxy.el") t)
