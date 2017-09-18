@@ -6,6 +6,14 @@
  ;; If you edit it by hand, you could mess it up, so be careful.
  ;; Your init file should contain only one such instance.
  ;; If there is more than one, they won't work right.
+ '(company-preview ((t (:foreground "darkgray" :underline t))))
+ '(company-preview-common ((t (:inherit company-preview))))
+ '(company-scrollbar-bg ((t (:background "gray40"))))
+ '(company-scrollbar-fg ((t (:background "orange"))))
+ '(company-tooltip ((t (:background "lightgray" :foreground "black"))))
+ '(company-tooltip-common ((((type x)) (:inherit company-tooltip :weight bold)) (t (:inherit company-tooltip))))
+ '(company-tooltip-common-selection ((((type x)) (:inherit company-tooltip-selection :weight bold)) (t (:inherit company-tooltip-selection))))
+ '(company-tooltip-selection ((t (:background "steelblue" :foreground "white"))))
  '(font-lock-function-name-face ((t (:foreground "DodgerBlue1"))))
  '(font-lock-preprocessor-face ((t (:foreground "steel blue"))))
  '(font-lock-variable-name-face ((t (:foreground "DodgerBlue1"))))
@@ -22,7 +30,7 @@
  '(helm-truncate-lines t t)
  '(package-selected-packages
    (quote
-    (go-eldoc go-mode go-projectile go-snippets use-package groovy-mode graphviz-dot-mode company-racer racer yesql-ghosts yaml-mode swiper ssh sqlup-mode sql-indent smartparens smart-tabs-mode scss-mode sass-mode recentf-ext rainbow-delimiters py-autopep8 psvn projectile-codesearch powerline popwin pastels-on-dark-theme paredit packed ox-gfm ox-asciidoc open-junk-file markdown-mode magit lua-mode less-css-mode js2-mode japanese-holidays init-loader helm-projectile helm-package helm-migemo helm-gtags helm-ag fsharp-mode flycheck-rust flycheck-pyflakes flycheck-pos-tip flx-ido expand-region evalator-clojure elscreen-buffer-group elpy dired-k csharp-mode clojure-mode-extra-font-locking cider-spy cider-decompile cargo auto-complete anzu adoc-mode)))
+    (rg go-eldoc go-mode go-projectile go-snippets use-package groovy-mode graphviz-dot-mode company-racer racer yesql-ghosts yaml-mode swiper ssh sqlup-mode sql-indent smartparens smart-tabs-mode scss-mode sass-mode recentf-ext rainbow-delimiters py-autopep8 psvn projectile-codesearch powerline popwin pastels-on-dark-theme paredit packed ox-gfm ox-asciidoc open-junk-file markdown-mode magit lua-mode less-css-mode js2-mode japanese-holidays init-loader helm-projectile helm-package helm-migemo helm-gtags helm-ag fsharp-mode flycheck-rust flycheck-pyflakes flycheck-pos-tip flx-ido expand-region evalator-clojure elscreen-buffer-group elpy dired-k csharp-mode clojure-mode-extra-font-locking cider-spy cider-decompile cargo auto-complete anzu adoc-mode)))
  '(safe-local-variable-values
    (quote
     ((cider-cljs-lein-repl . "(do (dev) (go) (cljs-repl))")
