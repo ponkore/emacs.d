@@ -45,10 +45,6 @@
 ;;; 行番号の表示
 (global-linum-mode t)      ; デフォルトで linum-mode を有効にする
 (setq linum-format "%5d ") ; 5 桁分の領域を確保して行番号のあとにスペースを入れる
-
-;;; 選択行のハイライト表示の face
-(custom-set-faces '(hl-line ((t (:underline "textBackgroundColor")))))
-
 
 ;;; 行
 ;; 行の先頭でC-kを一回押すだけで行全体を消去する

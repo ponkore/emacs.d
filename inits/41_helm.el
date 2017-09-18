@@ -110,8 +110,3 @@
     (let* ((default-directory topdir))
       (helm :sources (helm-c-sources-git-project-for default-directory)
             :buffer "*helm git project*"))))
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-;;
-(custom-set-variables
- '(helm-truncate-lines t))
