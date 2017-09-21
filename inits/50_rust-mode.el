@@ -17,4 +17,5 @@
   (add-hook 'racer-mode-hook (lambda ()
                                (company-mode)
                                (eldoc-mode)))
-  (define-key rust-mode-map (kbd "TAB") #'company-indent-or-complete-common))
+  (define-key rust-mode-map (kbd "TAB") #'company-indent-or-complete-common)
+  (setq rust-format-on-save t))
