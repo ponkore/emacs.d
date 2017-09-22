@@ -18,4 +18,5 @@
                                (company-mode)
                                (eldoc-mode)))
   (define-key rust-mode-map (kbd "TAB") #'company-indent-or-complete-common)
+  (define-key rust-mode-map (kbd "C-c d") #'racer-describe)
   (setq rust-format-on-save t))
