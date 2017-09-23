@@ -228,7 +228,7 @@
 
    ;; (M-! and M-| and compile.el)
    (setq shell-file-name "bash.exe")
-   (modify-coding-system-alist 'process ".*sh\\.exe" 'cp932)
+   (modify-coding-system-alist 'process ".*sh\\.exe" 'utf-8)
 
    ;; shellモードの時の^M抑制
    (add-hook 'comint-output-filter-functions 'shell-strip-ctrl-m nil t)
