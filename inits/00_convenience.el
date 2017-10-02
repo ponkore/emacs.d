@@ -96,25 +96,47 @@
 (add-hook 'after-save-hook 'delete-file-if-no-contents)
 
 ;;
-;; for myblog-hugo content create helper
+;; for myblog-hugo
 ;;
-;; (setq myblog-hugo-content-filename-format "~/blog/myblog-hugo/content/post/%Y-%m/%d/%Y-%m-%d-")
-;; (setq myblog-hugo-url-format "%Y-%m/%d/%Y-%m-%d-")
-;; (setq myblog-hugo-archives-format "%Y-%m")
-;; (format-time-string myblog-hugo-content-filename-format (current-time))
+(defvar myblog-hugo-base-directory-format-string "~/blog/myblog-hugo/content/post/%Y-%m/%d/"
+  "format string for post directory. use this with `format-time-string'")
 
+(defvar myblog-hugo-front-matter-template "+++
+title = \"\"
+description = \"\"
+date = \"%Y-%m-%dT%H:%M:%S+09:00\"
+categories = [\"Programming\"]
+tags = [\"\"]
+archives = [\"%Y-%m\"]
+url = \"post/%Y-%m/%d/{{post-title}}\"
+thumbnail = \"/img/%Y-%m/%d/{{post-title}}.png\"
++++
 
-;; +++
-;; title = "hugo でブログ書くことにしました"
-;; description = ""
-;; date = "2017-09-09T18:02:36+09:00"
-;; categories = ["Programming"]
-;; tags = ["hugo", "雑記"]
-;; archives = ["2017-09"]
-;; url = "2017-09/02/hugo-first-post"
-;; thumbnail = "https://raw.githubusercontent.com/gohugoio/hugoDocs/master/static/img/hugo-logo.png"
-;; +++
-;;
-;; 今まで放置していたブログですが、リニューアルして久しぶりに復活させることにしました。
-;;
-;; <!--more-->
+<!--more-->
+"
+  "template string for post's default markdown text. use this with `format-time-string', and replace {{post-title}}.")
+
+(defun myblog-hugo-create-frontmatter (post-title)
+  (let* ((tmp (format-time-string myblog-hugo-front-matter-template (current-time))))
+    (replace-regexp-in-string "{{post-title}}" post-title tmp)))
+
+(defun myblog-hugo-create-post (post-title)
+  "create a hugo post file with default template."
+  (interactive "Mblog-title-string(en): ")
+  (let* ((post-filename-prefix (format-time-string myblog-hugo-base-directory-format-string (current-time)))
+         (tmp-post-title (downcase (replace-regexp-in-string "[ \t\./]+" "-" post-title)))
+         (filename (concat post-filename-prefix tmp-post-title ".md"))
+         (directory (file-name-directory filename)))
+    (if (y-or-n-p (concat "create a post " filename ". ok? "))
+        (progn
+          (unless (file-exists-p directory)
+            (make-directory directory t))
+          (let* ((front-matter (myblog-hugo-create-frontmatter tmp-post-title))
+                 (buf (set-buffer (find-file-noselect filename t))))
+            (with-current-buffer buf
+              (goto-char (point-min))
+              (insert front-matter)
+              (basic-save-buffer)
+              (switch-to-buffer buf)
+              (goto-char (point-max)))))
+      (message "canceled."))))
