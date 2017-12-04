@@ -7,7 +7,7 @@
   (require 'projectile)
   (add-hook 'clojure-mode-hook 'yas-minor-mode)
   (add-hook 'clojure-mode-hook 'smartparens-strict-mode)
-  (add-hook 'clojure-mode-hook (lambda () (define-key clojure-mode-map (kbd "C-c t") 'projectile-find-test-file)))
+  (add-hook 'clojure-mode-hook (lambda () (define-key clojure-mode-map (kbd "C-c t") 'projectile-toggle-between-implementation-and-test)))
   (define-clojure-indent
        (defroutes 'defun)
        (tabular 'defun)
