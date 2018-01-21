@@ -18,6 +18,10 @@
        (HEAD 2)
        (ANY 2)
        (context 2)
+       (componentWillMount 'defun)
+       (componentDidMount 'defun)
+       (componentWillUnmount 'defun)
+       (render 'defun)
        (fact 'defun)
        (do-transaction 'defun)))
 
