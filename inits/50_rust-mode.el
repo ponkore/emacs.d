@@ -7,7 +7,7 @@
   (require 'racer)
   (require 'flycheck)
   (setq racer-cmd (expand-file-name "~/.cargo/bin/racer"))
-  (setq racer-rust-src-path (expand-file-name "~/.rust-src/src/"))
+  (setq racer-rust-src-path (expand-file-name "~/.multirust/toolchains/stable-x86_64-apple-darwin/lib/rustlib/src/rust/src/"))
   (add-hook 'rust-mode-hook (lambda ()
                               (racer-mode)
                               (flycheck-mode)))
