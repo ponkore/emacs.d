@@ -3,9 +3,12 @@
 ;;
 ;; (add-hook 'after-init-hook #'global-flycheck-mode)
 
-(flycheck-add-next-checker 'javascript-jshint
-                           'javascript-gjslint)
-
-(eval-after-load 'flycheck
-  '(custom-set-variables
-    '(flycheck-display-errors-function #'flycheck-pos-tip-error-messages)))
+(use-package flycheck
+  :defer t
+  :config
+  (require 'flycheck-pos-tip)
+  (custom-set-variables
+   '(flycheck-display-errors-function #'flycheck-pos-tip-error-messages))
+  ;; (flycheck-add-next-checker 'javascript-jshint
+  ;;                            'javascript-gjslint)
+  )
