@@ -19,8 +19,20 @@
 ;; C-sで絞り込む
 (define-key company-active-map (kbd "C-s") 'company-filter-candidates)
 
-;; TABで候補を設定
-(define-key company-active-map (kbd "C-i") 'company-complete-selection)
+;;; 1つしか候補がなかったらtabで補完、複数候補があればtabで次の候補へ行くように
+(define-key company-active-map (kbd "<tab>") 'company-complete-common-or-cycle)
+;; (define-key company-active-map (kbd "C-i") 'company-complete-selection)
+
+;;; C-hがデフォルトでドキュメント表示にmapされているので、文字を消せるようにmapを外す
+(define-key company-active-map (kbd "C-h") nil)
+
+;;; ドキュメント表示
+(define-key company-active-map (kbd "M-d") 'company-show-doc-buffer)
+
+(setq company-minimum-prefix-length 1) ;; 1文字入力で補完されるように
+
+;;; 候補の一番上でselect-previousしたら一番下に、一番下でselect-nextしたら一番上に行くように
+(setq company-selection-wrap-around t)
 
 ;; 各種メジャーモードでも C-M-iで company-modeの補完を使う
 (define-key emacs-lisp-mode-map (kbd "C-M-i") 'company-complete)
