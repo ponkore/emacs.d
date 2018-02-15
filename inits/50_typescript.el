@@ -1,5 +1,3 @@
-(setq tide-tsserver-executable (expand-file-name "~/.nvm/versions/node/v9.5.0/bin/tsserver"))
-;; (setq tide-tsserver-process-environment '("TSS_LOG=-level verbose -file /tmp/tss.log"))
 (require 'tide)
 
 (defun setup-tide-mode ()
