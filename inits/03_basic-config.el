@@ -196,3 +196,5 @@
 (set-face-attribute 'whitespace-space nil
                     :foreground "GreenYellow"
                     :weight 'bold)
+
+(require 'smartparens)

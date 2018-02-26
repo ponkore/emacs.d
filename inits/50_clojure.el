@@ -2,7 +2,6 @@
   :defer t
   :mode (("\\(default\\|user\\|emacs\\)\.\\(behaviors\\|keymap\\)" . clojure-mode))
   :config
-  (require 'smartparens)
   (require 'yasnippet)
   (require 'projectile)
   (add-hook 'clojure-mode-hook 'yas-minor-mode)
