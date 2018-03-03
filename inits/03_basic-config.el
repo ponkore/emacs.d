@@ -199,3 +199,7 @@
 
 (require 'smartparens)
 (smartparens-global-mode 1)
+
+;; ファイル終端の改行文字を自動入力しない
+;; https://windymelt.hatenablog.com/entry/2014/09/01/145343
+(setq-default require-final-newline nil)
