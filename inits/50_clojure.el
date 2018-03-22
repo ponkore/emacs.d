@@ -20,7 +20,12 @@
        (componentWillMount 'defun)
        (componentDidMount 'defun)
        (componentWillUnmount 'defun)
+       ;; for om.next
+       (ident 'defun)
+       (query 'defun)
+       (params 'defun)
        (render 'defun)
+       ;;
        (fact 'defun)
        (do-transaction 'defun)))
 
