@@ -8,6 +8,7 @@
   :config
   (require 'flycheck-pos-tip)
   (custom-set-variables
+   '(flycheck-disabled-checkers '(javascript-jshint javascript-jscs))
    '(flycheck-display-errors-function #'flycheck-pos-tip-error-messages))
   ;; (flycheck-add-next-checker 'javascript-jshint
   ;;                            'javascript-gjslint)
