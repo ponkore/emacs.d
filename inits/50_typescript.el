@@ -1,5 +1,12 @@
 (require 'tide)
 
+(setq typescript-indent-level 2)
+(setq js-indent-level 2)
+(setq js2-basic-offset 2)
+(setq web-mode-code-indent-offset 2)
+(setq web-mode-markup-indent-offset 2)
+(setq tide-format-options '(:indentSize 2 :tabSize 2))
+
 (defun setup-tide-mode ()
   (interactive)
   (tide-setup)
@@ -10,8 +17,7 @@
   ;; company is an optional dependency. You have to
   ;; install it separately via package-install
   ;; `M-x package-install [ret] company`
-  (company-mode +1)
-  (setq tide-format-options '(:indentSize 2 :tabSize 2)))
+  (company-mode +1))
 
 ;; aligns annotation to the right hand side
 (setq company-tooltip-align-annotations t)
