@@ -14,3 +14,12 @@
 (add-hook 'dired-mode-hook (lambda () (define-key dired-mode-map " " 'dired-open-external)))
 
 (set-frame-parameter nil 'alpha 90)
+
+(setq initial-frame-alist
+      (append
+       '((ns-transparent-titlebar . t) ;; タイトルバーを透過
+         (vertical-scroll-bars . nil) ;; スクロールバーを消す
+         ;; (ns-appearance . dark) ;; 26.1 {light, dark}
+         (internal-border-width . 0))))
+
+(setq default-frame-alist initial-frame-alist)
