@@ -38,5 +38,5 @@
 
 (require 'js2-mode)
 (add-to-list 'auto-mode-alist '("\\.js" . js2-mode))
-(add-hook 'js2-mode-hook #'setup-tide-mode)
+;; (add-hook 'js2-mode-hook #'setup-tide-mode)
 (add-to-list 'auto-mode-alist '("\\.json" . javascript-mode))
