@@ -176,10 +176,16 @@
 ;;
 (require 'whitespace)
 
-;;(setq whitespace-style '(face tabs tab-mark spaces space-mark lines-tail trailing space-before-tab space-after-tab::space))
-(setq whitespace-style '(face tabs tab-mark spaces space-mark trailing space-before-tab space-after-tab::space))
-;;(setq whitespace-style '(face tabs tab-mark spaces space-mark trailing space-before-tab space-after-tab::space))
-;;(setq whitespace-style '(face trailing space-before-tab space-after-tab::space))
+(defvar whitespace-style-with-tab '(face tabs tab-mark spaces space-mark trailing space-before-tab space-after-tab::space))
+(defvar whitespace-style-without-tab '(face spaces space-mark trailing space-before-tab space-after-tab::space))
+;; default setting
+(setq whitespace-style whitespace-style-without-tab)
+
+(defun toggle-tab-mark ()
+  (interactive)
+  (if (equal whitespace-style whitespace-style-with-tab)
+      (setq whitespace-style whitespace-style-without-tab)
+    (setq whitespace-style whitespace-style-with-tab)))
 
 (setq whitespace-space-regexp "\\(\x3000+\\)")
 (setq whitespace-display-mappings
