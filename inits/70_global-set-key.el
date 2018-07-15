@@ -12,6 +12,7 @@
    ("\C-x\C-v" find-file-other-window)
    ("\C-x=" count-lines-page)
    ("\C-xj" open-junk-file)
+   ("\C-xn" myblog-hugo/create-draft)
    ("\C-xl" goto-line)
    ("\C-xg" grep)
    ("\C-xt" toggle-truncate-lines)
