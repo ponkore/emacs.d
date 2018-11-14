@@ -21,6 +21,7 @@
 
   ;; set Oracle as default SQL product.
   (setq sql-product 'oracle)
+  ;;(setq sql-product 'mysql)
 
   ;; does not work below.
   ;; (when (eq system-type 'windows-nt)
