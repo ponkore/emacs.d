@@ -1,0 +1,25 @@
+# -*- mode: snippet -*-
+# name: newpageclass
+# key: newpageclass
+# expand-env: ((yas/indent-line 'fixed) (yas/wrap-around-region 'nil))
+# --
+import * as React from 'react';
+import {
+  Button,
+} from 'reactstrap';
+import Header from '../components/Header';
+import Footer from '../components/Footer';
+
+export default class ${1:ClassName} extends React.Component {
+  public render() {
+    return (
+      <div>
+        <Header />
+        <div className="main" role="main">
+	  $0
+        </div>
+        <Footer />
+      </div>
+    );
+  }
+}
