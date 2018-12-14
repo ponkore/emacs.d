@@ -250,6 +250,10 @@
                                 ))
 
 ;; ------------------------------------------------------------------------
+;; @ .nyagos
+   (add-to-list 'auto-mode-alist '(".nyagos" . lua-mode))
+
+;; ------------------------------------------------------------------------
 ;; @ w32-symlinks
 
    (custom-set-variables '(w32-symlinks-handle-shortcuts t))
