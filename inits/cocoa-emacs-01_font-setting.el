@@ -19,4 +19,4 @@
     (set-fontset-font nil '(#x0370 . #x03FF) fontspec)
     (setq face-font-rescale-alist '((".*Ricty.*" . 1.0)))))
 
-(cocoa-emacs-font-setting 18)
+(cocoa-emacs-font-setting 16)
