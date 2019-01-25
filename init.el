@@ -41,4 +41,16 @@
       (normal-top-level-add-subdirs-to-load-path)))
 
 (setq init-loader-show-log-after-init nil)
+
+(load-theme 'pastels-on-dark t)
+(enable-theme 'pastels-on-dark)
+
 (init-loader-load "~/.emacs.d/inits")
+
+(load (expand-file-name "~/.emacs.d/use-packages.el") t)
+
+;; anzu
+(global-anzu-mode 1)
+
+;; server
+(server-start)
