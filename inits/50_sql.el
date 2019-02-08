@@ -1,4 +1,4 @@
-(defun oracle-settins ()
+(defun oracle-settings ()
   "setup oracle sql environment"
   ;; for SQL mode (My Office PC Oracle setting)
   (when (eq system-type 'windows-nt)
@@ -38,16 +38,3 @@ set pagesize 1000
                           '(("\"\\([^\"]*\\)\"" . 'font-lock-constant-face)
                             ("\\<Hgs\\w+\\>\.\\<\\w+\\>" . 'font-lock-builtin-face)
                             ("\\<R[LSC][0-9][A-Z]\\w+\\>\.\\<\\w+\\>" . 'font-lock-builtin-face))))
-
-(use-package sql-mode
-  :defer t
-  :mode (("\\.ddl$" . sql-mode))
-  :init
-  (setq sql-product 'postgres)
-  (require 'yasnippet)
-  (add-hook 'sql-mode-hook
-            (lambda ()
-              (yas-minor-mode-on)
-              (setq indent-tabs-mode nil)
-              (define-key sql-mode-map (kbd "C-c \"") 'wrap-double-quote-thing-at-symbol)
-              (define-key sql-mode-map (kbd "C-c ,") 'move-trailing-comma-to-line-start))))
