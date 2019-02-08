@@ -7,7 +7,7 @@
          ("C-x C-r" . helm-recentf)
          ("M-y"     . helm-show-kill-ring)
          ("C-c i"   . helm-imenu)
-         ("C-x b"   . helm-buffers-list)
+         ("C-x b"   . helm-for-files)
          ("M-y"     . helm-show-kill-ring))
   :commands (helm-previous-page helm-execute-persistent-action
                                 helm-next-source
@@ -15,9 +15,6 @@
   :config
   (require 'helm-config)
   (require 'helm-files)
-  ;; (anything-set-anything-command-map-prefix-key 'anything-command-map-prefix-key "C-c C-<SPC>")
-  ;; (helm-mode)
-  ;; ;; (define-key global-map (kbd "C-x b") 'helm-for-files)
   (define-key helm-find-files-map (kbd "C-h") 'delete-backward-char)
   (define-key helm-map (kbd "C-o") nil)
   (bind-keys :map helm-map
