@@ -1,146 +1,33 @@
-;; Helm
-;; (some settings derived from https://abicky.net/2014/01/04/170448/ )
-(use-package helm
-  :bind (("C-c h"   . helm-mini)
-         ("M-x"     . helm-M-x)
-         ("C-x C-f" . helm-find-files)
-         ("C-x C-r" . helm-recentf)
-         ("M-y"     . helm-show-kill-ring)
-         ("C-c i"   . helm-imenu)
-         ("C-x b"   . helm-for-files)
-         ("M-y"     . helm-show-kill-ring))
-  :commands (helm-previous-page helm-execute-persistent-action
-                                helm-next-source
-                                helm-previous-source)
+;;
+;; ivy (https://qiita.com/blue0513/items/c0dc35a880170997c3f5)
+;;
+(use-package ivy
   :config
-  (require 'helm-config)
-  (require 'helm-files)
-  (define-key helm-find-files-map (kbd "C-h") 'delete-backward-char)
-  (define-key helm-map (kbd "C-o") nil)
-  (bind-keys :map helm-map
-             ("C-h"   . delete-backward-char)
-             ("C-z"   . helm-previous-page)
-             ("C-l"   . helm-execute-persistent-action)
-             ("C-M-n" . helm-next-source)
-             ("C-M-p" . helm-previous-source))
-  ;; Emulate `kill-line' in helm minibuffer
-  (setq helm-delete-minibuffer-contents-from-point t)
-  (defadvice helm-delete-minibuffer-contents (before helm-emulate-kill-line activate)
-    "Emulate `kill-line' in helm minibuffer"
-    (kill-new (buffer-substring (point) (field-end))))
-  ;; Disable helm in some functions
-  (require 'helm-mode)
-  (add-to-list 'helm-completing-read-handlers-alist '(find-alternate-file . nil))
-  (add-to-list 'helm-completing-read-handlers-alist '(find-file . nil))
-  (add-to-list 'helm-completing-read-handlers-alist '(write-file . nil))
-
-  ;; For find-file etc.
-  (define-key helm-read-file-map (kbd "TAB") 'helm-execute-persistent-action)
-  ;; For helm-find-files etc.
-  (define-key helm-find-files-map (kbd "TAB") 'helm-execute-persistent-action)
-
-  (setq helm-for-files-preferred-list
-        '(helm-source-buffers-list
-          helm-source-bookmarks         ; bookmark の順位を上げた
-          helm-source-recentf
-          helm-source-file-cache
-          helm-source-files-in-current-dir
-          helm-source-locate))
-
-  (defun helm-action-copy-selected (msg)
-    (save-excursion
-      (with-temp-buffer
-        (erase-buffer)
-        (insert msg)
-        (copy-region-as-kill (point-min) (point-max))
-        (message (format "%s" msg)))))
-
-  ;;
-  ;; deprecated, don't work.
-  ;;
-  ;; (defvar helm-string-cache (make-hash-table :test 'equal))
-  ;;
-  ;; (defun read-buf-string (fname)
-  ;;   (let ((result (gethash fname helm-string-cache)))
-  ;;     (if result result
-  ;;       (save-excursion
-  ;;         (with-temp-buffer
-  ;;           (let* ((buf (set-buffer (find-file-noselect fname)))
-  ;;                  (ret (buffer-string)))
-  ;;             (kill-buffer buf)
-  ;;             (puthash fname ret helm-string-cache)
-  ;;             ret))))))
-  ;; (defun make-helm-source-from-file (source-name filename execute-action)
-  ;;   (when (file-exists-p filename)
-  ;;     `((name . ,source-name)
-  ;;       (candidates-in-buffer)
-  ;;       (init . (lambda () (helm-init-candidates-in-buffer 'global (read-buf-string ,filename))))
-  ;;       (action . ,execute-action))))
-
-  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-  ;;  helm-git-project (http://syohex.hatenablog.com/entry/20121207/1354885367)
-  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-  (defun helm-c-sources-git-project-for (pwd)
-    (loop for elt in
-          '(("Modified files" . "--modified")
-            ("Untracked files" . "--others --exclude-standard")
-            ("All controlled files in this project" . nil))
-          for title  = (format "%s (%s)" (car elt) pwd)
-          for option = (cdr elt)
-          for cmd    = (format "git ls-files %s" (or option ""))
-          collect
-          (helm-build-sync-source title
-            :candidates (unless (and (not option) (helm-candidate-buffer))
-                          (with-current-buffer (helm-candidate-buffer 'global)
-                            (call-process-shell-command cmd nil t nil)
-                            (list (buffer-string)))))))
-
-  (defun helm-git-project-topdir ()
-    (file-name-as-directory
-     (let* ((one-line (replace-regexp-in-string
-                       "\n" ""
-                       (shell-command-to-string "git rev-parse --show-toplevel"))))
-       (replace-regexp-in-string "^/\\([a-z]\\)/" "\\1:/" one-line))))
-
-  (defun helm-git-project ()
-    (interactive)
-    (let ((topdir (helm-git-project-topdir)))
-      (unless (file-directory-p topdir)
-        (error "I'm not in Git Repository!!"))
-      (let* ((default-directory topdir))
-        (helm :sources (helm-c-sources-git-project-for default-directory)
-              :buffer "*helm git project*"))))
+  (ivy-mode 1)
+  (setq ivy-use-virtual-buffers t)
+  (setq enable-recursive-minibuffers t)
+  (setq ivy-height 20) ;; minibufferのサイズを拡大！（重要）
+  (setq ivy-extra-directories nil)
+  (setq ivy-re-builders-alist
+        '((t . ivy--regex-plus)))
   )
 
-(use-package helm-ag
+(use-package counsel
+  :bind (("M-x" . counsel-M-x)
+         ("C-x C-f" . counsel-find-file)) ;; find-fileもcounsel任せ！
   :config
-  ;; http://emacs.rubikitch.com/helm-ag/
-  (setq helm-ag-base-command "rg --vimgrep --no-heading")
-  ;; 現在のシンボルをデフォルトのクエリにする
-  (setq helm-ag-insert-at-point 'symbol)
-  (defun helm-ag-dot-emacs ()
-    ".emacs.d以下を検索"
-    (interactive)
-    (helm-ag "~/.emacs.d/")))
+  (defvar counsel-find-file-ignore-regexp (regexp-opt '("./" "../"))))
 
-(use-package helm-gtags
-  :commands helm-gtags-mode
-  :init
-  ;; Enable helm-gtags-mode
-  (add-hook 'c-mode-hook 'helm-gtags-mode)
-  (add-hook 'c++-mode-hook 'helm-gtags-mode)
-  (add-hook 'asm-mode-hook 'helm-gtags-mode)
-  (add-hook 'csharp-mode-hook 'helm-gtags-mode)
+(use-package swiper
+  :bind (("C-s" . swiper))
   :config
-  ;; Set key bindings
-  (define-key helm-gtags-mode-map (kbd "M-.") 'helm-gtags-find-tag)  ;; original : M-t
-  (define-key helm-gtags-mode-map (kbd "M-,") 'helm-gtags-find-rtag) ;; original : M-r
-  (define-key helm-gtags-mode-map (kbd "M-s") 'helm-gtags-find-symbol)
-  (define-key helm-gtags-mode-map (kbd "M-g M-p") 'helm-gtags-parse-file)
-  (define-key helm-gtags-mode-map (kbd "C-c <") 'helm-gtags-previous-history)
-  (define-key helm-gtags-mode-map (kbd "C-c >") 'helm-gtags-next-history)
-  (define-key helm-gtags-mode-map (kbd "M-,") 'helm-gtags-pop-stack))
-;;
+  (defvar swiper-include-line-number-in-search t) ;; line-numberでも検索可能
+  ;; ;; migemo + swiper（日本語をローマ字検索できるようになる）
+  ;; (require 'avy-migemo)
+  ;; (avy-migemo-mode 1)
+  ;; (require 'avy-migemo-e.g.swiper)
+  )
+
 (use-package markdown-mode
   :mode (("\\.\\(markdown\\|md\\)\\.txt\\'" . markdown-mode))
   :init
@@ -224,33 +111,16 @@
 ;;; yasnippet
 ;;;
 (use-package yasnippet
-  :defer t
+  ;; :bind (("C-x i i" . yas-insert-snippet)
+  ;;        ("C-x i n" . yas-new-snippet)
+  ;;        ("C-x i v" . yas-visit-snippet-file))
   :config
   (yas-reload-all)
-  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-  ;; my-yas/prompt(http://syohex.hatenablog.com/entry/20121207/1354885367)
-  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-  (defun my-yas/prompt (prompt choices &optional display-fn)
-    (let* ((names (loop for choice in choices
-                        collect (or (and display-fn (funcall display-fn choice))
-                                    choice)))
-           (selected (helm-other-buffer
-                      `(((name . ,(format "%s" prompt))
-                         (candidates . names)
-                         (action . (("Insert snippet" . (lambda (arg) arg))))))
-                      "*helm yas/prompt*")))
-      (if selected
-          (let ((n (position selected names :test 'equal)))
-            (nth n choices))
-        (signal 'quit "user quit!"))))
-  ;; (require 'helm-c-yasnippet)
-  ;; (setq helm-yas-space-match-any-greedy t) ;[default: nil]
-  ;; (global-set-key (kbd "C-c y") 'helm-yas-complete)
+  (yas-global-mode 1)
   (define-key yas-minor-mode-map (kbd "C-x i i") 'yas-insert-snippet)
   (define-key yas-minor-mode-map (kbd "C-x i n") 'yas-new-snippet)
-  (define-key yas-minor-mode-map (kbd "C-x i v") 'yas-visit-snippet-file))
-
-;;(yas-global-mode 1)
+  (define-key yas-minor-mode-map (kbd "C-x i v") 'yas-visit-snippet-file)
+  )
 
 ;; smartparens に移行してみる
 (use-package smartparens-config
@@ -259,8 +129,10 @@
 
 ;;; expand-region
 (use-package expand-region
-  :init
-  (global-set-key (kbd "C-=") 'er/expand-region))
+  :bind (("C-=" . er/expand-region))
+  ;; :init
+  ;; (global-set-key (kbd "C-=") 'er/expand-region)
+  )
 
 (use-package org
   :defer t
@@ -276,12 +148,6 @@
 (use-package projectile
   :bind (("<f12>" . projectile-toggle-between-implementation-and-test))
   :config
-  (defun helm-projectile-ag ()
-    "Projectileと連携"
-    (interactive)
-    (helm-ag (projectile-project-root)))
-  (setq projectile-completion-system 'helm)
-  (helm-projectile-on)
   (projectile-global-mode))
 
 ;;

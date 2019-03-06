@@ -8,7 +8,6 @@
    ("\e?" apropos)
    ("\C-x\C-e" compile)
    ("\C-x\C-n" next-error)
-   ("\C-x\C-f" helm-find-files)
    ("\C-x\C-v" find-file-other-window)
    ("\C-x=" count-lines-page)
    ("\C-xj" open-junk-file)
