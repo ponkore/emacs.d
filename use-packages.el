@@ -2,15 +2,15 @@
 ;; ivy (https://qiita.com/blue0513/items/c0dc35a880170997c3f5)
 ;;
 (use-package ivy
+  :bind (:map ivy-minibuffer-map ("C-l" . ivy-backward-delete-char))
   :config
   (ivy-mode 1)
   (setq ivy-use-virtual-buffers t)
   (setq enable-recursive-minibuffers t)
   (setq ivy-height 20) ;; minibufferのサイズを拡大！（重要）
   (setq ivy-extra-directories nil)
-  (setq ivy-re-builders-alist
-        '((t . ivy--regex-plus)))
-  )
+  (setq ivy-re-builders-alist '((t . ivy--regex-plus)))
+  (setq ivy-extra-directories '("../" "./")))
 
 (use-package counsel
   :bind (("M-x" . counsel-M-x)
