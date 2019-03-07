@@ -639,6 +639,16 @@
               (,(concat "\\_<" (regexp-opt UNIX) "\\_>") . font-lock-warning-face))))))
 
 ;;
+;; Visual Basic Mode - visual-basic-mode.el
+;;
+(use-package visual-basic-mode
+  :mode (("\\.\\(frm\\|bas\\|cls\\|vbs\\|vb\\)$" . visual-basic-mode))
+  :config
+  (setq visual-basic-mode-indent 4)
+  (add-hook 'visual-basic-mode-hook
+            '(lambda () (setq mode-name "vb"))))
+
+;;
 ;; gocode coding system
 ;;
 (use-package company-go
