@@ -23,3 +23,53 @@
          (internal-border-width . 0))))
 
 (setq default-frame-alist initial-frame-alist)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; font setting
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defun cocoa-emacs-font-setting (size)
+  "Set cocoa emacs japanese fonts(Ricty Diminished Version)."
+  (let* ((asciifont "Ricty Diminished")
+         (jpfont "Ricty Diminished")
+         (h (* size 10))
+         (fontspec)
+         (jp-fontspec))
+    (set-face-attribute 'default nil :family asciifont :height h)
+    (setq fontspec (font-spec :family asciifont))
+    (setq jp-fontspec (font-spec :family jpfont))
+    (set-fontset-font nil 'japanese-jisx0208 jp-fontspec)
+    (set-fontset-font nil 'japanese-jisx0212 jp-fontspec)
+    (set-fontset-font nil 'japanese-jisx0213-1 jp-fontspec)
+    (set-fontset-font nil 'japanese-jisx0213-2 jp-fontspec)
+    (set-fontset-font nil 'japanese-jisx0213.2004-1 jp-fontspec)
+    (set-fontset-font nil 'katakana-jisx0201 jp-fontspec)
+    (set-fontset-font nil '(#x0080 . #x024F) fontspec)
+    (set-fontset-font nil '(#x0370 . #x03FF) fontspec)
+    (setq face-font-rescale-alist '((".*Ricty.*" . 1.0)))))
+
+(cocoa-emacs-font-setting 16)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; fsharp
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; F# 編集用のモード
+
+(setq inferior-fsharp-program "/usr/bin/fsharpi --readline-")
+(setq fsharp-compiler "/usr/bin/fsharpc")
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; path
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; exec path setting ( http://qiita.com/catatsuy/items/3dda714f4c60c435bb25 )
+;;
+(defun set-exec-path-from-shell-PATH ()
+  "Set up Emacs' `exec-path' and PATH environment variable to match that used by the user's shell.
+
+This is particularly useful under Mac OSX, where GUI apps are not started from a shell."
+  (interactive)
+  (let ((path-from-shell (replace-regexp-in-string "[ \t\n]*$" "" (shell-command-to-string "/bin/bash --login -i -c 'echo $PATH'"))))
+    (setenv "PATH" path-from-shell)
+    (setq exec-path (split-string path-from-shell path-separator))))
+
+(set-exec-path-from-shell-PATH)
