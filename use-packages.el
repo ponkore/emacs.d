@@ -227,7 +227,7 @@
 (use-package projectile
   :bind (("<f12>" . projectile-toggle-between-implementation-and-test))
   :config
-  (projectile-global-mode))
+  (projectile-mode 1))
 
 ;;
 ;; shell-mode
