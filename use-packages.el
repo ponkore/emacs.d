@@ -14,18 +14,29 @@
 
 (use-package counsel
   :bind (("M-x" . counsel-M-x)
-         ("C-x C-f" . counsel-find-file)) ;; find-fileもcounsel任せ！
+         ("C-x C-f" . counsel-find-file) ;; find-fileもcounsel任せ！
+         ("C-x C-r" . counsel-recentf))
   :config
   (defvar counsel-find-file-ignore-regexp (regexp-opt '("./" "../"))))
 
 (use-package swiper
   :bind (("C-s" . swiper))
   :config
-  (defvar swiper-include-line-number-in-search t) ;; line-numberでも検索可能
+  (setq swiper-include-line-number-in-search t) ;; line-numberでも検索可能
   ;; ;; migemo + swiper（日本語をローマ字検索できるようになる）
   ;; (require 'avy-migemo)
   ;; (avy-migemo-mode 1)
   ;; (require 'avy-migemo-e.g.swiper)
+  )
+
+(use-package symbol-overlay
+  :bind (("M-i" . symbol-overlay-put))
+  :config
+  (add-hook 'prog-mode-hook #'symbol-overlay-mode)
+  (add-hook 'markdown-mode-hook #'symbol-overlay-mode)
+  (define-key symbol-overlay-map (kbd "p") 'symbol-overlay-jump-prev) ;; 次のシンボルへ
+  (define-key symbol-overlay-map (kbd "n") 'symbol-overlay-jump-next) ;; 前のシンボルへ
+  (define-key symbol-overlay-map (kbd "C-g") 'symbol-overlay-remove-all) ;; ハイライトキャンセル
   )
 
 (use-package markdown-mode
