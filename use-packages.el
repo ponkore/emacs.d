@@ -81,6 +81,7 @@
 ;;       (setq i (1+ i)))))
 
 (use-package open-junk-file
+  :bind (("C-x j" . open-junk-file))
   :config
   (setq open-junk-file-format "~/Downloads/junk/%Y-%m-%d-%H%M%S."))
 

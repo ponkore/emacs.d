@@ -1,6 +1,6 @@
-;;;
-;;; my prefer key binding
-;;;
+;;
+;; my prefer key binding
+;;
 (mapcar
  '(lambda (l) (global-set-key (first l) (second l)))
  '(("\C-h" delete-backward-char)
@@ -10,7 +10,6 @@
    ("\C-x\C-n" next-error)
    ("\C-x\C-v" find-file-other-window)
    ("\C-x=" count-lines-page)
-   ("\C-xj" open-junk-file)
    ("\C-xn" myblog-hugo/create-draft)
    ("\C-xl" goto-line)
    ("\C-xg" grep)
