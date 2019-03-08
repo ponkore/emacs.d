@@ -23,6 +23,7 @@
   :bind (("C-s" . swiper))
   :config
   (setq swiper-include-line-number-in-search t) ;; line-numberでも検索可能
+  (define-key swiper-map (kbd "C-w") 'ivy-yank-word)
   ;; ;; migemo + swiper（日本語をローマ字検索できるようになる）
   ;; (require 'avy-migemo)
   ;; (avy-migemo-mode 1)
