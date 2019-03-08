@@ -17,12 +17,14 @@
          ("C-x C-f" . counsel-find-file) ;; find-fileもcounsel任せ！
          ("C-x C-r" . counsel-recentf))
   :config
-  (defvar counsel-find-file-ignore-regexp (regexp-opt '("./" "../"))))
+  (defvar counsel-find-file-ignore-regexp (regexp-opt '("./" "../")))
+  (bind-keys :map counsel-find-file-map ("C-l" . 'counsel-up-directory)))
 
 (use-package swiper
   :bind (("C-s" . swiper))
   :config
   (setq swiper-include-line-number-in-search t) ;; line-numberでも検索可能
+  (define-key swiper-map (kbd "C-w") 'ivy-yank-word)
   ;; ;; migemo + swiper（日本語をローマ字検索できるようになる）
   ;; (require 'avy-migemo)
   ;; (avy-migemo-mode 1)
