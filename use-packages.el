@@ -8,16 +8,16 @@
   (setq enable-recursive-minibuffers t)
   (setq ivy-height 20) ;; minibufferのサイズを拡大！（重要）
   (setq ivy-extra-directories nil)
-  (setq ivy-re-builders-alist
-        '((t . ivy--regex-plus)))
-  )
+  (setq ivy-re-builders-alist '((t . ivy--regex-plus)))
+  (setq ivy-extra-directories '("../" "./")))
 
 (use-package counsel
   :bind (("M-x" . counsel-M-x)
          ("C-x C-f" . counsel-find-file) ;; find-fileもcounsel任せ！
          ("C-x C-r" . counsel-recentf))
   :config
-  (defvar counsel-find-file-ignore-regexp (regexp-opt '("./" "../"))))
+  (defvar counsel-find-file-ignore-regexp (regexp-opt '("./" "../")))
+  (bind-keys :map counsel-find-file-map ("C-l" . 'counsel-up-directory)))
 
 (use-package swiper
   :bind (("C-s" . swiper))
