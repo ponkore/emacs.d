@@ -17,8 +17,7 @@
          ("C-x C-f" . counsel-find-file) ;; find-fileもcounsel任せ！
          ("C-x C-r" . counsel-recentf))
   :config
-  (defvar counsel-find-file-ignore-regexp (regexp-opt '("./" "../")))
-  (bind-keys :map counsel-find-file-map ("C-l" . 'counsel-up-directory)))
+  (defvar counsel-find-file-ignore-regexp (regexp-opt '("./" "../"))))
 
 (use-package swiper
   :bind (("C-s" . swiper))
