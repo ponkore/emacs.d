@@ -482,7 +482,6 @@
   :mode (("\\.ddl$" . sql-mode))
   :init
   (setq sql-product 'postgres)
-  (require 'yasnippet)
   (add-hook 'sql-mode-hook
             (lambda ()
               (yas-minor-mode-on)
@@ -490,6 +489,7 @@
               (define-key sql-mode-map (kbd "C-c \"") 'wrap-double-quote-thing-at-symbol)
               (define-key sql-mode-map (kbd "C-c ,") 'move-trailing-comma-to-line-start)))
   :config
+  (require 'yasnippet)
   (defun oracle-settings ()
     "setup oracle sql environment"
     ;; for SQL mode (My Office PC Oracle setting)
