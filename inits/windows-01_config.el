@@ -86,9 +86,9 @@
 ;;(set-face-attribute 'default nil :family "Consolas" :height 108)
 ;;(set-fontset-font nil 'japanese-jisx0208 (font-spec :family "MeiryoKe_Console"))
 (defun windows-emacs-font-setting (size)
-  "Set windows emacs japanese fonts(Meiryoke_Console mix Version)."
-  (let* ((asciifont "Meiryoke_Console")
-         (jpfont "Meiryoke_Console")
+  "Set windows emacs japanese fonts."
+  (let* ((asciifont "Hackgen") ;; was Meiryoke_Console
+         (jpfont "Hackgen") ;; was Meiryoke_Console
          (h (* size 10))
          (fontspec (font-spec :family asciifont))
          (jp-fontspec (font-spec :family jpfont)))
@@ -100,8 +100,8 @@
     (set-fontset-font nil 'katakana-jisx0201 jp-fontspec)
     (set-fontset-font nil '(#x0080 . #x024F) fontspec)
     (set-fontset-font nil '(#x0370 . #x03FF) fontspec)
-    (setq face-font-rescale-alist '(("MeiryoKe_Console" . 1.0)))))
+    (setq face-font-rescale-alist '(("Hackgen" . 1.0))))) ;; was MeiryoKe_Console
 
-(windows-emacs-font-setting 10)
+(windows-emacs-font-setting 11)
 ;;あいうえお あいうえお あいうえお あいうえお あいうえお あいうえお ◎●○①㈱
 ;;abcdefghij klmnopqrst uvwxyzABCD EFGHIJKLMN OPQRSTUVWX YZilO0     1234567890
