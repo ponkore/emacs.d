@@ -102,6 +102,6 @@
     (set-fontset-font nil '(#x0370 . #x03FF) fontspec)
     (setq face-font-rescale-alist '(("Hackgen" . 1.0))))) ;; was MeiryoKe_Console
 
-(windows-emacs-font-setting 11)
+(windows-emacs-font-setting 10)
 ;;あいうえお あいうえお あいうえお あいうえお あいうえお あいうえお ◎●○①㈱
 ;;abcdefghij klmnopqrst uvwxyzABCD EFGHIJKLMN OPQRSTUVWX YZilO0     1234567890

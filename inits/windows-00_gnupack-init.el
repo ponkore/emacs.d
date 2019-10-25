@@ -230,7 +230,6 @@
    (setq shell-file-name "bash.exe")
 
    ;; (M-! and M-| and compile.el)
-   (setq shell-file-name "bash.exe")
    (modify-coding-system-alist 'process ".*sh\\.exe" 'utf-8)
 
    ;; shellモードの時の^M抑制
