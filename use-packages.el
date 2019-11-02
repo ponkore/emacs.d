@@ -278,8 +278,10 @@
   :config
   (require 'yasnippet)
   (require 'projectile)
+  (require 'flycheck-joker)
   (add-hook 'clojure-mode-hook 'yas-minor-mode)
   (add-hook 'clojure-mode-hook 'smartparens-strict-mode)
+  (add-hook 'clojure-mode-hook 'flycheck-mode)
   (add-hook 'clojure-mode-hook (lambda () (define-key clojure-mode-map (kbd "C-c t") 'projectile-toggle-between-implementation-and-test)))
   (define-clojure-indent
        (defroutes 'defun)
