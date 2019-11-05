@@ -35,7 +35,9 @@
     (dart-mode flutter avy symbol-overlay counsel counsel-projectile ivy-yasnippet kotlin-mode arduino-mode company-arduino cider log4j-mode git-gutter-fringe git-gutter-fringe+ slime slime-company vue-mode htmlize smarty-mode company-php php-mode meghanada flycheck-joker web-mode tide typescript company-jedi jedi swift-mode rg go-eldoc go-mode go-projectile use-package graphviz-dot-mode company-racer racer yaml-mode swiper ssh sqlup-mode sql-indent smartparens smart-tabs-mode scss-mode sass-mode recentf-ext rainbow-delimiters py-autopep8 psvn projectile-codesearch powerline popwin pastels-on-dark-theme paredit packed ox-gfm ox-asciidoc open-junk-file markdown-mode magit lua-mode less-css-mode js2-mode japanese-holidays init-loader fsharp-mode flycheck-rust flycheck-pyflakes flycheck-pos-tip flx-ido expand-region elscreen-buffer-group elpy dired-k csharp-mode clojure-mode-extra-font-locking cargo auto-complete anzu adoc-mode)))
  '(safe-local-variable-values
    (quote
-    ((cider-default-cljs-repl . "(do (user/go) (user/cljs-repl))")
+    ((cider-ns-refresh-after-fn . "reloaded.repl/resume")
+     (cider-ns-refresh-before-fn . "reloaded.repl/suspend")
+     (cider-default-cljs-repl . "(do (user/go) (user/cljs-repl))")
      (cider-cljs-lein-repl . "(do (user/go) (user/cljs-repl))")
      (cider-cljs-lein-repl . "(do (dev) (go) (cljs-repl))")
      (cider-refresh-after-fn . "reloaded.repl/resume")
