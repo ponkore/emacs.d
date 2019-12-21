@@ -225,12 +225,11 @@
 ;; ------------------------------------------------------------------------
 ;; @ shell
    (require 'shell)
-   (setq explicit-shell-file-name "bash.exe")
-   (setq shell-command-switch "-c")
-   (setq shell-file-name "bash.exe")
+   ;; (setq explicit-shell-file-name "bash.exe")
+   ;; (setq shell-command-switch "-c")
+   ;; (setq shell-file-name "bash.exe")
 
    ;; (M-! and M-| and compile.el)
-   (setq shell-file-name "bash.exe")
    (modify-coding-system-alist 'process ".*sh\\.exe" 'utf-8)
 
    ;; shellモードの時の^M抑制
@@ -245,8 +244,10 @@
 
    (add-hook 'shell-mode-hook (lambda ()
                                 ;; シェルモードの入出力文字コード(cp932 -> utf-8)
-                                (set-buffer-process-coding-system 'utf-8-dos 'utf-8-unix)
-                                (set-buffer-file-coding-system    'utf-8-unix)
+                                ;; (set-buffer-process-coding-system 'utf-8-dos 'utf-8-unix)
+                                ;; (set-buffer-file-coding-system    'utf-8-unix)
+                                (set-buffer-process-coding-system 'cp932 'cp932)
+                                (set-buffer-file-coding-system    'cp932)
                                 ))
 
 ;; ------------------------------------------------------------------------
