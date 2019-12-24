@@ -52,4 +52,3 @@
 # --
 $0")
  '(yas-prompt-functions (quote (my-yas/prompt))))
-
