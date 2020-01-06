@@ -140,7 +140,12 @@
               (setq indent-tabs-mode nil))))
 
 (use-package rst
-  :defer t)
+  :defer t
+  :mode (("\\.\\(rst|rest\\)$" . rst-mode))
+  :init
+  (add-hook 'rst-mode-hook '(lambda ()
+                              (setq indent-tabs-mode nil)
+                              (setq frame-background-mode 'dark))))
 
 ;; (let ((i 1))
 ;;   (while (<= i rst-level-face-max)
