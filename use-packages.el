@@ -4,20 +4,88 @@
 (use-package ivy
   :bind (:map ivy-minibuffer-map ("C-l" . ivy-backward-delete-char))
   :config
-  (ivy-mode 1)
+  (when (require 'ivy-hydra nil t)
+    (setq ivy-read-action-function #'ivy-hydra-read-action))
   (setq ivy-use-virtual-buffers t)
-  (setq enable-recursive-minibuffers t)
+  (when (setq enable-recursive-minibuffers t)
+    (minibuffer-depth-indicate-mode 1))
   (setq ivy-height 20) ;; minibufferのサイズを拡大！（重要）
   (setq ivy-extra-directories nil)
+  (setq ivy-wrap t)
   (setq ivy-re-builders-alist '((t . ivy--regex-plus)))
-  (setq ivy-extra-directories '("../" "./")))
+  (setq ivy-extra-directories '("../" "./"))
+  (setq ivy-count-format "(%d/%d) ")
+
+  (defface my-ivy-arrow-visible
+    '((((class color) (background light)) :foreground "orange")
+      (((class color) (background dark)) :foreground "#EE6363"))
+    "Face used by Ivy for highlighting the arrow.")
+
+  (defface my-ivy-arrow-invisible
+    '((((class color) (background light)) :foreground "#FFFFFF")
+      (((class color) (background dark)) :foreground "#31343F"))
+    "Face used by Ivy for highlighting the invisible arrow.")
+
+  (if window-system
+      (when (require 'all-the-icons nil t)
+        (defun my-ivy-format-function-arrow (cands)
+          "Transform CANDS into a string for minibuffer."
+          (ivy--format-function-generic
+           (lambda (str)
+             (concat (all-the-icons-faicon
+                      "hand-o-right"
+                      :v-adjust -0.2 :face 'my-ivy-arrow-visible)
+                     " " (ivy--add-face str 'ivy-current-match)))
+           (lambda (str)
+             (concat (all-the-icons-faicon
+                      "hand-o-right" :face 'my-ivy-arrow-invisible) " " str))
+           cands
+           "\n"))
+        (require 'all-the-icons-ivy nil t)
+        (setq ivy-format-functions-alist
+              '((t . my-ivy-format-function-arrow)))
+        (add-to-list 'all-the-icons-ivy-buffer-commands
+                     'counsel-projectile-switch-project)
+        (add-to-list 'all-the-icons-ivy-buffer-commands
+                     'counsel-ibuffer)
+        (all-the-icons-ivy-setup))
+    (setq ivy-format-functions-alist '((t . ivy-format-function-arrow))))
+
+  (ivy-mode 1))
 
 (use-package counsel
   :bind (("M-x" . counsel-M-x)
          ("C-x C-f" . counsel-find-file) ;; find-fileもcounsel任せ！
+         ("C-x C-b" . counsel-ibuffer)
          ("C-x C-r" . counsel-recentf))
   :config
-  (defvar counsel-find-file-ignore-regexp (regexp-opt '("./" "../"))))
+  (defvar counsel-find-file-ignore-regexp (regexp-opt '("./" "../")))
+  (defun ad:counsel-recentf ()
+    "Find a file on `recentf-list'."
+    (interactive)
+    (require 'recentf)
+    (recentf-mode)
+    (ivy-read "Recentf: "
+              (progn
+                (mapcar #'substring-no-properties recentf-list) ;; no need?
+                (mapcar #'abbreviate-file-name recentf-list)) ;; ~/
+              :action (lambda (f)
+                        (with-ivy-window
+                          (find-file f)))
+              :require-match t
+              :caller 'counsel-recentf))
+  (advice-add 'counsel-recentf :override #'ad:counsel-recentf))
+
+(use-package smex
+  :config
+  (setq smex-history-length 35)
+  (setq smex-completion-method 'ivy)
+  (setq ivy-initial-inputs-alist
+        '((org-agenda-refile . "^")
+          (org-capture-refile . "^")
+          ;; (counsel-M-x . "^") ;; 削除．必要に応じて他のコマンドも除外する．
+          (counsel-describe-function . "^")
+          (counsel-describe-variable . "^"))))
 
 (use-package swiper
   :bind (("C-s" . swiper))
