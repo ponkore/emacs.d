@@ -18,7 +18,6 @@
  '(font-lock-preprocessor-face ((t (:foreground "steel blue"))))
  '(font-lock-variable-name-face ((t (:foreground "DodgerBlue1"))))
  '(hl-line ((t (:underline "textBackgroundColor"))))
- ;; see https://laclefyoshi.hatenablog.com/entry/20100922/1285125722
  '(rst-level-1-face ((t (:foreground "LightSkyBlue"))) t)
  '(rst-level-2-face ((t (:foreground "LightGoldenrod"))) t)
  '(rst-level-3-face ((t (:foreground "Cyan1"))) t)
@@ -41,7 +40,7 @@
  '(helm-truncate-lines t t)
  '(package-selected-packages
    (quote
-    (cider tide company-quickhelp magit inf-clojure let-alist editorconfig dart-mode avy symbol-overlay counsel counsel-projectile ivy-yasnippet kotlin-mode arduino-mode company-arduino log4j-mode git-gutter-fringe git-gutter-fringe+ slime slime-company vue-mode htmlize smarty-mode company-php meghanada flycheck-joker web-mode typescript company-jedi jedi swift-mode rg go-eldoc go-projectile use-package graphviz-dot-mode company-racer racer yaml-mode ssh sqlup-mode sql-indent smartparens smart-tabs-mode scss-mode sass-mode recentf-ext rainbow-delimiters py-autopep8 psvn projectile-codesearch powerline popwin pastels-on-dark-theme paredit packed ox-gfm ox-asciidoc open-junk-file markdown-mode lua-mode less-css-mode js2-mode japanese-holidays init-loader flycheck-rust flycheck-pyflakes flycheck-pos-tip flx-ido expand-region elscreen-buffer-group elpy dired-k csharp-mode clojure-mode-extra-font-locking auto-complete anzu adoc-mode)))
+    (all-the-icons all-the-icons-dired all-the-icons-ivy cider tide company-quickhelp magit inf-clojure let-alist editorconfig dart-mode avy symbol-overlay counsel counsel-projectile ivy-yasnippet kotlin-mode arduino-mode company-arduino log4j-mode git-gutter-fringe git-gutter-fringe+ slime slime-company vue-mode htmlize smarty-mode company-php meghanada flycheck-joker web-mode typescript company-jedi jedi swift-mode rg go-eldoc go-projectile use-package graphviz-dot-mode company-racer racer yaml-mode ssh sqlup-mode sql-indent smartparens smart-tabs-mode scss-mode sass-mode recentf-ext rainbow-delimiters py-autopep8 psvn projectile-codesearch powerline popwin pastels-on-dark-theme paredit packed ox-gfm ox-asciidoc open-junk-file markdown-mode lua-mode less-css-mode js2-mode japanese-holidays init-loader flycheck-rust flycheck-pyflakes flycheck-pos-tip flx-ido expand-region elscreen-buffer-group elpy dired-k csharp-mode clojure-mode-extra-font-locking auto-complete anzu adoc-mode)))
  '(safe-local-variable-values
    (quote
     ((cider-ns-refresh-after-fn . "reloaded.repl/resume")
