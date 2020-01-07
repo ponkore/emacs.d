@@ -31,6 +31,8 @@
   (ivy-mode 1))
 
 (use-package all-the-icons
+  :custom
+  (all-the-icons-scale-factor 1.0)
   :config
   (when window-system
     (defun my-ivy-format-function-arrow (cands)
@@ -98,6 +100,23 @@
   ;; (avy-migemo-mode 1)
   ;; (require 'avy-migemo-e.g.swiper)
   )
+
+(use-package doom-modeline
+  :commands (doom-modeline-def-modeline)
+  :custom
+  (doom-modeline-buffer-file-name-style 'truncate-with-project)
+  (doom-modeline-icon t)
+  (doom-modeline-major-mode-icon nil)
+  (doom-modeline-minor-modes nil)
+  :hook
+  (after-init . doom-modeline-mode)
+  :config
+  (line-number-mode 0)
+  (column-number-mode 0)
+  (doom-modeline-def-modeline
+    'main
+    '(bar workspace-number window-number evil-state ryo-modal xah-fly-keys matches buffer-info remote-host buffer-position parrot selection-info)
+    '(misc-info persp-name debug minor-modes input-method major-mode process vcs checker)))
 
 (use-package symbol-overlay
   :bind (("M-i" . symbol-overlay-put))
