@@ -26,32 +26,33 @@
       (((class color) (background dark)) :foreground "#31343F"))
     "Face used by Ivy for highlighting the invisible arrow.")
 
-  (if window-system
-      (when (require 'all-the-icons nil t)
-        (defun my-ivy-format-function-arrow (cands)
-          "Transform CANDS into a string for minibuffer."
-          (ivy--format-function-generic
-           (lambda (str)
-             (concat (all-the-icons-faicon
-                      "hand-o-right"
-                      :v-adjust -0.2 :face 'my-ivy-arrow-visible)
-                     " " (ivy--add-face str 'ivy-current-match)))
-           (lambda (str)
-             (concat (all-the-icons-faicon
-                      "hand-o-right" :face 'my-ivy-arrow-invisible) " " str))
-           cands
-           "\n"))
-        (require 'all-the-icons-ivy nil t)
-        (setq ivy-format-functions-alist
-              '((t . my-ivy-format-function-arrow)))
-        (add-to-list 'all-the-icons-ivy-buffer-commands
-                     'counsel-projectile-switch-project)
-        (add-to-list 'all-the-icons-ivy-buffer-commands
-                     'counsel-ibuffer)
-        (all-the-icons-ivy-setup))
-    (setq ivy-format-functions-alist '((t . ivy-format-function-arrow))))
+    (setq ivy-format-functions-alist '((t . ivy-format-function-arrow)))
 
   (ivy-mode 1))
+
+(use-package all-the-icons
+  :config
+  (when window-system
+    (defun my-ivy-format-function-arrow (cands)
+      "Transform CANDS into a string for minibuffer."
+      (ivy--format-function-generic
+       (lambda (str)
+         (concat (all-the-icons-faicon
+                  "hand-o-right"
+                  :v-adjust -0.2 :face 'my-ivy-arrow-visible)
+                 " " (ivy--add-face str 'ivy-current-match)))
+       (lambda (str)
+         (concat (all-the-icons-faicon
+                  "hand-o-right" :face 'my-ivy-arrow-invisible) " " str))
+       cands
+       "\n"))
+    (require 'ivy nil t)
+    (require 'all-the-icons-ivy nil t)
+    (setq ivy-format-functions-alist '((t . my-ivy-format-function-arrow)))
+    (add-to-list 'all-the-icons-ivy-buffer-commands 'counsel-projectile-switch-project)
+    (add-to-list 'all-the-icons-ivy-buffer-commands 'counsel-ibuffer)
+    (all-the-icons-ivy-setup)
+    (setq ivy-format-functions-alist '((t . ivy-format-function-arrow)))))
 
 (use-package counsel
   :bind (("M-x" . counsel-M-x)
@@ -151,6 +152,13 @@
   (setq company-idle-delay .3)
   (setq company-echo-delay 0)
   (setq company-begin-commands '(self-insert-command)))
+
+(use-package company-box
+  :after (company all-the-icons)
+  :hook ((company-mode . company-box-mode))
+  :custom
+  (company-box-icons-alist 'company-box-icons-all-the-icons)
+  (company-box-doc-enable nil))
 
 (use-package magit
   :config

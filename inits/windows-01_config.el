@@ -89,7 +89,7 @@
   "Set windows emacs japanese fonts."
   (let* ((asciifont "Hackgen") ;; was Meiryoke_Console
          (jpfont "Hackgen") ;; was Meiryoke_Console
-         (h (* size 10))
+         (h (round (* size 10)))
          (fontspec (font-spec :family asciifont))
          (jp-fontspec (font-spec :family jpfont)))
     (set-face-attribute 'default nil :family asciifont :height h)
@@ -100,6 +100,13 @@
     (set-fontset-font nil 'katakana-jisx0201 jp-fontspec)
     (set-fontset-font nil '(#x0080 . #x024F) fontspec)
     (set-fontset-font nil '(#x0370 . #x03FF) fontspec)
+    (when (require 'all-the-icons nil t)
+      (set-fontset-font nil 'unicode (font-spec :family (all-the-icons-alltheicon-family)) nil 'append)
+      (set-fontset-font nil 'unicode (font-spec :family (all-the-icons-material-family)) nil 'append)
+      (set-fontset-font nil 'unicode (font-spec :family (all-the-icons-fileicon-family)) nil 'append)
+      (set-fontset-font nil 'unicode (font-spec :family (all-the-icons-faicon-family)) nil 'append)
+      (set-fontset-font nil 'unicode (font-spec :family (all-the-icons-octicon-family)) nil 'append)
+      (set-fontset-font nil 'unicode (font-spec :family (all-the-icons-wicon-family)) nil 'append))
     (setq face-font-rescale-alist '(("Hackgen" . 1.0))))) ;; was MeiryoKe_Console
 
 (windows-emacs-font-setting 10)
