@@ -1,3 +1,13 @@
+(require 'leaf)
+
+(leaf leaf-keywords
+  :require t
+  :config
+  (leaf-keywords-init))
+
+(leaf diminish :straight t)
+(leaf hydra :straight t)
+
 ;;
 ;; ivy (https://qiita.com/blue0513/items/c0dc35a880170997c3f5)
 ;;
@@ -115,7 +125,8 @@
   (column-number-mode 0)
   (doom-modeline-def-modeline
     'main
-    '(bar workspace-number window-number evil-state ryo-modal xah-fly-keys matches buffer-info remote-host buffer-position parrot selection-info)
+    '(workspace-number bar window-number evil-state ryo-modal xah-fly-keys matches buffer-info remote-host buffer-position parrot selection-info)
+    ;; '(bar window-number matches buffer-info remote-host buffer-position selection-info)
     '(misc-info persp-name debug minor-modes input-method major-mode process vcs checker)))
 
 (use-package symbol-overlay
