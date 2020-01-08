@@ -176,10 +176,11 @@
                            (face-remap-set-base 'comint-highlight-prompt :inherit nil)))))
 
   (leaf *dired
+    :config
     (leaf dired-k
       :straight t)
     (leaf dired
-      :afer dired-k
+      :after dired-k
       :bind
       (:dired-mode-map
        ("V" . dired-vc-status)
