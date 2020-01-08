@@ -502,8 +502,8 @@
       :straight t
       :after racer
       :custom
-      (racer-cmd . "~/.cargo/bin/racer")
-      (racer-rust-src-path . "~/.multirust/toolchains/stable-x86_64-apple-darwin/lib/rustlib/src/rust/src/")
+      (racer-cmd . `(expand-file-name "~/.cargo/bin/racer"))
+      (racer-rust-src-path . `(expand-file-name "~/.multirust/toolchains/stable-x86_64-apple-darwin/lib/rustlib/src/rust/src/"))
       (rust-format-on-save . t)
       :hook
       (rust-mode-hook . (lambda () (racer-mode) (flycheck-mode)))
