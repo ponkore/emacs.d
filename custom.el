@@ -66,8 +66,7 @@
  '(ivy-wrap t)
  '(line-number-mode 0)
  '(package-selected-packages
-   (quote
-    (diminish leaf-keywords leaf doom-modeline company-box smex ivy-hydra which-key-posframe all-the-icons all-the-icons-dired all-the-icons-ivy cider tide company-quickhelp magit inf-clojure let-alist editorconfig dart-mode avy symbol-overlay counsel counsel-projectile ivy-yasnippet kotlin-mode arduino-mode company-arduino log4j-mode git-gutter-fringe git-gutter-fringe+ slime slime-company vue-mode htmlize smarty-mode company-php meghanada flycheck-joker web-mode typescript company-jedi jedi swift-mode rg go-eldoc go-projectile use-package graphviz-dot-mode company-racer racer yaml-mode ssh sqlup-mode sql-indent smartparens smart-tabs-mode scss-mode sass-mode recentf-ext rainbow-delimiters py-autopep8 psvn projectile-codesearch powerline popwin pastels-on-dark-theme paredit packed ox-gfm ox-asciidoc open-junk-file markdown-mode lua-mode less-css-mode js2-mode japanese-holidays init-loader flycheck-rust flycheck-pyflakes flycheck-pos-tip flx-ido expand-region elscreen-buffer-group elpy dired-k csharp-mode clojure-mode-extra-font-locking auto-complete anzu adoc-mode)))
+   (quote (init-loader leaf leaf-keywords pastels-on-dark-theme)))
  '(projectile-completion-system (quote ivy) t)
  '(projectile-enable-caching t t)
  '(projectile-enable-idle-timer nil t)
