@@ -68,9 +68,3 @@
 (init-loader-load "~/.emacs.d/inits")
 
 (load (expand-file-name "~/.emacs.d/use-packages.el") t)
-
-;; anzu
-(global-anzu-mode 1)
-
-;; server
-(server-start)
