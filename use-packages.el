@@ -327,7 +327,7 @@
       :mode ("\\(default\\|user\\|emacs\\)\.\\(behaviors\\|keymap\\)" . clojure-mode)
       :hook
       (clojure-mode-hook . yas-minor-mode)
-      (clojure-mode-hook . smarparens-strict-mode)
+      (clojure-mode-hook . smartparens-strict-mode)
       (clojure-mode-hook . flycheck-mode)
       :config
       (define-clojure-indent
