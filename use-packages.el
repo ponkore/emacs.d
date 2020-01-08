@@ -300,7 +300,8 @@
         (setq-local company-idle-delay 0.2)
         (setq-local company-backends '(company-semantic company-files company-elisp))
         (setq-local show-paren-style 'expression)
-        (set-newline-and-indent))
+        ;; (set-newline-and-indent)
+	)
       :hook
       (emacs-lisp-mode-hook . my:emacs-lisp-hooks)))
 
