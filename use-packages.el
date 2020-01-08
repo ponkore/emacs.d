@@ -11,215 +11,345 @@
 ;;
 ;; ivy (https://qiita.com/blue0513/items/c0dc35a880170997c3f5)
 ;;
-(use-package ivy
-  :bind (:map ivy-minibuffer-map ("C-l" . ivy-backward-delete-char))
+(leaf *interactive-search
   :config
-  (when (require 'ivy-hydra nil t)
-    (setq ivy-read-action-function #'ivy-hydra-read-action))
-  (setq ivy-use-virtual-buffers t)
-  (when (setq enable-recursive-minibuffers t)
-    (minibuffer-depth-indicate-mode 1))
-  (setq ivy-height 20) ;; minibufferのサイズを拡大！（重要）
-  (setq ivy-extra-directories nil)
-  (setq ivy-wrap t)
-  (setq ivy-re-builders-alist '((t . ivy--regex-plus)))
-  (setq ivy-extra-directories '("../" "./"))
-  (setq ivy-count-format "(%d/%d) ")
 
-  (defface my-ivy-arrow-visible
-    '((((class color) (background light)) :foreground "orange")
-      (((class color) (background dark)) :foreground "#EE6363"))
-    "Face used by Ivy for highlighting the arrow.")
+  (leaf ivy
+    :straight t
+    :diminish t
+    :custom
+    (ivy-use-virtual-buffers . t)
+    (ivy-height . 20)
+    (ivy-extra-directories . nil)
+    (ivy-wrap . t)
+    (ivy-re-builders-alist . '((t . ivy--regex-plus)))
+    (ivy-extra-directories . '("../" "./"))
+    (ivy-count-format . "(%d/%d) ")
+    (ivy-format-functions-alist . '((t . ivy-format-function-arrow)))
+    :bind (:ivy-minibuffer-map ("C-l" . ivy-backward-delete-char))
+    :hook (emacs-startup-hook . ivy-mode)
+    :config
+    (when (require 'ivy-hydra nil t)
+      (setq ivy-read-action-function #'ivy-hydra-read-action))
+    (when (setq enable-recursive-minibuffers t)
+      (minibuffer-depth-indicate-mode 1))
+    (defface my-ivy-arrow-visible
+      '((((class color) (background light)) :foreground "orange")
+        (((class color) (background dark)) :foreground "#EE6363"))
+      "Face used by Ivy for highlighting the arrow.")
+    (defface my-ivy-arrow-invisible
+      '((((class color) (background light)) :foreground "#FFFFFF")
+        (((class color) (background dark)) :foreground "#31343F"))
+      "Face used by Ivy for highlighting the invisible arrow."))
 
-  (defface my-ivy-arrow-invisible
-    '((((class color) (background light)) :foreground "#FFFFFF")
-      (((class color) (background dark)) :foreground "#31343F"))
-    "Face used by Ivy for highlighting the invisible arrow.")
+  (leaf ivy-rich
+    :straight t
+    :hook (emacs-startup-hook . ivy-rich-mode)
+    :config
+    (defun ivy-rich-switch-buffer-icon (candidate)
+      (with-current-buffer
+          (get-buffer candidate)
+        (let ((icon (all-the-icons-icon-for-mode major-mode)))
+          (if (symbolp icon)
+              (all-the-icons-icon-for-mode 'fundamental-mode)
+            icon))))
 
-    (setq ivy-format-functions-alist '((t . ivy-format-function-arrow)))
+    (let ((rich-transformer-config '(:columns
+                                     ((ivy-rich-switch-buffer-icon :width 2)
+                                      (ivy-rich-candidate (:width 30))
+                                      (ivy-rich-switch-buffer-size (:width 7))
+                                      (ivy-rich-switch-buffer-indicators (:width 4 :face error :align right))
+                                      (ivy-rich-switch-buffer-major-mode (:width 12 :face warning))
+                                      (ivy-rich-switch-buffer-path (:width (lambda (x) (ivy-rich-switch-buffer-shorten-path x (ivy-rich-minibuffer-width 0.3))))))
+                                     :predicate
+                                     (lambda (cand) (get-buffer cand)))))
+      (plist-put ivy-rich-display-transformers-list
+                 'ivy-switch-buffer
+                 rich-transformer-config)
+      (plist-put ivy-rich-display-transformers-list
+                 'ivy-switch-buffer-other-window
+                 rich-transformer-config)))
 
-  (ivy-mode 1))
+  (leaf counsel
+    :straight t
+    :bind
+    ("M-x" . counsel-M-x)
+    ("C-x C-f" . counsel-find-file)
+    ("C-x C-b" . counsel-ibuffer)
+    ("C-x C-r" . counsel-recentf)
+    :custom
+    (counsel-find-file-ignore-regexp . (regexp-opt '("./" "../")))
+    :config
+    (defun ad:counsel-recentf ()
+      "Find a file on `recentf-list'."
+      (interactive)
+      (require 'recentf)
+      (recentf-mode)
+      (ivy-read "Recentf: "
+                (progn
+                  (mapcar #'substring-no-properties recentf-list) ;; no need?
+                  (mapcar #'abbreviate-file-name recentf-list)) ;; ~/
+                :action (lambda (f)
+                          (with-ivy-window
+                            (find-file f)))
+                :require-match t
+                :caller 'counsel-recentf))
+    (advice-add 'counsel-recentf :override #'ad:counsel-recentf))
 
-(use-package all-the-icons
-  :custom
-  (all-the-icons-scale-factor 1.0)
-  :config
-  (when window-system
-    (defun my-ivy-format-function-arrow (cands)
-      "Transform CANDS into a string for minibuffer."
-      (ivy--format-function-generic
-       (lambda (str)
-         (concat (all-the-icons-faicon
-                  "hand-o-right"
-                  :v-adjust -0.2 :face 'my-ivy-arrow-visible)
-                 " " (ivy--add-face str 'ivy-current-match)))
-       (lambda (str)
-         (concat (all-the-icons-faicon
-                  "hand-o-right" :face 'my-ivy-arrow-invisible) " " str))
-       cands
-       "\n"))
-    (require 'ivy nil t)
-    (require 'all-the-icons-ivy nil t)
-    (setq ivy-format-functions-alist '((t . my-ivy-format-function-arrow)))
-    (add-to-list 'all-the-icons-ivy-buffer-commands 'counsel-projectile-switch-project)
-    (add-to-list 'all-the-icons-ivy-buffer-commands 'counsel-ibuffer)
-    (all-the-icons-ivy-setup)
-    (setq ivy-format-functions-alist '((t . ivy-format-function-arrow)))))
+  (leaf swiper
+    :straight t
+    :bind
+    ("C-s" . swiper)
+    (:swiper-map ("C-w" . ivy-yank-word))
+    :custom (swiper-include-line-number-in-search . t))
 
-(use-package counsel
-  :bind (("M-x" . counsel-M-x)
-         ("C-x C-f" . counsel-find-file) ;; find-fileもcounsel任せ！
-         ("C-x C-b" . counsel-ibuffer)
-         ("C-x C-r" . counsel-recentf))
-  :config
-  (defvar counsel-find-file-ignore-regexp (regexp-opt '("./" "../")))
-  (defun ad:counsel-recentf ()
-    "Find a file on `recentf-list'."
-    (interactive)
-    (require 'recentf)
-    (recentf-mode)
-    (ivy-read "Recentf: "
-              (progn
-                (mapcar #'substring-no-properties recentf-list) ;; no need?
-                (mapcar #'abbreviate-file-name recentf-list)) ;; ~/
-              :action (lambda (f)
-                        (with-ivy-window
-                          (find-file f)))
-              :require-match t
-              :caller 'counsel-recentf))
-  (advice-add 'counsel-recentf :override #'ad:counsel-recentf))
-
-(use-package smex
-  :config
-  (setq smex-history-length 35)
-  (setq smex-completion-method 'ivy)
-  (setq ivy-initial-inputs-alist
-        '((org-agenda-refile . "^")
-          (org-capture-refile . "^")
-          ;; (counsel-M-x . "^") ;; 削除．必要に応じて他のコマンドも除外する．
-          (counsel-describe-function . "^")
-          (counsel-describe-variable . "^"))))
-
-(use-package swiper
-  :bind (("C-s" . swiper))
-  :config
-  (setq swiper-include-line-number-in-search t) ;; line-numberでも検索可能
-  (define-key swiper-map (kbd "C-w") 'ivy-yank-word)
-  ;; ;; migemo + swiper（日本語をローマ字検索できるようになる）
+  ;; TODO migemo + swiper（日本語をローマ字検索できるようになる）
   ;; (require 'avy-migemo)
   ;; (avy-migemo-mode 1)
   ;; (require 'avy-migemo-e.g.swiper)
   )
 
-(use-package doom-modeline
-  :commands (doom-modeline-def-modeline)
-  :custom
-  (doom-modeline-buffer-file-name-style 'truncate-with-project)
-  (doom-modeline-icon t)
-  (doom-modeline-major-mode-icon nil)
-  (doom-modeline-minor-modes nil)
-  :hook
-  (after-init . doom-modeline-mode)
+(leaf *modelines
   :config
-  (line-number-mode 0)
-  (column-number-mode 0)
-  (doom-modeline-def-modeline
-    'main
-    '(workspace-number bar window-number evil-state ryo-modal xah-fly-keys matches buffer-info remote-host buffer-position parrot selection-info)
-    ;; '(bar window-number matches buffer-info remote-host buffer-position selection-info)
-    '(misc-info persp-name debug minor-modes input-method major-mode process vcs checker)))
 
-(use-package symbol-overlay
-  :bind (("M-i" . symbol-overlay-put))
+  (leaf doom-modeline
+    :straight t
+    :commands (doom-modeline-def-modeline)
+    :custom
+    (doom-modeline-buffer-file-name-style . 'truncate-with-project)
+    (doom-modeline-icon . t)
+    (doom-modeline-major-mode-icon . nil)
+    (doom-modeline-minor-modes . nil)
+    (line-number-mode . 0)
+    (column-number-mode . 0)
+    :hook (emacs-startup-hook . doom-modeline-mode)
+    :config
+    (doom-modeline-def-modeline
+      'main
+      ;; '(workspace-number bar window-number evil-state ryo-modal xah-fly-keys matches buffer-info remote-host buffer-position parrot selection-info)
+      '(bar matches buffer-info buffer-position selection-info)
+      '(misc-info debug minor-modes input-method major-mode process vcs checker))))
+
+(leaf *utility-package
   :config
-  (add-hook 'prog-mode-hook #'symbol-overlay-mode)
-  (add-hook 'markdown-mode-hook #'symbol-overlay-mode)
-  (define-key symbol-overlay-map (kbd "p") 'symbol-overlay-jump-prev) ;; 次のシンボルへ
-  (define-key symbol-overlay-map (kbd "n") 'symbol-overlay-jump-next) ;; 前のシンボルへ
-  (define-key symbol-overlay-map (kbd "C-g") 'symbol-overlay-remove-all) ;; ハイライトキャンセル
+
+  (leaf all-the-icons
+    :straight t
+    :custom
+    (all-the-icons-scale-factor . 1.0)
+    :config
+    (when window-system
+      (defun my-ivy-format-function-arrow (cands)
+        "Transform CANDS into a string for minibuffer."
+        (ivy--format-function-generic
+         (lambda (str)
+           (concat (all-the-icons-faicon
+                    "hand-o-right"
+                    :v-adjust -0.2 :face 'my-ivy-arrow-visible)
+                   " " (ivy--add-face str 'ivy-current-match)))
+         (lambda (str)
+           (concat (all-the-icons-faicon
+                    "hand-o-right" :face 'my-ivy-arrow-invisible) " " str))
+         cands
+         "\n"))
+      (require 'ivy nil t)
+      (require 'all-the-icons-ivy nil t)
+      (setq ivy-format-functions-alist '((t . my-ivy-format-function-arrow)))
+      (add-to-list 'all-the-icons-ivy-buffer-commands 'counsel-projectile-switch-project)
+      (add-to-list 'all-the-icons-ivy-buffer-commands 'counsel-ibuffer)
+      (all-the-icons-ivy-setup)
+      (setq ivy-format-functions-alist '((t . ivy-format-function-arrow)))))
+
+  (leaf s
+    :straight t
+    :commands s-join))
+
+(leaf *major-mode
+  :config
+
+  (leaf magit
+    :straight t
+    :hook (magit-mode-hook . my:magit-setup-diff)
+    :config
+    (defun magit-expand-git-file-name--msys (args)
+      "Handle Msys directory names such as /c/* by changing them to C:/*"
+      (let ((filename (car args)))
+        (when (string-match "^/\\([a-z]\\)/\\(.*\\)" filename)
+          (setq filename (concat (match-string 1 filename) ":/"
+                                 (match-string 2 filename))))
+        (list filename)))
+    (advice-add 'magit-expand-git-file-name :filter-args #'magit-expand-git-file-name--msys)
+    ;; diff関連の設定
+    ;; 2012-04-02
+    (defun my:magit-setup-diff ()
+      ;; diffを表示しているときに文字単位での変更箇所も強調表示する
+      ;; 'allではなくtにすると現在選択中のhunkのみ強調表示する
+      ;; 2012-04-02
+      (setq magit-diff-refine-hunk 'all)
+      ;; diff用のfaceを設定する
+      ;; 2012-04-02
+      (diff-mode-setup-faces)))
+
+  (leaf markdown-mode
+    :straight t
+    :mode ("\\.\\(markdown\\|md\\)\\.txt\\'" . markdown-mode)
+    :config
+    (defface markdown-inline-code-face
+      '((t (:inherit (markdown-code-face font-lock-constant-face))))
+      "Face for inline code."
+      :group 'markdown-faces))
+
+  (use-package rst
+    :straight t
+    :mode ("\\.\\(rst|rest\\)$" . rst-mode)
+    :hook (rst-mode-hook . (lambda ()
+                             (setq indent-tabs-mode nil)
+                             (setq frame-background-mode 'dark))))
+  ;; (let ((i 1))
+  ;;   (while (<= i rst-level-face-max)
+  ;;     (let ((face-name (intern (format "rst-level-%d-face" i))))
+  ;;       (set-face-background face-name nil)
+  ;;       (setq i (1+ i)))))
   )
 
-(use-package company
-  :bind (("C-c y" . company-yasnippet)
-         ("C-M-i" . company-complete))
+(leaf *minor-mode
   :config
-  (global-company-mode)
-  (company-quickhelp-mode 1)
 
-  ;;
-  ;; http://qiita.com/syohex/items/8d21d7422f14e9b53b17
-  ;;
+  (leaf yasnippet
+    :straight t
+    :bind (:yas-minor-mode-map
+           ("TAB" . nil)
+           ("<tab>" . nil)
+           ("<C-tab>" . yas-expand)
+           ("C-x i i" . yas-insert-snippet)
+           ("C-x i n" . yas-new-snippet)
+           ("C-x i v" . yas-visit-snippet-file))
+    :commands yas-expand yas-global-mode yas-insert-snippet yas-visit-snippet-file
+    :hook (emacs-startup-hook . yas-global-mode))
 
-  ;; C-n, C-pで補完候補を次/前の候補を選択
-  (define-key company-active-map (kbd "C-n") 'company-select-next)
-  (define-key company-active-map (kbd "C-p") 'company-select-previous)
-  (define-key company-search-map (kbd "C-n") 'company-select-next)
-  (define-key company-search-map (kbd "C-p") 'company-select-previous)
+  (leaf symbol-overlay
+    :straight t
+    :bind
+    ("M-i" . symbol-overlay-put)
+    (:symbol-overlay-map
+     ("p" . symbol-overlay-jump-prev)
+     ("n" . symbol-overlay-jump-next)
+     ("C-g" . symbol-overlay-remove-all))
+    :hook
+    (prog-mode-hook . symbol-overlay-mode)
+    (markdown-mode-hook . symbol-overlay-mode))
 
-  ;; C-sで絞り込む
-  (define-key company-active-map (kbd "C-s") 'company-filter-candidates)
+  (leaf smartparens
+    :straight t
+    :commands smartparens-global-mode sp-local-pairs
+    :hook (emacs-startup-hook . smartparens-global-mode)
+    :config
+    (sp-local-pair 'emacs-lisp-mode "'" nil :actions nil)
+    (sp-local-pair 'lisp-mode "'" nil :actions nil)
+    (sp-local-pair 'lisp-mode "`" nil :actions nil))
 
-  ;; 1つしか候補がなかったらtabで補完、複数候補があればtabで次の候補へ行くように
-  (define-key company-active-map (kbd "<tab>") 'company-complete-common-or-cycle)
-  ;; (define-key company-active-map (kbd "C-i") 'company-complete-selection)
+  (leaf expand-region
+    :straight t
+    :commands er/expand-region
+    :bind ("C-=" . er/expand-region))
+  )
 
-  ;; C-hがデフォルトでドキュメント表示にmapされているので、文字を消せるようにmapを外す
-  (define-key company-active-map (kbd "C-h") nil)
-
-  ;; ドキュメント表示
-  (define-key company-active-map (kbd "M-d") 'company-show-doc-buffer)
-
-  (setq company-minimum-prefix-length 1) ;; 1文字入力で補完されるように
-
-  ;; 候補の一番上でselect-previousしたら一番下に、一番下でselect-nextしたら一番上に行くように
-  (setq company-selection-wrap-around t)
-
-  ;; 各種メジャーモードでも C-M-iで company-modeの補完を使う
-  (define-key emacs-lisp-mode-map (kbd "C-M-i") 'company-complete)
-
-  (setq company-tooltip-limit 20)
-  (setq company-tooltip-align-annotations t)
-  (setq company-idle-delay .3)
-  (setq company-echo-delay 0)
-  (setq company-begin-commands '(self-insert-command)))
-
-(use-package company-box
-  :after (company all-the-icons)
-  :hook ((company-mode . company-box-mode))
-  :custom
-  (company-box-icons-alist 'company-box-icons-all-the-icons)
-  (company-box-doc-enable nil))
-
-(use-package magit
+(leaf *company-packages
   :config
-  (defun magit-expand-git-file-name--msys (args)
-    "Handle Msys directory names such as /c/* by changing them to C:/*"
-    (let ((filename (car args)))
-      (when (string-match "^/\\([a-z]\\)/\\(.*\\)" filename)
-        (setq filename (concat (match-string 1 filename) ":/"
-                               (match-string 2 filename))))
-      (list filename)))
-  (advice-add 'magit-expand-git-file-name :filter-args #'magit-expand-git-file-name--msys)
 
-  ;; diff関連の設定
-  ;; 2012-04-02
-  (defun magit-setup-diff ()
-    ;; diffを表示しているときに文字単位での変更箇所も強調表示する
-    ;; 'allではなくtにすると現在選択中のhunkのみ強調表示する
-    ;; 2012-04-02
-    (setq magit-diff-refine-hunk 'all)
-    ;; diff用のfaceを設定する
-    ;; 2012-04-02
-    (diff-mode-setup-faces))
-  (add-hook 'magit-mode-hook 'magit-setup-diff))
+  (leaf company
+    :straight t
+    :diminish t
+    :bind
+    ("C-c y" . company-yasnippet)
+    ("C-M-i" . company-complete-common-or-cycle)
+    (:company-active-map
+     ;; C-n, C-pで補完候補を次/前の候補を選択
+     ("C-n" . company-select-next)
+     ("C-p" . company-select-previous)
+     ;; C-sで絞り込む
+     ("C-s" . company-filter-candidates)
+     ;; 1つしか候補がなかったらtabで補完、複数候補があればtabで次の候補へ行くように
+     ("<tab>" . company-complete-common-or-cycle)
+     ;; C-hがデフォルトでドキュメント表示にmapされているので、文字を消せるようにmapを外す
+     ("C-h" . nil)
+     ;; ドキュメント表示
+     ("M-d" . company-show-doc-buffer))
+    (:company-search-map
+     ;; C-n, C-pで補完候補を次/前の候補を選択
+     ("C-n" . company-select-next)
+     ("C-p" . company-select-previous))
+    (:emacs-lisp-mode-map
+     ("C-M-i" . company-complete)) ;; 各種メジャーモードでも C-M-iで company-modeの補完を使う
+    :hook
+    (emacs-startup-hook . global-company-mode)
+    :custom
+    (company-idle-delay . 0)
+    (company-echo-delay . 0)
+    (company-minimum-prefix-length . 1) ;; 1文字入力で補完されるように
+    (company-selection-wrap-around . t) ;; 候補の一番上でselect-previousしたら一番下に、一番下でselect-nextしたら一番上に行くように
+    (company-tooltip-limit . 20)
+    (company-tooltip-align-annotations . t)
+    (company-begin-commands . '(self-insert-command)))
 
-(use-package markdown-mode
-  :mode (("\\.\\(markdown\\|md\\)\\.txt\\'" . markdown-mode))
-  :init
-  (defface markdown-inline-code-face
-    '((t (:inherit (markdown-code-face font-lock-constant-face))))
-    "Face for inline code."
-    :group 'markdown-faces))
+  (leaf company-quickhelp
+    :straight t
+    :custom
+    (company-quickhelp-color-foreground . "black")
+    :bind (:company-active-map
+           :package company
+           ("M-h" . company-quickhelp-manual-begin))
+    :hook (global-company-mode-hook . company-quickhelp-mode))
+
+  (leaf company-box
+    :straight t
+    :after all-the-icons
+    :hook
+    (company-mode-hook . company-box-mode)
+    (global-company-mode-hook . company-box-mode)
+    :custom
+    (company-box-doc-enable . t)
+    (company-box-show-single-candidate . t)
+    (company-box-max-candidates . 50)
+    (company-box-icons-alist . 'company-box-icons-all-the-icons)
+    :config
+    (setq company-box-backends-colors nil)
+
+    ;; great configuration for company-box with all-the-icons
+    ;; https://ladicle.com/post/config/#company
+    (declare-function all-the-icons-faicon 'all-the-icons)
+    (declare-function all-the-icons-fileicon 'all-the-icons)
+    (declare-function all-the-icons-material 'all-the-icons)
+    (declare-function all-the-icons-octicon 'all-the-icons)
+    (setq company-box-icons-all-the-icons
+          `((Unknown . ,(all-the-icons-material "find_in_page" :height 0.7 :v-adjust -0.15))
+            (Text . ,(all-the-icons-faicon "book" :height 0.68 :v-adjust -0.15))
+            (Method . ,(all-the-icons-faicon "cube" :height 0.7 :v-adjust -0.05 :face 'font-lock-constant-face))
+            (Function . ,(all-the-icons-faicon "cube" :height 0.7 :v-adjust -0.05 :face 'font-lock-constant-face))
+            (Constructor . ,(all-the-icons-faicon "cube" :height 0.7 :v-adjust -0.05 :face 'font-lock-constant-face))
+            (Field . ,(all-the-icons-faicon "tags" :height 0.65 :v-adjust -0.15 :face 'font-lock-warning-face))
+            (Variable . ,(all-the-icons-faicon "tag" :height 0.7 :v-adjust -0.05 :face 'font-lock-warning-face))
+            (Class . ,(all-the-icons-faicon "clone" :height 0.65 :v-adjust 0.01 :face 'font-lock-constant-face))
+            (Interface . ,(all-the-icons-faicon "clone" :height 0.65 :v-adjust 0.01))
+            (Module . ,(all-the-icons-octicon "package" :height 0.7 :v-adjust -0.15))
+            (Property . ,(all-the-icons-octicon "package" :height 0.7 :v-adjust -0.05 :face 'font-lock-warning-face)) ;; Golang module
+            (Unit . ,(all-the-icons-material "settings_system_daydream" :height 0.7 :v-adjust -0.15))
+            (Value . ,(all-the-icons-material "format_align_right" :height 0.7 :v-adjust -0.15 :face 'font-lock-constant-face))
+            (Enum . ,(all-the-icons-material "storage" :height 0.7 :v-adjust -0.15 :face 'all-the-icons-orange))
+            (Keyword . ,(all-the-icons-material "filter_center_focus" :height 0.7 :v-adjust -0.15))
+            (Snippet . ,(all-the-icons-faicon "code" :height 0.7 :v-adjust 0.02 :face 'font-lock-variable-name-face))
+            (Color . ,(all-the-icons-material "palette" :height 0.7 :v-adjust -0.15))
+            (File . ,(all-the-icons-faicon "file-o" :height 0.7 :v-adjust -0.05))
+            (Reference . ,(all-the-icons-material "collections_bookmark" :height 0.7 :v-adjust -0.15))
+            (Folder . ,(all-the-icons-octicon "file-directory" :height 0.7 :v-adjust -0.05))
+            (EnumMember . ,(all-the-icons-material "format_align_right" :height 0.7 :v-adjust -0.15 :face 'all-the-icons-blueb))
+            (Constant . ,(all-the-icons-faicon "tag" :height 0.7 :v-adjust -0.05))
+            (Struct . ,(all-the-icons-faicon "clone" :height 0.65 :v-adjust 0.01 :face 'font-lock-constant-face))
+            (Event . ,(all-the-icons-faicon "bolt" :height 0.7 :v-adjust -0.05 :face 'all-the-icons-orange))
+            (Operator . ,(all-the-icons-fileicon "typedoc" :height 0.65 :v-adjust 0.05))
+            (TypeParameter . ,(all-the-icons-faicon "hashtag" :height 0.65 :v-adjust 0.07 :face 'font-lock-const-face))
+            (Template . ,(all-the-icons-faicon "code" :height 0.7 :v-adjust 0.02 :face 'font-lock-variable-name-face)))))
+  )
 
 (use-package rainbow-delimiters
   :commands rainbow-delimiters-mode
@@ -234,30 +364,6 @@
    do
    (let ((face (intern (format "rainbow-delimiters-depth-%d-face" index))))
      (cl-callf color-saturate-name (face-foreground face) 30))))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; text-mode
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(use-package text-mode
-  :defer t
-  :init
-  (add-hook 'text-mode-hook
-            (lambda ()
-              (setq indent-tabs-mode nil))))
-
-(use-package rst
-  :defer t
-  :mode (("\\.\\(rst|rest\\)$" . rst-mode))
-  :init
-  (add-hook 'rst-mode-hook '(lambda ()
-                              (setq indent-tabs-mode nil)
-                              (setq frame-background-mode 'dark))))
-
-;; (let ((i 1))
-;;   (while (<= i rst-level-face-max)
-;;     (let ((face-name (intern (format "rst-level-%d-face" i))))
-;;       (set-face-background face-name nil)
-;;       (setq i (1+ i)))))
 
 (use-package open-junk-file
   :bind (("C-x j" . open-junk-file))
@@ -297,33 +403,6 @@
   (add-hook 'dired-initial-position-hook 'dired-k)
   (define-key dired-mode-map "K" 'dired-k)
   (define-key dired-mode-map "g" 'dired-k))
-
-;;;
-;;; yasnippet
-;;;
-(use-package yasnippet
-  ;; :bind (("C-x i i" . yas-insert-snippet)
-  ;;        ("C-x i n" . yas-new-snippet)
-  ;;        ("C-x i v" . yas-visit-snippet-file))
-  :config
-  (yas-reload-all)
-  (yas-global-mode 1)
-  (define-key yas-minor-mode-map (kbd "C-x i i") 'yas-insert-snippet)
-  (define-key yas-minor-mode-map (kbd "C-x i n") 'yas-new-snippet)
-  (define-key yas-minor-mode-map (kbd "C-x i v") 'yas-visit-snippet-file)
-  )
-
-;; smartparens に移行してみる
-(use-package smartparens-config
-  :config
-  (smartparens-global-mode t))
-
-;;; expand-region
-(use-package expand-region
-  :bind (("C-=" . er/expand-region))
-  ;; :init
-  ;; (global-set-key (kbd "C-=") 'er/expand-region)
-  )
 
 (use-package org
   :defer t
