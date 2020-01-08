@@ -133,8 +133,12 @@
 (leaf *utility-package
   :config
 
+  (leaf all-the-icons-ivy
+    :straight t)
+
   (leaf all-the-icons
     :straight t
+    :after all-the-icons-ivy ivy
     :custom
     (all-the-icons-scale-factor . 1.0)
     :config
@@ -152,8 +156,6 @@
                     "hand-o-right" :face 'my-ivy-arrow-invisible) " " str))
          cands
          "\n"))
-      (require 'ivy nil t)
-      (require 'all-the-icons-ivy nil t)
       (setq ivy-format-functions-alist '((t . my-ivy-format-function-arrow)))
       (add-to-list 'all-the-icons-ivy-buffer-commands 'counsel-projectile-switch-project)
       (add-to-list 'all-the-icons-ivy-buffer-commands 'counsel-ibuffer)
@@ -163,6 +165,44 @@
   (leaf s
     :straight t
     :commands s-join))
+
+(leaf *dired
+  :config
+  (leaf dired-k
+    :straight t)
+  (leaf dired
+    :commands dired-vc-status
+    :bind
+    (:dired-mode-map
+     ("V" . dired-vc-status)
+     ("K" . dired-k)
+     ("g" . dired-k))
+    :hook
+    (dired-mode-hook . dired-k)
+    (dired-initial-position-hook . dired-k)
+    :custom
+    ;;
+    ;; http://qiita.com/l3msh0@github/items/8665122e01f6f5ef502f
+    ;;
+    ;; diredを2つのウィンドウで開いている時に、デフォルトの移動orコピー先をもう一方のdiredで開いているディレクトリにする
+    (dired-dwim-target . t)
+    ;; ディレクトリを再帰的にコピーする
+    (dired-recursive-copies . 'always)
+    ;; diredバッファでC-sした時にファイル名だけにマッチするように
+    (dired-isearch-filenames . t)
+    :config
+    ;; バージョン管理システム
+    ;; diredから適切なバージョン管理システムの*-statusを起動
+    (defun dired-vc-status (&rest args)
+      (interactive)
+      (let ((path (find-path-in-parents (dired-current-directory)
+					'(".git" ".svn"))))
+	(cond ((null path)
+	       (message "not version controlled."))
+	      ((string-match-p "\\.svn$" path)
+	       (svn-status (file-name-directory path)))
+	      ((string-match-p "\\.git$" path)
+	       (magit-status-internal (file-name-directory path))))))))
 
 (leaf *major-mode
   :config
@@ -174,42 +214,6 @@
       ;; https://stackoverflow.com/questions/25819034/colors-in-emacs-shell-prompt
       (shell-mode-hook . (lambda ()
                            (face-remap-set-base 'comint-highlight-prompt :inherit nil)))))
-
-  (leaf *dired
-    :config
-    (leaf dired-k
-      :straight t)
-    (leaf dired
-      :after dired-k
-      :bind
-      (:dired-mode-map
-       ("V" . dired-vc-status)
-       ("K" . dired-k)
-       ("g" . dired-k))
-      :hook (dired-initial-position-hook . dired-k)
-      :custom
-      ;;
-      ;; http://qiita.com/l3msh0@github/items/8665122e01f6f5ef502f
-      ;;
-      ;; diredを2つのウィンドウで開いている時に、デフォルトの移動orコピー先をもう一方のdiredで開いているディレクトリにする
-      (dired-dwim-target . t)
-      ;; ディレクトリを再帰的にコピーする
-      (dired-recursive-copies . 'always)
-      ;; diredバッファでC-sした時にファイル名だけにマッチするように
-      (dired-isearch-filenames . t)
-      :config
-      ;; バージョン管理システム
-      ;; diredから適切なバージョン管理システムの*-statusを起動
-      (defun dired-vc-status (&rest args)
-        (interactive)
-        (let ((path (find-path-in-parents (dired-current-directory)
-                                          '(".git" ".svn"))))
-          (cond ((null path)
-                 (message "not version controlled."))
-                ((string-match-p "\\.svn$" path)
-                 (svn-status (file-name-directory path)))
-                ((string-match-p "\\.git$" path)
-                 (magit-status-internal (file-name-directory path))))))))
 
   (leaf *org-mode
     :config
@@ -251,6 +255,7 @@
   (leaf magit
     :straight t
     :hook (magit-mode-hook . my:magit-setup-diff)
+    :commands magit-status-internal
     :config
     (defun magit-expand-git-file-name--msys (args)
       "Handle Msys directory names such as /c/* by changing them to C:/*"
@@ -311,6 +316,7 @@
     (leaf slime
       :straight t
       :commands slime-setup
+      :after company
       :custom
       (inferior-lisp-program . "ros run")
       :bind
@@ -872,6 +878,11 @@ set pagesize 1000
   ;;  :run "yarn start"
   ;;  :test-suffix ".test")
   )
+
+(leaf anzu
+  :straight t
+  :config
+  (global-anzu-mode 1))
 
 (leaf open-junk-file
   :straight t
