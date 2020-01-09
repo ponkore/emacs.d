@@ -1167,7 +1167,7 @@ set pagesize 1000
     :custom
     (recentf-max-saved-items . 200)
     `(recentf-save-file . ,(expand-file-name "~/.emacs.d/recentf"))
-    (recentf-auto-cleanup . 10)
+    ;; (recentf-auto-cleanup . 10)
     :config
     ;; 最近開いたファイルを保存する数を増やす
     (setq recentf-exclude `("r:/.+$"
