@@ -1,11 +1,6 @@
 ;;; 文字列
 ;;; 2012-03-24
 
-;; 文字列の先頭と最後にある一連の空白をすべて削除する
-;; 2012-03-24
-(defun string-strip (string)
-  (replace-regexp-in-string "\\`[ \r\n]*\\|[ \r\n]*\\'" "" string))
-
 
 ;;; パス
 ;;; 2011-03-19
@@ -119,15 +114,6 @@
         (setq ret (cons (match-string-no-properties 0) ret)))
       (kill-buffer buffer)
       (reverse ret))))
-
-;; (defun read-file-and-list-each-lines (filename)
-;;   (save-excursion
-;;     (let* ((buffer (find-file-noselect filename))
-;;            (ret nil))
-;;       (with-current-buffer buffer
-;;         (setq ret (split-string (buffer-string) "[\r\n]")))
-;;       (kill-buffer buffer)
-;;       ret)))
 
 ;;; insert current datetime
 (defun my-insert-datetime ()
