@@ -8,6 +8,48 @@
 (leaf diminish :straight t)
 (leaf hydra :straight t)
 
+(leaf *font-setting
+  :config
+  (defun emacs-font-setting (font-name size)
+    "Set emacs japanese fonts."
+    ;; Note:
+    ;; https://qiita.com/melito/items/238bdf72237290bc6e42
+    ;; [NG] ricty だと、[] の下が欠ける
+    ;; (set-frame-font "ricty-12")
+    ;; [NG] noto mono だと全角文字が半角の２倍幅になっていない
+    ;; (set-frame-font "noto mono-10")
+    ;; [△] Consolas & Meiryoke_Console だと丸付き数字(①等)が半角幅になってしまっている
+    ;; [△] Inconsolata & Meiryoke_Console だと全角○が半角幅になってしまっている
+    ;; [△] Meiryoke_Console 統一だと文字幅問題はないが、行高さが詰まりすぎ、O0liの区別がつきにくい
+    ;;あいうえお あいうえお あいうえお あいうえお あいうえお あいうえお ◎●○①㈱
+    ;;abcdefghij klmnopqrst uvwxyzABCD EFGHIJKLMN OPQRSTUVWX YZilO0     1234567890
+    (let* ((asciifont font-name)
+           (jpfont font-name)
+           (h (round (* size 10)))
+           (fontspec (font-spec :family asciifont))
+           (jp-fontspec (font-spec :family jpfont)))
+      (set-face-attribute 'default nil :family asciifont :height h)
+      (set-fontset-font nil 'japanese-jisx0208 jp-fontspec)
+      (set-fontset-font nil 'japanese-jisx0212 jp-fontspec)
+      (set-fontset-font nil 'japanese-jisx0213-1 jp-fontspec)
+      (set-fontset-font nil 'japanese-jisx0213-2 jp-fontspec)
+      (set-fontset-font nil 'japanese-jisx0213.2004-1 jp-fontspec)
+      (set-fontset-font nil 'katakana-jisx0201 jp-fontspec)
+      (set-fontset-font nil '(#x0080 . #x024F) fontspec)
+      (set-fontset-font nil '(#x0370 . #x03FF) fontspec)
+      (when (require 'all-the-icons nil t)
+	(set-fontset-font nil 'unicode (font-spec :family (all-the-icons-alltheicon-family)) nil 'append)
+	(set-fontset-font nil 'unicode (font-spec :family (all-the-icons-material-family)) nil 'append)
+	(set-fontset-font nil 'unicode (font-spec :family (all-the-icons-fileicon-family)) nil 'append)
+	(set-fontset-font nil 'unicode (font-spec :family (all-the-icons-faicon-family)) nil 'append)
+	(set-fontset-font nil 'unicode (font-spec :family (all-the-icons-octicon-family)) nil 'append)
+	(set-fontset-font nil 'unicode (font-spec :family (all-the-icons-wicon-family)) nil 'append))
+      (setq face-font-rescale-alist '((font-name . 1.0)))))
+  (when (eq system-type 'darwin)
+    (emacs-font-setting "Ricty Diminished" 16))
+  (when (eq system-type 'windows-nt)
+    (emacs-font-setting "Hackgen" 10)))
+
 ;;
 ;; ivy (https://qiita.com/blue0513/items/c0dc35a880170997c3f5)
 ;;

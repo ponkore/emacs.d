@@ -23,37 +23,6 @@
          (internal-border-width . 0))))
 
 (setq default-frame-alist initial-frame-alist)
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; font setting
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defun cocoa-emacs-font-setting (size)
-  "Set cocoa emacs japanese fonts(Ricty Diminished Version)."
-  (let* ((asciifont "Ricty Diminished")
-         (jpfont "Ricty Diminished")
-         (h (round (* size 10)))
-         (fontspec (font-spec :family asciifont))
-         (jp-fontspec (font-spec :family jpfont)))
-    (set-face-attribute 'default nil :family asciifont :height h)
-    (set-fontset-font nil 'japanese-jisx0208 jp-fontspec)
-    (set-fontset-font nil 'japanese-jisx0212 jp-fontspec)
-    (set-fontset-font nil 'japanese-jisx0213-1 jp-fontspec)
-    (set-fontset-font nil 'japanese-jisx0213-2 jp-fontspec)
-    (set-fontset-font nil 'japanese-jisx0213.2004-1 jp-fontspec)
-    (set-fontset-font nil 'katakana-jisx0201 jp-fontspec)
-    (set-fontset-font nil '(#x0080 . #x024F) fontspec)
-    (set-fontset-font nil '(#x0370 . #x03FF) fontspec)
-    (when (require 'all-the-icons nil t)
-      (set-fontset-font nil 'unicode (font-spec :family (all-the-icons-alltheicon-family)) nil 'append)
-      (set-fontset-font nil 'unicode (font-spec :family (all-the-icons-material-family)) nil 'append)
-      (set-fontset-font nil 'unicode (font-spec :family (all-the-icons-fileicon-family)) nil 'append)
-      (set-fontset-font nil 'unicode (font-spec :family (all-the-icons-faicon-family)) nil 'append)
-      (set-fontset-font nil 'unicode (font-spec :family (all-the-icons-octicon-family)) nil 'append)
-      (set-fontset-font nil 'unicode (font-spec :family (all-the-icons-wicon-family)) nil 'append))
-    (setq face-font-rescale-alist '(("Ricty" . 1.0)))))
-
-(cocoa-emacs-font-setting 16)
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; fsharp
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
