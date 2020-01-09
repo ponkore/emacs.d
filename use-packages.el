@@ -1632,3 +1632,190 @@ set pagesize 1000
   (setq mode-require-final-newline nil)
   ;;
   (setq indent-tabs-mode nil))
+
+(leaf *etc
+  :config
+
+  (leaf myblog-hugo
+    :config
+    (defvar myblog-hugo/base-directory-format-string "~/blog/myblog-hugo/content/post/%Y-%m/%d/"
+      "format string for post directory. use this with `format-time-string'")
+
+    (defvar myblog-hugo/draft-directory "~/blog/drafts/"
+      "draft directory for myblog-hugo. draft file for markdown, thumbnails")
+
+    (defvar myblog-hugo/draft-template "+++
+shortname = \"\"
+title = \"\"
+description = \"\"
+date = \"%Y-%m-%dT%H:%M:%S+09:00\"
+categories = [\"Programming\"]
+tags = [\"\"]
+archives = [\"%Y-%m\"]
+url = \"post/%Y-%m/%d/{{shortname}}\"
+thumbnail = \"/img/%Y-%m/%d/{{shortname}}.png\"
++++
+
+<!--more-->
+"
+      "template string for post's default markdown text. use this with `format-time-string', and replace {{post-title}}.")
+
+    (defun myblog-hugo/create-draft ()
+      "create a hugo draft file with default template."
+      (interactive)
+      (let* ((draft-filename (format-time-string "%Y-%m-%d-%H%M%S.md" (current-time)))
+             (filename (concat myblog-hugo/draft-directory draft-filename))
+             (directory (file-name-directory filename))
+             (draft-content myblog-hugo/draft-template)
+             (buf (set-buffer (find-file-noselect filename t))))
+	(with-current-buffer buf
+	  (goto-char (point-min))
+	  (insert draft-content)
+	  ;; (basic-save-buffer)
+	  (switch-to-buffer buf)
+	  (goto-char (point-max)))))
+
+    (defun myblog-hugo/get-shortname ()
+      "frontmatter にある shortname を取得する"
+      (goto-char (point-min))
+      (when (re-search-forward "shortname* = *\"\\(.*\\)\"" nil t)
+	(let* ((matched (match-string-no-properties 1)))
+	  matched)))
+
+    (defun myblog-hugo/apply-current-time (field-name end)
+      "frontmatter にある keyword = format の format に現在時刻を適用する。"
+      (let* ((left-part (concat "\\(" field-name " *= *\\[?"))
+             (right-part (concat "\"" "\\)" "\\(.+\\)" "\\(\"\\]?\\)")))
+	(when (re-search-forward (concat left-part right-part) end t)
+	  (let* ((matched (match-string-no-properties 2))
+		 (formatted (format-time-string matched (current-time))))
+            (replace-match (concat "\\1" formatted "\\3"))
+            (goto-char (point-min))))))
+
+    (defun myblog-hugo/apply-shortname (shortname end)
+      "frontmatter に含まれる {{shortname}} を置き換える"
+      (goto-char (point-min))
+      (while (re-search-forward "{{shortname}}" end t)
+	(replace-match shortname)))
+
+    (defun myblog-hugo/publish ()
+      "publish current draft buffer to hugo post directory."
+      (interactive)
+      (let* ((end)
+             (post-destdir (format-time-string myblog-hugo/base-directory-format-string (current-time)))
+             (shortname (downcase (myblog-hugo/get-shortname)))
+             (destfile (concat post-destdir "/" shortname ".md")))
+	(goto-char (point-min))
+	(re-search-forward "\\+\\+\\+")
+	(forward-char)
+	(re-search-forward "\\+\\+\\+")
+	(forward-char -3)
+	(setq end (point))
+	;;
+	(goto-char (point-min))
+	(myblog-hugo/apply-current-time "date" end)
+	(myblog-hugo/apply-current-time "archives" end)
+	(myblog-hugo/apply-current-time "url" end)
+	(myblog-hugo/apply-current-time "thumbnail" end)
+	(myblog-hugo/apply-shortname shortname end)
+	;;
+	(unless (file-exists-p post-destdir)
+	  (make-directory post-destdir t))
+	(set-visited-file-name destfile)
+	(basic-save-buffer))))
+
+  (leaf google-search
+    :config
+;;;
+;;; Google Search via Browser
+;;;
+    (require 'browse-url)
+    (require 'thingatpt)
+
+    ;; w3m-url-encode-string の rename 版 (w3m.el を入れてないから)
+    (defun my-url-encode-string (str &optional coding)
+      (apply (function concat)
+             (mapcar
+              (lambda (ch)
+		(cond
+		 ((eq ch ?\n)               ; newline
+		  "%0D%0A")
+		 ((string-match "[-a-zA-Z0-9_:/]" (char-to-string ch)) ; xxx?
+		  (char-to-string ch))      ; printable
+		 ((char-equal ch ?\x20)     ; space
+		  "+")
+		 (t
+		  (format "%%%02X" ch))))   ; escape
+              ;; Coerce a string to a list of chars.
+              (append (encode-coding-string (or str "") (or coding 'iso-2022-jp))
+                      nil))))
+
+    ;; google で検索。引数無しだと mini-buffer で編集できる。
+    (defun google (str &optional flag)
+      "google で検索。引数無しだと mini-buffer で編集できる。"
+      (interactive
+       (list (cond ((or
+                     ;; mouse drag の後で呼び出された場合
+                     (eq last-command 'mouse-drag-region)
+                     ;; region が活性
+                     (and transient-mark-mode mark-active)
+                     ;; point と mark を入れ替えた後
+                     (eq last-command 'exchange-point-and-mark))
+                    (buffer-substring-no-properties
+                     (region-beginning) (region-end)))
+		   (t (thing-at-point 'word)))
+             current-prefix-arg))
+      (unless flag
+	(setq str (read-from-minibuffer "Search word: " str)))
+      (browse-url
+       (concat
+	"http://www.google.com/search?q="
+	(my-url-encode-string str 'shift_jis)
+	"&hl=ja&ie=Shift_JIS&lr=lang_ja"))))
+
+  (leaf grep-r
+    :config
+    ;; 再帰的にgrep
+    (require 'grep)
+
+    (if (eq system-type 'windows-nt)
+	(setq grep-command-before-query "yagrep -nH -r -e ")
+      (setq grep-command-before-query "grep -nH -r -e "))
+
+    (defun grep-default-command ()
+      (if current-prefix-arg
+	  (let ((grep-command-before-target
+		 (concat grep-command-before-query
+			 (shell-quote-argument (grep-tag-default)))))
+            (cons (if buffer-file-name
+                      (concat grep-command-before-target
+                              " *."
+                              (file-name-extension buffer-file-name))
+                    (concat grep-command-before-target " ."))
+		  (+ (length grep-command-before-target) 1)))
+	(car grep-command)))
+    (setq grep-command (cons (concat grep-command-before-query " .")
+                             (+ (length grep-command-before-query) 1)))
+
+    ;; (defadvice grep (around grep-coding-system-setup compile)
+    ;;   "When a prefix argument given, specify coding-system-for-read."
+    ;;   (let ((coding-system-for-read
+    ;;          (if current-prefix-arg
+    ;;              (read-coding-system "coding system: ")
+    ;;            coding-system-for-read)))
+    ;;     ad-do-it))
+
+    ;; (defadvice grep (around grep-coding-system-setup compile)
+    ;;   "When a prefix argument given, specify coding-system-for-read."
+    ;;   (let ((coding-system-for-read 'utf-8))
+    ;;     ad-do-it))
+    (defadvice grep (around grep-coding-system-setup compile)
+      ""
+      (let ((old-default-process-coding-system default-process-coding-system))
+	(setq default-process-coding-system '(utf-8 . cp932))
+	ad-do-it
+	(setq default-process-coding-system old-default-process-coding-system)))
+    ;; (ad-activate-regexp "grep-coding-system-setup")
+    ;; (ad-deactivate-regexp "grep-coding-system-setup")
+    )
+  )
