@@ -3,12 +3,10 @@
 ;;
 (when (eq window-system 'w32)
   (setq w32-get-true-file-attributes nil)
-  ;; for my home's win10 environment.
   (setenv "HOME" (getenv "USERPROFILE")))
 
 ;; only for my office environment
 (load (expand-file-name "~/.emacs.d/config-proxy.el") t)
-;;
 
 ;;
 ;; initialize Emacs package system.
@@ -19,7 +17,7 @@
 (package-initialize)
 
 ;;
-;; try straight
+;; initialize straight
 ;;
 (defvar bootstrap-version)
 (let ((bootstrap-file
@@ -34,18 +32,12 @@
       (eval-print-last-sexp)))
   (load bootstrap-file nil 'nomessage))
 
-;; (straight-use-package 'use-package)
-;; (setq straight-use-package-by-default t)
-;; (use-package init-loader)
-
-;;
-;; initialize init-loader
-;;
 (require 'cl)
 
 ;; Avoid to write `package-selected-packages` in init.el
 (load (setq custom-file (expand-file-name "custom.el" user-emacs-directory)))
 
+;; install packages
 (let ((not-installed (loop for x in package-selected-packages
                            when (not (package-installed-p x))
                            collect x)))
@@ -60,11 +52,8 @@
   (if (fboundp 'normal-top-level-add-subdirs-to-load-path)
       (normal-top-level-add-subdirs-to-load-path)))
 
-(setq init-loader-show-log-after-init nil)
-
+;; set theme
 (load-theme 'pastels-on-dark t)
 (enable-theme 'pastels-on-dark)
-
-(init-loader-load "~/.emacs.d/inits")
 
 (load (expand-file-name "~/.emacs.d/use-packages.el") t)
