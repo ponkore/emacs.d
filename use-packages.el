@@ -479,6 +479,16 @@ static char * arrow_right[] = {
     :config
     ;; バージョン管理システム
     ;; diredから適切なバージョン管理システムの*-statusを起動
+    (defun find-path-in-parents (directory base-names)
+      (or (find-if 'file-exists-p
+		   (mapcar (lambda (base-name)
+                             (concat directory base-name))
+			   base-names))
+	  (if (string= directory "/")
+              nil
+            (let ((parent-directory (substring directory 0 -1)))
+              (find-path-in-parents parent-directory base-names)))))
+    ;;
     (defun dired-vc-status (&rest args)
       (interactive)
       (let ((path (find-path-in-parents (dired-current-directory)
@@ -649,7 +659,19 @@ static char * arrow_right[] = {
        ("C-d" . company-show-doc-buffer)
        ("M-." . company-show-location))
       :config
-      (slime-setup '(slime-repl slime-fancy slime-banner slime-company))))
+      (slime-setup '(slime-repl slime-fancy slime-banner slime-company)))
+    (leaf pretty-print
+      :hook
+      (lisp-interaction-mode-hook . (lambda() (define-key lisp-interaction-mode-map (kbd "C-c RET") 'my-pp-macroexpand-last-sexp)))
+      (emacs-lisp-mode-hook . (lambda() (define-key emacs-lisp-mode-map (kbd "C-c RET") 'my-pp-macroexpand-last-sexp)))
+      :config
+      (defun my:pp-macroexpand-last-sexp ()
+	(interactive)
+	(if (thing-at-point-looking-at "\(")
+	    (save-excursion
+              (forward-list)
+              (pp-macroexpand-last-sexp nil))
+	  (pp-macroexpand-last-sexp nil)))))
 
   (leaf *clojure
     :config
@@ -952,7 +974,33 @@ set pagesize 1000
       (font-lock-add-keywords 'sql-mode
                               '(("\"\\([^\"]*\\)\"" . 'font-lock-constant-face)
                                 ("\\<Hgs\\w+\\>\.\\<\\w+\\>" . 'font-lock-builtin-face)
-                                ("\\<R[LSC][0-9][A-Z]\\w+\\>\.\\<\\w+\\>" . 'font-lock-builtin-face)))))
+                                ("\\<R[LSC][0-9][A-Z]\\w+\\>\.\\<\\w+\\>" . 'font-lock-builtin-face))))
+    (defun wrap-double-quote-thing-at-symbol ()
+      (interactive)
+      (let* ((bounds (bounds-of-thing-at-point 'symbol))
+             (start (car bounds))
+             (end (cdr bounds))
+             (str (thing-at-point 'symbol))
+             (wrapped (format "\"%s\"" str)))
+	(delete-region start end)
+	(insert wrapped)
+	(goto-char (+ 2 end))))
+
+    (defun move-trailing-comma-to-line-start ()
+      (interactive)
+      (let* ((eol (save-excursion (end-of-line) (point)))
+             (pt (re-search-forward ",[ \t]*$" eol t)))
+	(when pt
+	  (goto-char (- pt 1))
+	  (delete-char 1)
+	  (forward-line)
+	  (let* ((eol (save-excursion (end-of-line) (point)))
+		 (pt (re-search-forward "^[ \t]*--" eol t)))
+            (when pt (forward-line)))
+	  (let* ((eol (save-excursion (end-of-line) (point))))
+            (when (= eol pt) (forward-line)))
+	  (insert "  ,")
+	  (just-one-space)))))
 
   (leaf bat-mode
     :if (eq system-type 'windows-nt)
@@ -1547,10 +1595,20 @@ set pagesize 1000
      ("\C-x!" shell-command)
      ("\C-x|" shell-command-on-region)
      ("\eh" backward-kill-word)
-     ("%" my-match-paren)
+     ("%" my:match-paren)
      ))
+  (defun my:match-paren (arg)
+    "Go to the matching parenthesis if on parenthesis otherwise insert %."
+    (interactive "p")
+    (cond
+     ((looking-at "\\s\(") (forward-list 1) (backward-char 1))
+     ((looking-at "\\s\)") (forward-char 1) (backward-list 1))
+     (t (self-insert-command (or arg 1)))))
+  (defun my:insert-datetime ()
+    (interactive)
+    (insert (format-time-string "%Y/%m/%d %T")))
   (defmacro foo (key fun) `(global-set-key (kbd ,key) (function ,fun)))
-  (foo "C-x C-;" my-insert-datetime))
+  (foo "C-x C-;" my:insert-datetime))
 
 (leaf global-configuration
   :config
@@ -1631,10 +1689,39 @@ set pagesize 1000
   (setq-default require-final-newline nil)
   (setq mode-require-final-newline nil)
   ;;
-  (setq indent-tabs-mode nil))
+  (setq indent-tabs-mode nil)
+  ;; いちいち消すのも面倒なので、内容が 0 ならファイルごと削除する
+  (defun delete-file-if-no-contents ()
+    (let ((file (buffer-file-name (current-buffer))))
+      (when (= (point-min) (point-max))
+        (delete-file file)
+        (message (concat "File: " file " deleted.")))))
+  (add-hook 'after-save-hook 'delete-file-if-no-contents))
 
 (leaf *etc
   :config
+  (leaf **misc-utility
+    :config
+    (defun read-file-and-list-each-lines (filename)
+      (save-excursion
+	(let* ((buffer (find-file-noselect filename))
+               (ret nil))
+	  (set-buffer buffer)
+	  (goto-char (point-min))
+	  (while (re-search-forward "^.+$" nil t)
+            (setq ret (cons (match-string-no-properties 0) ret)))
+	  (kill-buffer buffer)
+	  (reverse ret)))))
+  (leaf goto-line-beginning-or-indent
+    ;; http://qiita.com/ShingoFukuyama/items/62269c4904ca085f9149
+    :config
+    (defun my:goto-line-beginning-or-indent (&optional $position)
+      (interactive)
+      (or $position (setq $position (point)))
+      (let (($starting-position (progn (back-to-indentation) (point))))
+	(if (eq $starting-position $position)
+            (move-beginning-of-line 1))))
+    (global-set-key (kbd "C-a") 'my:goto-line-beginning-or-indent))
 
   (leaf myblog-hugo
     :config
@@ -1726,9 +1813,9 @@ thumbnail = \"/img/%Y-%m/%d/{{shortname}}.png\"
 
   (leaf google-search
     :config
-;;;
-;;; Google Search via Browser
-;;;
+    ;;
+    ;; Google Search via Browser
+    ;;
     (require 'browse-url)
     (require 'thingatpt)
 
