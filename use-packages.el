@@ -128,6 +128,7 @@
     (setq default-process-coding-system '(utf-8 . utf-8))))
 
 (leaf *font-setting
+  :after all-the-icons
   :config
   (defun emacs-font-setting (font-name size)
     "Set emacs japanese fonts."
@@ -164,10 +165,13 @@
 	(set-fontset-font nil 'unicode (font-spec :family (all-the-icons-octicon-family)) nil 'append)
 	(set-fontset-font nil 'unicode (font-spec :family (all-the-icons-wicon-family)) nil 'append))
       (setq face-font-rescale-alist '((font-name . 1.0)))))
-  (when (eq system-type 'darwin)
-    (emacs-font-setting "Ricty Diminished" 16))
-  (when (eq system-type 'windows-nt)
-    (emacs-font-setting "Hackgen" 10)))
+  (defun setup-font ()
+    (interactive)
+    (when (eq system-type 'darwin)
+      (emacs-font-setting "Ricty Diminished" 16))
+    (when (eq system-type 'windows-nt)
+      (emacs-font-setting "Hackgen" 10)))
+  (setup-font))
 
 ;;
 ;; ivy (https://qiita.com/blue0513/items/c0dc35a880170997c3f5)
