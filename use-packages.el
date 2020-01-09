@@ -173,10 +173,11 @@
     (doom-modeline-icon . t)
     (doom-modeline-major-mode-icon . nil)
     (doom-modeline-minor-modes . nil)
-    (line-number-mode . 0)
-    (column-number-mode . 0)
     :hook (emacs-startup-hook . doom-modeline-mode)
     :config
+    (line-number-mode 0)
+    (column-number-mode 0)
+    (which-function-mode 0)
     (doom-modeline-def-modeline
       'main
       ;; '(workspace-number bar window-number evil-state ryo-modal xah-fly-keys matches buffer-info remote-host buffer-position parrot selection-info)
@@ -792,7 +793,26 @@ set pagesize 1000
     ;; in site-lisp
     :mode ("\\.\\(mayu\\)\\'" . mayu-mode))
 
-  ;; end of major mode
+  (leaf *calendar
+    :config
+    (leaf japanese-holidays
+      :straight t
+      :hook (calendar-mode-hook . init-japanese-holidays)
+      :config
+      (defun init-japanese-holidays()
+	(setq calendar-holidays ; 他の国の祝日も表示させたい場合は適当に調整
+              (append japanese-holidays holiday-local-holidays holiday-other-holidays))
+	(setq mark-holidays-in-calendar t) ; 祝日をカレンダーに表示
+	;; 土曜日・日曜日を祝日として表示する場合、以下の設定を追加します。
+	;; 変数はデフォルトで設定済み
+	(setq japanese-holiday-weekend '(0 6)     ; 土日を祝日として表示
+              japanese-holiday-weekend-marker     ; 土曜日を水色で表示
+              '(holiday nil nil nil nil nil japanese-holiday-saturday))
+	(add-hook 'calendar-today-visible-hook 'japanese-holiday-mark-weekend)
+	(add-hook 'calendar-today-invisible-hook 'japanese-holiday-mark-weekend)
+	;; “きょう”をマークするには以下の設定を追加します。
+	(add-hook 'calendar-today-visible-hook 'calendar-mark-today))))
+  ;; end of major-mode
   )
 
 (leaf *minor-mode
@@ -841,13 +861,13 @@ set pagesize 1000
     :hook (prog-mode-hook . rainbow-delimiters-mode)
     :config
       (require 'cl-lib)
-  (require 'color)
-  ;;(global-rainbow-delimiters-mode)
-  (cl-loop
-   for index from 1 to rainbow-delimiters-max-face-count
-   do
-   (let ((face (intern (format "rainbow-delimiters-depth-%d-face" index))))
-     (cl-callf color-saturate-name (face-foreground face) 30))))
+
+      (require 'color)
+      ;;(global-rainbow-delimiters-mode)
+      (cl-loop for index from 1 to rainbow-delimiters-max-face-count
+	       do
+	       (let ((face (intern (format "rainbow-delimiters-depth-%d-face" index))))
+		 (cl-callf color-saturate-name (face-foreground face) 30))))
 
   (leaf flycheck-pos-tip
     :straight t)
@@ -876,7 +896,69 @@ set pagesize 1000
                     ("f" flycheck-first-error)
                     ("l" (progn (goto-char (point-max)) (fiycheck-previous-error)))
                     ("c" flycheck-clear)
-                    ("q" nil))))
+                    ("q" nil)))
+
+  (leaf whitespace
+    ;;
+    ;; whitespace ( http://qiita.com/catatsuy/items/55d50d13ebc965e5f31e )
+    ;;
+    :straight t
+    :config
+    (defvar whitespace-style-with-tab '(face tabs tab-mark spaces space-mark trailing space-before-tab space-after-tab::space))
+    (defvar whitespace-style-without-tab '(face spaces space-mark trailing space-before-tab space-after-tab::space))
+    ;; default setting
+    (setq whitespace-style whitespace-style-without-tab)
+    ;;
+    (defun toggle-tab-mark ()
+      (interactive)
+      (if (equal whitespace-style whitespace-style-with-tab)
+	  (setq whitespace-style whitespace-style-without-tab)
+	(setq whitespace-style whitespace-style-with-tab)))
+    (setq whitespace-space-regexp "\\(\x3000+\\)")
+    (setq whitespace-display-mappings
+	  '((space-mark ?\x3000 [?\□])
+            (tab-mark   ?\t   [?\xBB ?\t])))
+    (global-whitespace-mode t)
+    (set-face-attribute 'whitespace-trailing nil
+			:foreground "DeepPink"
+			:underline t)
+    (set-face-attribute 'whitespace-tab nil
+			:foreground "LightSkyBlue"
+			:underline t)
+    (set-face-attribute 'whitespace-space nil
+			:foreground "GreenYellow"
+			:weight 'bold))
+
+  (leaf cua-mode
+    :custom
+    (cua-enable-cua-keys . nil)
+    :config
+    (cua-mode t))
+
+  (leaf recentf-ext
+    :straight t
+    :custom
+    (recentf-max-saved-items . 200)
+    (recentf-save-file . `(expand-file-name "~/.emacs.d/recentf"))
+    (recentf-auto-cleanup . 10)
+    :config
+    ;; 最近開いたファイルを保存する数を増やす
+    (setq recentf-exclude `("r:/.+$"
+                            "s:/.+$"
+                            "p:/.+$"
+                            ,(concat (expand-file-name "~/") ".emacs.d/elpa/.*$")
+                            ,(expand-file-name "~/.emacs.d/recentf")))
+    ;; from http://qiita.com/itiut@github/items/d917eafd6ab255629346
+    (defmacro with-suppressed-message (&rest body)
+      "Suppress new messages temporarily in the echo area and the `*Messages*' buffer while BODY is evaluated."
+      (declare (indent 0))
+      (let ((message-log-max nil))
+	`(with-temp-message (or (current-message) "") ,@body)))
+    (setq recentf-auto-save-timer (run-with-idle-timer 120 t '(lambda () (with-suppressed-message (recentf-save-list)))))
+    (recentf-mode 1))
+
+  ;; end of minor-mode
+  )
 
 (leaf *company-packages
   :config
@@ -1078,6 +1160,12 @@ set pagesize 1000
     (set-frame-parameter nil 'alpha 90)
     ;; カーソル点滅表示
     (blink-cursor-mode 0)
+    ;; メニューバーを消す
+    (menu-bar-mode -1)
+    ;; ツールバーを消す
+    (tool-bar-mode -1)
+    ;; scroll bar を表示しない
+    (scroll-bar-mode 0)
     ;; スクロール時のカーソル位置の維持
     (setq scroll-preserve-screen-position t)
     ;; スクロール行数（一行ごとのスクロール）
@@ -1092,7 +1180,7 @@ set pagesize 1000
     ;; 行番号のフォーマット
     ;; (set-face-attribute 'linum nil :foreground "red" :height 0.8)
     (set-face-attribute 'linum nil :height 0.8)
-    (setq linum-format "%4d")))
+    (setq linum-format "%5d")))
 
 (leaf buffer
   :config
@@ -1138,6 +1226,9 @@ set pagesize 1000
 
 (leaf backup
   :config
+  ;; バックアップファイルを作らない
+  (setq backup-inhibited t)
+  (setq auto-save-default nil)
   ;; 変更ファイルのバックアップ
   (setq make-backup-files nil)
   ;; 変更ファイルの番号つきバックアップ
@@ -1151,6 +1242,8 @@ set pagesize 1000
   (setq auto-save-timeout 30)
   ;; 編集中ファイルのバックアップ間隔（打鍵）
   (setq auto-save-interval 500)
+  ;; 終了時にオートセーブファイルを消す
+  (setq delete-auto-save-files t)
   ;; バックアップ世代数
   (setq kept-old-versions 1)
   (setq kept-new-versions 2)
@@ -1184,3 +1277,108 @@ set pagesize 1000
   ;; (require 'setup-cygwin)
   ;; (load "config/builtins/setup-cygwin")
   (file-name-shadow-mode -1))
+
+(leaf global-set-keys
+  :config
+  (mapcar
+   '(lambda (l) (global-set-key (first l) (second l)))
+   '(("\C-h" delete-backward-char)
+     ("\C-z" scroll-down)
+     ("\e?" apropos)
+     ("\C-x\C-e" compile)
+     ("\C-x\C-n" next-error)
+     ("\C-x\C-v" find-file-other-window)
+     ("\C-x=" count-lines-page)
+     ("\C-xn" myblog-hugo/create-draft)
+     ("\C-xl" goto-line)
+     ("\C-xg" grep)
+     ("\C-xt" toggle-truncate-lines)
+     ("\e\C-g" keyboard-quit)              ; init.el の設定をもとに戻す
+     ("\C-x!" shell-command)
+     ("\C-x|" shell-command-on-region)
+     ("\eh" backward-kill-word)
+     ("%" my-match-paren)
+     ))
+  (defmacro foo (key fun) `(global-set-key (kbd ,key) (function ,fun)))
+  (foo "C-x C-;" my-insert-datetime))
+
+(leaf global-configuration
+  :config
+  ;; 画像ファイルを表示
+  (auto-image-file-mode t)
+  ;; evalした結果を全部表示
+  (setq eval-expression-print-length nil)
+  ;; 括弧
+  ;; 対応する括弧を光らせる。
+  (show-paren-mode 1)
+  ;; ウィンドウ内に収まらないときだけ括弧内も光らせる。
+  (setq show-paren-style 'mixed)
+  ;; startup message を表示しない
+  (setq inhibit-startup-message t)
+  ;; 行の先頭でC-kを一回押すだけで行全体を消去する
+  (setq kill-whole-line t)
+  ;; 最終行に必ず一行挿入する
+  ;; (setq require-final-newline t)
+  ;; バッファの最後でnewlineで新規行を追加するのを禁止する
+  (setq next-line-add-newlines nil)
+  ;; 補完時に大文字小文字を区別しない
+  (setq completion-ignore-case t)
+  (setq read-file-name-completion-ignore-case t)
+  ;; ;; 部分一致の補完機能を使う
+  ;; ;; p-bでprint-bufferとか
+  ;; ;; 2012-08-08
+  ;; ;; Emacs 24ではデフォルトで有効になっていて、`partial-completion-mode'は
+  ;; ;; なくなっている。カスタマイズする場合は以下の変数を変更する。
+  ;; ;;   * `completion-styles'
+  ;; ;;   * `completion-pcm-complete-word-inserts-delimiters'
+  ;; (if (fboundp 'partial-completion-mode)
+  ;;     (partial-completion-mode t))
+  ;; ;; 補完可能なものを随時表示
+  ;; ;; 少しうるさい
+  ;; (icomplete-mode 1)
+  ;; 履歴数を大きくする
+  (setq history-length 500)
+  ;; ミニバッファの履歴を保存する
+  (savehist-mode 1)
+  ;; 圧縮
+  ;; gzファイルも編集できるようにする
+  (auto-compression-mode t)
+  ;; diff
+  ;; ediffを1ウィンドウで実行
+  (setq ediff-window-setup-function 'ediff-setup-windows-plain)
+  ;; diffのオプション
+  (setq diff-switches '("-u" "-p" "-N"))
+  ;; バッファ名
+  ;; ファイル名が重複していたらディレクトリ名を追加する。
+  (require 'uniquify)
+  (setq uniquify-buffer-name-style 'post-forward-angle-brackets)
+  ;; shebangがあるファイルを保存すると実行権をつける。
+  ;; 2012-03-15
+  (add-hook 'after-save-hook
+            'executable-make-buffer-file-executable-if-script-p)
+  ;; リージョンの大文字小文字変換を有効にする。
+  ;; C-x C-u -> upcase
+  ;; C-x C-l -> downcase
+  ;; 2011-03-09
+  (put 'upcase-region 'disabled nil)
+  (put 'downcase-region 'disabled nil)
+  ;; kill
+  ;; 2012-09-01
+  ;; Emacs 24からクリップボードだけ使うようになっているので
+  ;; Emacs 23のようにprimary selectionを使うように変更
+  ;;   * killしたらprimary selectionにだけ入れる（Xの場合のみ）
+  ;;   * yankするときはprimary selectionのものを使う
+  (setq x-select-enable-primary t)
+  (when (eq window-system 'x)
+    (setq x-select-enable-clipboard nil))
+  ;; M-kanji is undefined に対する対策
+  (global-set-key [M-kanji] 'ignore)
+  (add-hook 'message-mode-hook (lambda () (yas-minor-mode)))
+  ;; lock file を作らない
+  (setq create-lockfiles nil)
+  ;; ファイル終端の改行文字を自動入力しない
+  ;; https://windymelt.hatenablog.com/entry/2014/09/01/145343
+  (setq-default require-final-newline nil)
+  (setq mode-require-final-newline nil)
+  ;;
+  (setq indent-tabs-mode nil))
