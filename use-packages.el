@@ -609,7 +609,7 @@ static char * arrow_right[] = {
       (setq magit-diff-refine-hunk 'all)
       ;; diff用のfaceを設定する
       ;; 2012-04-02
-      (diff-mode-setup-faces)))
+      (my:diff-mode-setup-faces)))
 
   (leaf markdown-mode
     :straight t
