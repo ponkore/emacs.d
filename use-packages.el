@@ -244,7 +244,21 @@
 	      ((string-match-p "\\.svn$" path)
 	       (svn-status (file-name-directory path)))
 	      ((string-match-p "\\.git$" path)
-	       (magit-status-internal (file-name-directory path))))))))
+	       (magit-status-internal (file-name-directory path)))))))
+  (leaf vc-windows
+    :if (eq system-type 'windows-nt)
+    :hook
+    ;; svn log の出力は cp932
+    (vc-svn-log-view-mode-hook . (lambda () (set-buffer-process-coding-system 'cp932 'cp932)))
+    :config
+    ;; Windows 上の SVN で日本語ファイル名がうまく扱えない問題への対応
+    ;; (一時的に default-process-coding-system を '(utf-8 . cp932) に変更する)
+    (defadvice vc-svn-command (around vc-svn-coding-system-setup compile)
+      (let ((old-default-process-coding-system default-process-coding-system))
+	(setq default-process-coding-system '(utf-8 . cp932))
+	ad-do-it
+	(setq default-process-coding-system old-default-process-coding-system)))
+    (ad-activate-regexp "vc-svn-coding-system-setup")))
 
 (leaf *major-mode
   :config
@@ -411,7 +425,13 @@
       (cider-auto-select-error-buffer . t)
       (cider-repl-result-prefix . ";; => ")
       (nrepl-sync-request-timeout . 40)
-      (nrepl-hide-special-buffers . t)))
+      (nrepl-hide-special-buffers . t))
+
+    (leaf cider-lein-command-on-windows
+      :if (eq system-type 'windows-nt)
+      :config
+      ;; on Windows, use lein.bat instead of lein shell script.
+      (setq cider-lein-command "lein.bat")))
 
   (leaf *python
     :config
@@ -700,10 +720,15 @@ set pagesize 1000
                 (,(concat "\\_<" (regexp-opt UNIX) "\\_>") . font-lock-warning-face))))))
 
   (leaf visual-basic-mode
+    ;; in site-lisp
     :mode ("\\.\\(frm\\|bas\\|cls\\|vbs\\|vb\\)$" . visual-basic-mode)
     :hook (visual-basic-mode-hook . (lambda () (setq mode-name "vb")))
     :config
     (setq visual-basic-mode-indent 4))
+
+  (leaf mayu-mode
+    ;; in site-lisp
+    :mode ("\\.\\(mayu\\)\\'" . mayu-mode))
   ;; end of major mode
   )
 
@@ -931,3 +956,13 @@ set pagesize 1000
   :bind ("C-x j" . open-junk-file)
   :custom
   (open-junk-file-format . "~/Downloads/junk/%Y-%m-%d-%H%M%S."))
+
+(leaf windows-ime
+  :if (eq system-type 'windows-nt)
+  :config
+  ;; IME on/off key bind
+  (global-set-key (kbd "M-`") 'toggle-input-method)
+
+  ;; minibuffer に入った時、IME を OFF にする
+  (add-hook 'minibuffer-setup-hook (lambda () (deactivate-input-method)))
+  (add-hook 'helm-minibuffer-set-up-hook (lambda () (deactivate-input-method))))
