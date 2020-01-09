@@ -1,0 +1,8 @@
+# -*- mode: snippet -*-
+# name: log
+# key: log
+# expand-env: ((yas/indent-line 'fixed) (yas/wrap-around-region 'nil))
+# --
+log4j.logger.batch-${1:JOB_ID}=DEBUG, appender-batch-$1-apl, appender-batch-$1-err
+log4j.logger.batch-$1.additivity=false
+$0

@@ -1,0 +1,22 @@
+# key: logger
+# name: logger
+# expand-env: ((yas/indent-line (quote fixed)) (yas/wrap-around-region (quote nil)))
+# --
+log4j.appender.appender-batch-${1:JOB_ID}-apl=fujitsu.ekssmix2.logging.appender.CompositeRollingFileAppender
+log4j.appender.appender-batch-$1-apl.File=E:/Log/Apl/$1_APL_
+log4j.appender.appender-batch-$1-apl.Encoding=Windows-31J
+log4j.appender.appender-batch-$1-apl.Threshold=DEBUG
+log4j.appender.appender-batch-$1-apl.layout.ConversionPattern=[%d{yyyy/MM/dd HH\:mm\:ss\:SSS}][%p]%m%n
+log4j.appender.appender-batch-$1-apl.layout=org.apache.log4j.PatternLayout
+log4j.appender.appender-batch-$1-apl.MaxFileSize=30MB
+log4j.appender.appender-batch-$1-apl.AppendSameDate=true
+
+log4j.appender.appender-batch-$1-err=fujitsu.ekssmix2.logging.appender.CompositeRollingFileAppender
+log4j.appender.appender-batch-$1-err.File=E:/Log/Error/$1_ERR_
+log4j.appender.appender-batch-$1-err.Encoding=Windows-31J
+log4j.appender.appender-batch-$1-err.Threshold=ERROR
+log4j.appender.appender-batch-$1-err.layout.ConversionPattern=[%d{yyyy/MM/dd HH\:mm\:ss\:SSS}][%p]%m%n
+log4j.appender.appender-batch-$1-err.layout=org.apache.log4j.PatternLayout
+log4j.appender.appender-batch-$1-err.MaxFileSize=30MB
+log4j.appender.appender-batch-$1-err.AppendSameDate=true
+$0
