@@ -8,6 +8,17 @@
 (leaf diminish :straight t)
 (leaf hydra :straight t)
 
+(leaf *encoding
+  :config
+  (leaf encoding-mac
+    :if (eq system-type 'darwin)
+    :config
+    (setq default-process-coding-system '(utf-8-unix . utf-8-unix)))
+  (leaf encoding-windows
+    :if (eq system-type 'windows-nt)
+    :config
+    (setq default-process-coding-system '(utf-8 . utf-8))))
+
 (leaf *font-setting
   :config
   (defun emacs-font-setting (font-name size)
@@ -206,7 +217,29 @@
 
   (leaf s
     :straight t
-    :commands s-join))
+    :commands s-join)
+
+  ;;   ;;
+  ;;   ;; exec path setting ( http://qiita.com/catatsuy/items/3dda714f4c60c435bb25 )
+  ;;   ;;
+  ;;   (defun set-exec-path-from-shell-PATH ()
+  ;;     "Set up Emacs' `exec-path' and PATH environment variable to match that used by the user's shell.
+  ;; This is particularly useful under Mac OSX, where GUI apps are not started from a shell."
+  ;;     (interactive)
+  ;;     (let ((path-from-shell (replace-regexp-in-string "[ \t\n]*$" "" (shell-command-to-string "/bin/bash --login -i -c 'echo $PATH'"))))
+  ;;       (setenv "PATH" path-from-shell)
+  ;;       (setq exec-path (split-string path-from-shell path-separator))))
+  ;;   (set-exec-path-from-shell-PATH)
+
+  (leaf exec-path-from-shell
+    :straight t
+    :commands exec-path-from-shell-copy-envs
+    :config
+    (mapc #'(lambda (f)
+              (add-to-list 'exec-path (expand-file-name f)))
+          (s-split ":" (exec-path-from-shell-getenv "PATH")))
+    (let ((envs '("GOROOT" "GOPATH")))
+      (exec-path-from-shell-copy-envs envs))))
 
 (leaf *dired
   :config
@@ -265,11 +298,36 @@
 
   (leaf *shell
     :config
+    (leaf shell-windows
+      :if (eq system-type 'windows-nt)
+      :hook
+      (shell-mode-hook . (lambda ()
+                           ;; シェルモードの入出力文字コード(cp932 -> utf-8)
+                           ;; (set-buffer-process-coding-system 'utf-8-dos 'utf-8-unix)
+                           ;; (set-buffer-file-coding-system    'utf-8-unix)
+                           (set-buffer-process-coding-system 'cp932 'cp932)
+                           (set-buffer-file-coding-system    'cp932)))
+      :custom
+      (explicit-shell-file-name . "bash.exe")
+      (shell-command-switch . "-c")
+      (shell-file-name . "bash.exe")
+      :config
+      (require 'shell)
+      ;; (M-! and M-| and compile.el)
+      (modify-coding-system-alist 'process ".*sh\\.exe" 'utf-8)
+      ;; エスケープシーケンス処理の設定
+      (autoload 'ansi-color-for-comint-mode-on "ansi-color"
+        "Set `ansi-color-for-comint-mode' to t." t))
     (leaf shell
       :hook
       ;; https://stackoverflow.com/questions/25819034/colors-in-emacs-shell-prompt
       (shell-mode-hook . (lambda ()
-                           (face-remap-set-base 'comint-highlight-prompt :inherit nil)))))
+                           (face-remap-set-base 'comint-highlight-prompt :inherit nil)))
+      ;; or shellモードの時の^M抑制 (どっちが正しい？)
+      ;; (comint-output-filter-functions . shell-strip-ctrl-m nil t)
+      :config
+      ;; shell-modeでの補完 (for drive letter)
+      (setq shell-file-name-chars "~/A-Za-z0-9_^$!#%&{}@'`.,;()-")))
 
   (leaf *org-mode
     :config
@@ -719,6 +777,10 @@ set pagesize 1000
                 (,(concat "\\_<" (regexp-opt CONTROLFLOW) "\\_>") . font-lock-keyword-face)
                 (,(concat "\\_<" (regexp-opt UNIX) "\\_>") . font-lock-warning-face))))))
 
+  (leaf lua-mode
+    :straight t
+    :mode (".nyagos" . lua-mode))
+
   (leaf visual-basic-mode
     ;; in site-lisp
     :mode ("\\.\\(frm\\|bas\\|cls\\|vbs\\|vb\\)$" . visual-basic-mode)
@@ -729,6 +791,7 @@ set pagesize 1000
   (leaf mayu-mode
     ;; in site-lisp
     :mode ("\\.\\(mayu\\)\\'" . mayu-mode))
+
   ;; end of major mode
   )
 
@@ -959,10 +1022,165 @@ set pagesize 1000
 
 (leaf windows-ime
   :if (eq system-type 'windows-nt)
+  :after *encoding
   :config
+
+  ;; 日本語入力のための設定
+  (set-keyboard-coding-system 'cp932)
+
+  (prefer-coding-system 'utf-8-dos)
+  (set-file-name-coding-system 'cp932)
+
+  ;; 標準IMEの設定
+  (setq default-input-method "W32-IME")
+
+  ;; IME状態のモードライン表示 (TODO: doom-modeline に細工が必要)
+  (setq-default w32-ime-mode-line-state-indicator "[Aa]")
+  (setq w32-ime-mode-line-state-indicator-list '("[Aa]" "[あ]" "[Aa]"))
+
+  ;; IMEの初期化
+  (w32-ime-initialize)
+
+  ;; IME OFF時の初期カーソルカラー
+  ;; (set-cursor-color "red")
+  ;; IME ON/OFF時のカーソルカラー
+  ;; (add-hook 'input-method-activate-hook (lambda() (set-cursor-color "green")))
+  ;; (add-hook 'input-method-inactivate-hook (lambda() (set-cursor-color "red")))
+
+  ;; バッファ切り替え時にIME状態を引き継ぐ
+  (setq w32-ime-buffer-switch-p nil)
+
   ;; IME on/off key bind
   (global-set-key (kbd "M-`") 'toggle-input-method)
 
   ;; minibuffer に入った時、IME を OFF にする
   (add-hook 'minibuffer-setup-hook (lambda () (deactivate-input-method)))
   (add-hook 'helm-minibuffer-set-up-hook (lambda () (deactivate-input-method))))
+
+(leaf *frame-setting
+  :config
+  (leaf frame-setting-mac
+    :if (eq system-type 'darwin)
+    :config
+    (setq initial-frame-alist
+	  (append
+	   '((ns-transparent-titlebar . t) ;; タイトルバーを透過
+             (vertical-scroll-bars . nil) ;; スクロールバーを消す
+             ;; (ns-appearance . dark) ;; 26.1 {light, dark}
+             (internal-border-width . 0))))
+    (setq default-frame-alist initial-frame-alist))
+  (leaf frame-setting-common
+    :after frame-setting-mac
+    :config
+    ;; フレームタイトルの設定
+    (setq frame-title-format "%b")
+    ;; 背景の透明度
+    (set-frame-parameter nil 'alpha 90)
+    ;; カーソル点滅表示
+    (blink-cursor-mode 0)
+    ;; スクロール時のカーソル位置の維持
+    (setq scroll-preserve-screen-position t)
+    ;; スクロール行数（一行ごとのスクロール）
+    (setq vertical-centering-font-regexp ".*")
+    (setq scroll-conservatively 35)
+    (setq scroll-margin 0)
+    (setq scroll-step 1)
+    ;; 画面スクロール時の重複行数
+    (setq next-screen-context-lines 1)
+    ;; バッファ中の行番号表示
+    (global-linum-mode t)
+    ;; 行番号のフォーマット
+    ;; (set-face-attribute 'linum nil :foreground "red" :height 0.8)
+    (set-face-attribute 'linum nil :height 0.8)
+    (setq linum-format "%4d")))
+
+(leaf buffer
+  :config
+  ;; バッファ画面外文字の切り詰め表示
+  (setq truncate-lines nil)
+  ;; ウィンドウ縦分割時のバッファ画面外文字の切り詰め表示
+  (setq truncate-partial-width-windows t)
+  ;; 同一バッファ名にディレクトリ付与
+  (require 'uniquify)
+  (setq uniquify-buffer-name-style 'forward)
+  (setq uniquify-buffer-name-style 'post-forward-angle-brackets)
+  (setq uniquify-ignore-buffers-re "*[^*]+*")
+  ;; バッファの先頭までスクロールアップ
+  (defadvice scroll-up (around scroll-up-around)
+    (interactive)
+    (let* ( (start_num (+ 1 (count-lines (point-min) (point))) ) )
+      (goto-char (point-max))
+      (let* ( (end_num (+ 1 (count-lines (point-min) (point))) ) )
+        ;;(goto-line start_num )
+        (goto-char (point-min))
+        (forward-line (1- start_num))
+        (let* ( (limit_num (- (- end_num start_num) (window-height)) ))
+          (if (< (- (- end_num start_num) (window-height)) 0)
+              (goto-char (point-max))
+            ad-do-it)) )) )
+  (ad-activate 'scroll-up)
+
+  ;; バッファの最後までスクロールダウン
+  (defadvice scroll-down (around scroll-down-around)
+    (interactive)
+    (let* ( (start_num (+ 1 (count-lines (point-min) (point)))) )
+      (if (< start_num (window-height))
+          (goto-char (point-min))
+        ad-do-it) ))
+  (ad-activate 'scroll-down))
+
+(leaf startup
+  :config
+  ;; 起動メッセージの非表示
+  (setq inhibit-startup-message t)
+  ;; スタートアップ時のエコー領域メッセージの非表示
+  (setq inhibit-startup-echo-area-message -1))
+
+(leaf backup
+  :config
+  ;; 変更ファイルのバックアップ
+  (setq make-backup-files nil)
+  ;; 変更ファイルの番号つきバックアップ
+  (setq version-control nil)
+  ;; 編集中ファイルのバックアップ
+  (setq auto-save-list-file-name nil)
+  (setq auto-save-list-file-prefix nil)
+  ;; 編集中ファイルのバックアップ先
+  (setq auto-save-file-name-transforms `((".*" ,temporary-file-directory t)))
+  ;; 編集中ファイルのバックアップ間隔（秒）
+  (setq auto-save-timeout 30)
+  ;; 編集中ファイルのバックアップ間隔（打鍵）
+  (setq auto-save-interval 500)
+  ;; バックアップ世代数
+  (setq kept-old-versions 1)
+  (setq kept-new-versions 2)
+  ;; 上書き時の警告表示
+  ;; (setq trim-versions-without-asking nil)
+  ;; 古いバックアップファイルの削除
+  (setq delete-old-versions t))
+
+(leaf w32-symlinks
+  :if (eq system-type 'windoows-nt)
+  :config
+  (custom-set-variables '(w32-symlinks-handle-shortcuts t))
+  (require 'w32-symlinks)
+
+  (defadvice insert-file-contents-literally
+      (before insert-file-contents-literally-before activate)
+    (set-buffer-multibyte nil))
+
+  (defadvice minibuffer-complete (before expand-symlinks activate)
+    (let ((file (expand-file-name
+                 (buffer-substring-no-properties
+                  (line-beginning-position) (line-end-position)))))
+      (when (file-symlink-p file)
+        (delete-region (line-beginning-position) (line-end-position))
+        (insert (w32-symlinks-parse-symlink file))))))
+
+(leaf cygwin
+  :if (eq system-type 'windows-nt)
+  :config
+  (setq cygwin-mount-cygwin-bin-directory (concat (getenv "CYGWIN_DIR") "\\bin"))
+  ;; (require 'setup-cygwin)
+  ;; (load "config/builtins/setup-cygwin")
+  (file-name-shadow-mode -1))

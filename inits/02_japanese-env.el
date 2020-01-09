@@ -95,3 +95,11 @@
 (coding-system-put 'cp932-dos :mnemonic ?P)
 (coding-system-put 'cp932-unix :mnemonic ?P)
 (coding-system-put 'cp932-mac :mnemonic ?P)
+
+;; PuTTY 用の terminal-coding-system の設定
+(apply 'define-coding-system 'utf-8-for-putty
+       "UTF-8 (translate jis to cp932)"
+       :encode-translation-table
+       (get 'japanese-ucs-jis-to-cp932-map 'translation-table)
+       (coding-system-plist 'utf-8))
+(set-terminal-coding-system 'utf-8-for-putty)
