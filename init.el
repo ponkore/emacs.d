@@ -432,20 +432,11 @@ static char * arrow_right[] = {
                                       ))))
 
     (make-face 'mode-line-color-1)
-    (set-face-attribute 'mode-line-color-1 nil
-			:foreground "#fff"
-			:background color1)
+    (set-face-attribute 'mode-line-color-1  nil :foreground "#fff" :background color1)
     (make-face 'mode-line-color-2)
-    (set-face-attribute 'mode-line-color-2 nil
-			:foreground "#fff"
-			:background color2)
-    (set-face-attribute 'mode-line nil
-			:foreground "#f00" ;; #fff
-			:background color3
-			:box nil)
-    (set-face-attribute 'mode-line-inactive nil
-			:foreground "#f66" ;; #fff
-			:background color4))
+    (set-face-attribute 'mode-line-color-2  nil :foreground "#fff" :background color2)
+    (set-face-attribute 'mode-line          nil :foreground "#f00" :background color3 :box nil)
+    (set-face-attribute 'mode-line-inactive nil :foreground "#f66" :background color4))
 
   (leaf doom-modeline
     :straight t
@@ -503,18 +494,6 @@ static char * arrow_right[] = {
     :straight t
     :commands s-join s-split)
 
-  ;; ;;
-  ;; ;; exec path setting ( http://qiita.com/catatsuy/items/3dda714f4c60c435bb25 )
-  ;; ;;
-  ;; (defun set-exec-path-from-shell-PATH ()
-  ;;   "Set up Emacs' `exec-path' and PATH environment variable to match that used by the user's shell.
-  ;; This is particularly useful under Mac OSX, where GUI apps are not started from a shell."
-  ;;   (interactive)
-  ;;   (let ((path-from-shell (replace-regexp-in-string "[ \t\n]*$" "" (shell-command-to-string "/bin/bash --login -i -c 'echo $PATH'"))))
-  ;;     (setenv "PATH" path-from-shell)
-  ;;     (setq exec-path (split-string path-from-shell path-separator))))
-  ;; (set-exec-path-from-shell-PATH)
-
   (leaf *setup-exec-path
     :config
     (leaf exec-path-from-shell
@@ -558,9 +537,7 @@ static char * arrow_right[] = {
     ;; diredから適切なバージョン管理システムの*-statusを起動
     (defun find-path-in-parents (directory base-names)
       (or (find-if 'file-exists-p
-		   (mapcar (lambda (base-name)
-                             (concat directory base-name))
-			   base-names))
+		   (mapcar (lambda (base-name) (concat directory base-name)) base-names))
 	  (if (string= directory "/")
               nil
             (let ((parent-directory (substring directory 0 -1)))
@@ -568,8 +545,7 @@ static char * arrow_right[] = {
     ;;
     (defun dired-vc-status (&rest args)
       (interactive)
-      (let ((path (find-path-in-parents (dired-current-directory)
-					'(".git" ".svn"))))
+      (let ((path (find-path-in-parents (dired-current-directory) '(".git" ".svn"))))
 	(cond ((null path)
 	       (message "not version controlled."))
 	      ((string-match-p "\\.svn$" path)
@@ -632,22 +608,21 @@ static char * arrow_right[] = {
       :straight t
       :mode ("\\.org$" . org-mode)
       :hook (org-mode-hook . turn-on-font-lock)
-      :custom (;; org-mode内部のソースを色付けする
-               (org-src-fontify-natively . t)
-               ;; org-modeの開始時に、行の折り返しを無効にする。
-               (org-startup-truncated . t)
-               ;; follow-linkから戻ることを可能とする。
-               (org-return-follows-link . t)
-
-               (org-refile-use-outline-path . 'file)
-               (org-outline-path-complete-in-steps . nil)
-               (org-log-done . t)
-               (org-todo-keywords . '((sequence "TODO(t)" "WAITING(w)" "|" "DONE(d)" "CANCELED(c)")))
-
-               (org-indent-indentation-per-level . 0)
-               (org-adapt-indentation . nil)
-               (org-clock-clocked-in-display . 'none)
-               (org-clock-out-remove-zero-time-clocks . t))
+      :custom
+      ;; org-mode内部のソースを色付けする
+      (org-src-fontify-natively . t)
+      ;; org-modeの開始時に、行の折り返しを無効にする。
+      (org-startup-truncated . t)
+      ;; follow-linkから戻ることを可能とする。
+      (org-return-follows-link . t)
+      (org-refile-use-outline-path . 'file)
+      (org-outline-path-complete-in-steps . nil)
+      (org-log-done . t)
+      (org-todo-keywords . '((sequence "TODO(t)" "WAITING(w)" "|" "DONE(d)" "CANCELED(c)")))
+      (org-indent-indentation-per-level . 0)
+      (org-adapt-indentation . nil)
+      (org-clock-clocked-in-display . 'none)
+      (org-clock-out-remove-zero-time-clocks . t)
       :config
       ;; 一時間に一回、org-modeの全てのバッファを保存する。
       (run-at-time "00:59" 3600 #'org-save-all-org-buffers)
@@ -687,14 +662,11 @@ static char * arrow_right[] = {
         (list filename)))
     (advice-add 'magit-expand-git-file-name :filter-args #'magit-expand-git-file-name--msys)
     ;; diff関連の設定
-    ;; 2012-04-02
     (defun my:magit-setup-diff ()
       ;; diffを表示しているときに文字単位での変更箇所も強調表示する
       ;; 'allではなくtにすると現在選択中のhunkのみ強調表示する
-      ;; 2012-04-02
       (setq magit-diff-refine-hunk 'all)
       ;; diff用のfaceを設定する
-      ;; 2012-04-02
       (my:diff-mode-setup-faces)))
 
   (leaf markdown-mode
@@ -726,9 +698,8 @@ static char * arrow_right[] = {
       (defun my:emacs-lisp-hooks ()
         (setq-local company-idle-delay 0.2)
         (setq-local company-backends '(company-semantic company-files company-elisp))
-        (setq-local show-paren-style 'expression)
-        ;; (set-newline-and-indent)
-	)
+        (setq-local show-paren-style 'expression))
+      ;; (set-newline-and-indent)
       :hook
       (emacs-lisp-mode-hook . my:emacs-lisp-hooks)))
 
@@ -1283,19 +1254,12 @@ set pagesize 1000
 	  (setq whitespace-style whitespace-style-without-tab)
 	(setq whitespace-style whitespace-style-with-tab)))
     (setq whitespace-space-regexp "\\(\x3000+\\)")
-    (setq whitespace-display-mappings
-	  '((space-mark ?\x3000 [?\□])
-            (tab-mark   ?\t   [?\xBB ?\t])))
+    (setq whitespace-display-mappings '((space-mark ?\x3000 [?\□])
+					(tab-mark   ?\t   [?\xBB ?\t])))
     (global-whitespace-mode t)
-    (set-face-attribute 'whitespace-trailing nil
-			:foreground "DeepPink"
-			:underline t)
-    (set-face-attribute 'whitespace-tab nil
-			:foreground "LightSkyBlue"
-			:underline t)
-    (set-face-attribute 'whitespace-space nil
-			:foreground "GreenYellow"
-			:weight 'bold))
+    (set-face-attribute 'whitespace-trailing nil :foreground "DeepPink" :underline t)
+    (set-face-attribute 'whitespace-tab nil :foreground "LightSkyBlue" :underline t)
+    (set-face-attribute 'whitespace-space nil :foreground "GreenYellow" :weight 'bold))
 
   (leaf cua-mode
     :custom
@@ -1451,16 +1415,7 @@ set pagesize 1000
     (cond
      ((and (featurep 'ripgrep) (executable-find "rg")) (projectile-ripgrep search-term))
      ((executable-find "ag") (projectile-ag search-term))
-     (t (projectile-grep search-term))))
-  ;; :config
-  ;; (projectile-register-project-type
-  ;;  'yarn
-  ;;  '("package.json")
-  ;;  :compile "yarn build"
-  ;;  :test "yarn test"
-  ;;  :run "yarn start"
-  ;;  :test-suffix ".test")
-  )
+     (t (projectile-grep search-term)))))
 
 (leaf anzu
   :straight t
@@ -1725,18 +1680,6 @@ set pagesize 1000
   ;; 補完時に大文字小文字を区別しない
   (setq completion-ignore-case t)
   (setq read-file-name-completion-ignore-case t)
-  ;; ;; 部分一致の補完機能を使う
-  ;; ;; p-bでprint-bufferとか
-  ;; ;; 2012-08-08
-  ;; ;; Emacs 24ではデフォルトで有効になっていて、`partial-completion-mode'は
-  ;; ;; なくなっている。カスタマイズする場合は以下の変数を変更する。
-  ;; ;;   * `completion-styles'
-  ;; ;;   * `completion-pcm-complete-word-inserts-delimiters'
-  ;; (if (fboundp 'partial-completion-mode)
-  ;;     (partial-completion-mode t))
-  ;; ;; 補完可能なものを随時表示
-  ;; ;; 少しうるさい
-  ;; (icomplete-mode 1)
   ;; 履歴数を大きくする
   (setq history-length 500)
   ;; ミニバッファの履歴を保存する
@@ -1754,17 +1697,13 @@ set pagesize 1000
   (require 'uniquify)
   (setq uniquify-buffer-name-style 'post-forward-angle-brackets)
   ;; shebangがあるファイルを保存すると実行権をつける。
-  ;; 2012-03-15
-  (add-hook 'after-save-hook
-            'executable-make-buffer-file-executable-if-script-p)
+  (add-hook 'after-save-hook 'executable-make-buffer-file-executable-if-script-p)
   ;; リージョンの大文字小文字変換を有効にする。
   ;; C-x C-u -> upcase
   ;; C-x C-l -> downcase
-  ;; 2011-03-09
   (put 'upcase-region 'disabled nil)
   (put 'downcase-region 'disabled nil)
   ;; kill
-  ;; 2012-09-01
   ;; Emacs 24からクリップボードだけ使うようになっているので
   ;; Emacs 23のようにprimary selectionを使うように変更
   ;;   * killしたらprimary selectionにだけ入れる（Xの場合のみ）
@@ -1968,9 +1907,9 @@ thumbnail = \"/img/%Y-%m/%d/{{shortname}}.png\"
     ;; 再帰的にgrep
     (require 'grep)
 
-    (if (eq system-type 'windows-nt)
-	(setq grep-command-before-query "yagrep -nH -r -e ")
-      (setq grep-command-before-query "grep -nH -r -e "))
+    (when-let (cmd (or (executable-find "yagrep")
+		       (executable-find "grep")))
+      (setq grep-command-before-query (concat cmd " -nH -r -e")))
 
     (defun grep-default-command ()
       (if current-prefix-arg
