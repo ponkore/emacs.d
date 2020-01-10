@@ -73,6 +73,8 @@
 (leaf *japanese-env
   :config
   ;; 日本語環境
+  (setenv "LANG" "ja_JP.UTF-8")
+
   ;; Localeに合わせた環境の設定
   (set-locale-environment nil)
 
@@ -499,29 +501,34 @@ static char * arrow_right[] = {
 
   (leaf s
     :straight t
-    :commands s-join)
+    :commands s-join s-split)
 
-  ;;   ;;
-  ;;   ;; exec path setting ( http://qiita.com/catatsuy/items/3dda714f4c60c435bb25 )
-  ;;   ;;
-  ;;   (defun set-exec-path-from-shell-PATH ()
-  ;;     "Set up Emacs' `exec-path' and PATH environment variable to match that used by the user's shell.
+  ;; ;;
+  ;; ;; exec path setting ( http://qiita.com/catatsuy/items/3dda714f4c60c435bb25 )
+  ;; ;;
+  ;; (defun set-exec-path-from-shell-PATH ()
+  ;;   "Set up Emacs' `exec-path' and PATH environment variable to match that used by the user's shell.
   ;; This is particularly useful under Mac OSX, where GUI apps are not started from a shell."
-  ;;     (interactive)
-  ;;     (let ((path-from-shell (replace-regexp-in-string "[ \t\n]*$" "" (shell-command-to-string "/bin/bash --login -i -c 'echo $PATH'"))))
-  ;;       (setenv "PATH" path-from-shell)
-  ;;       (setq exec-path (split-string path-from-shell path-separator))))
-  ;;   (set-exec-path-from-shell-PATH)
+  ;;   (interactive)
+  ;;   (let ((path-from-shell (replace-regexp-in-string "[ \t\n]*$" "" (shell-command-to-string "/bin/bash --login -i -c 'echo $PATH'"))))
+  ;;     (setenv "PATH" path-from-shell)
+  ;;     (setq exec-path (split-string path-from-shell path-separator))))
+  ;; (set-exec-path-from-shell-PATH)
 
-  (leaf exec-path-from-shell
-    :straight t
-    :commands exec-path-from-shell-copy-envs
+  (leaf *setup-exec-path
     :config
-    (mapc #'(lambda (f)
-              (add-to-list 'exec-path (expand-file-name f)))
-          (s-split ":" (exec-path-from-shell-getenv "PATH")))
-    (let ((envs '("GOROOT" "GOPATH")))
-      (exec-path-from-shell-copy-envs envs))))
+    (leaf exec-path-from-shell
+      :straight t
+      :commands exec-path-from-shell-getenv)
+    (defun setup-exec-path ()
+      (message "inside setup-exec-path")
+      (mapc #'(lambda (f)
+		(add-to-list 'exec-path (expand-file-name f)))
+	    (s-split ":" (exec-path-from-shell-getenv "PATH"))))
+    (setup-exec-path)))
+
+;; (let ((envs '("GOROOT" "GOPATH")))
+;;   (exec-path-from-shell-copy-envs envs))
 
 (leaf *dired
   :config
@@ -599,12 +606,11 @@ static char * arrow_right[] = {
                            ;; (set-buffer-file-coding-system    'utf-8-unix)
                            (set-buffer-process-coding-system 'cp932 'cp932)
                            (set-buffer-file-coding-system    'cp932)))
-      :custom
-      (explicit-shell-file-name . "bash.exe")
-      (shell-command-switch . "-c")
-      (shell-file-name . "bash.exe")
       :config
       (require 'shell)
+      (setq explicit-shell-file-name "bash.exe")
+      (setq shell-command-switch "-c")
+      (setq shell-file-name "bash.exe")
       ;; (M-! and M-| and compile.el)
       (modify-coding-system-alist 'process ".*sh\\.exe" 'utf-8)
       ;; エスケープシーケンス処理の設定
@@ -729,12 +735,13 @@ static char * arrow_right[] = {
 
   (leaf *lisp
     :config
+    (leaf slime-company
+      :straight t)
     (leaf slime
       :straight t
       :commands slime-setup
-      :after company
       :custom
-      (inferior-lisp-program . "ros run")
+      `(inferior-lisp-program . ,(concat (executable-find "ros") " run"))
       :bind
       (:company-active-map
        ("C-d" . company-show-doc-buffer)
@@ -743,9 +750,9 @@ static char * arrow_right[] = {
       (slime-setup '(slime-repl slime-fancy slime-banner slime-company)))
     (leaf pretty-print
       :hook
-      (lisp-interaction-mode-hook . (lambda() (define-key lisp-interaction-mode-map (kbd "C-c RET") 'my-pp-macroexpand-last-sexp)))
-      (emacs-lisp-mode-hook . (lambda() (define-key emacs-lisp-mode-map (kbd "C-c RET") 'my-pp-macroexpand-last-sexp)))
-      :config
+      (lisp-interaction-mode-hook . (lambda() (define-key lisp-interaction-mode-map (kbd "C-c RET") 'my:pp-macroexpand-last-sexp)))
+      (emacs-lisp-mode-hook . (lambda() (define-key emacs-lisp-mode-map (kbd "C-c RET") 'my:pp-macroexpand-last-sexp)))
+      :preface
       (defun my:pp-macroexpand-last-sexp ()
 	(interactive)
 	(if (thing-at-point-looking-at "\(")
