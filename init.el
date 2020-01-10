@@ -1,3 +1,4 @@
+;; -*- lexical-binding: t -*-
 ;;
 ;; ~/.emacs.d/init.el
 ;;
@@ -189,6 +190,7 @@
     (setq default-process-coding-system '(utf-8 . utf-8))))
 
 (leaf *font-setting
+  :if window-system
   :after all-the-icons
   :config
   (defun emacs-font-setting (font-name size)
@@ -218,13 +220,13 @@
       (set-fontset-font nil 'katakana-jisx0201 jp-fontspec)
       (set-fontset-font nil '(#x0080 . #x024F) fontspec)
       (set-fontset-font nil '(#x0370 . #x03FF) fontspec)
-      (when (require 'all-the-icons nil t)
-	(set-fontset-font nil 'unicode (font-spec :family (all-the-icons-alltheicon-family)) nil 'append)
-	(set-fontset-font nil 'unicode (font-spec :family (all-the-icons-material-family)) nil 'append)
-	(set-fontset-font nil 'unicode (font-spec :family (all-the-icons-fileicon-family)) nil 'append)
-	(set-fontset-font nil 'unicode (font-spec :family (all-the-icons-faicon-family)) nil 'append)
-	(set-fontset-font nil 'unicode (font-spec :family (all-the-icons-octicon-family)) nil 'append)
-	(set-fontset-font nil 'unicode (font-spec :family (all-the-icons-wicon-family)) nil 'append))
+      ;; all-the-icons-font
+      (set-fontset-font nil 'unicode (font-spec :family (all-the-icons-alltheicon-family)) nil 'append)
+      (set-fontset-font nil 'unicode (font-spec :family (all-the-icons-material-family)) nil 'append)
+      (set-fontset-font nil 'unicode (font-spec :family (all-the-icons-fileicon-family)) nil 'append)
+      (set-fontset-font nil 'unicode (font-spec :family (all-the-icons-faicon-family)) nil 'append)
+      (set-fontset-font nil 'unicode (font-spec :family (all-the-icons-octicon-family)) nil 'append)
+      (set-fontset-font nil 'unicode (font-spec :family (all-the-icons-wicon-family)) nil 'append)
       (setq face-font-rescale-alist '((font-name . 1.0)))))
   (defun setup-font ()
     (interactive)
@@ -445,6 +447,7 @@ static char * arrow_right[] = {
 
   (leaf doom-modeline
     :straight t
+    :if window-system
     :commands (doom-modeline-def-modeline)
     :custom
     (doom-modeline-buffer-file-name-style . 'truncate-with-project)
@@ -652,6 +655,7 @@ static char * arrow_right[] = {
         (advice-add 'org-extract-archive-file :filter-return #'my:org-add-ymd-to-archive)))
     (leaf org-bullets
       :straight t
+      :if window-system
       :custom (org-bullets-bullet-list . '("" "" "" "" "" "" ""))
       :hook (org-mode-hook . org-bullets-mode))
     (leaf org-beautify-theme
@@ -799,7 +803,10 @@ static char * arrow_right[] = {
       :if (eq system-type 'windows-nt)
       :config
       ;; on Windows, use lein.bat instead of lein shell script.
-      (setq cider-lein-command "lein.bat")))
+      (setq cider-lein-command "lein.bat"))
+
+    (leaf flycheck-clj-kondo
+      :straight t))
 
   (leaf *python
     :config
@@ -1520,7 +1527,7 @@ set pagesize 1000
     ;; ツールバーを消す
     (tool-bar-mode -1)
     ;; scroll bar を表示しない
-    (scroll-bar-mode 0)
+    (when (fboundp 'scroll-bar-mode) (scroll-bar-mode 0))
     ;; スクロール時のカーソル位置の維持
     (setq scroll-preserve-screen-position t)
     ;; スクロール行数（一行ごとのスクロール）
@@ -1659,7 +1666,7 @@ set pagesize 1000
 (leaf global-set-keys
   :config
   (mapcar
-   '(lambda (l) (global-set-key (first l) (second l)))
+   #'(lambda (l) (global-set-key (first l) (second l)))
    '(("\C-h" delete-backward-char)
      ("\C-z" scroll-down)
      ("\e?" apropos)
