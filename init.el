@@ -1777,6 +1777,16 @@ set pagesize 1000
 
 (leaf *etc
   :config
+  (leaf dashboard
+    :when (version<= "25.1" emacs-version)
+    :ensure t
+    :custom ((dashboard-items . '((recents . 15)
+                                  (projects . 5)
+                                  (bookmarks . 5)
+                                  ;; (agenda . 5)
+                                  )))
+    :config
+    (dashboard-setup-startup-hook))
   (leaf **misc-utility
     :config
     (defun read-file-and-list-each-lines (filename)
