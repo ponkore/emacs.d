@@ -1351,9 +1351,13 @@ set pagesize 1000
     (company-box-show-single-candidate . t)
     (company-box-max-candidates . 50)
     (company-box-icons-alist . 'company-box-icons-all-the-icons)
-    :config
-    (setq company-box-backends-colors nil)
+    (company-box-background . '((t (:inherit company-tooltip :background "midnight blue"))))
 
+    (company-box-backends-colors . '((company-yasnippet . (:candidate "yellow" :annotation some-face))
+				     (company-elisp . (:icon "yellow" :selected
+							     (:background "orange" :foreground "black")))
+				   (company-dabbrev . "purple")))
+    :config
     ;; great configuration for company-box with all-the-icons
     ;; https://ladicle.com/post/config/#company
     (declare-function all-the-icons-faicon 'all-the-icons)
