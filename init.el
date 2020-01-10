@@ -1164,6 +1164,9 @@ set pagesize 1000
       )
     (defun my:diff-mode-refine-automatically ()
       (diff-auto-refine-mode t)))
+
+  (leaf yaml-mode
+    :straight t)
   ;; end of major-mode
   )
 
