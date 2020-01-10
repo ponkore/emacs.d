@@ -521,7 +521,6 @@ static char * arrow_right[] = {
       :straight t
       :commands exec-path-from-shell-getenv)
     (defun setup-exec-path ()
-      (message "inside setup-exec-path")
       (mapc #'(lambda (f)
 		(add-to-list 'exec-path (expand-file-name f)))
 	    (s-split ":" (exec-path-from-shell-getenv "PATH"))))
@@ -1424,8 +1423,10 @@ set pagesize 1000
             (Event . ,(all-the-icons-faicon "bolt" :height 0.7 :v-adjust -0.05 :face 'all-the-icons-orange))
             (Operator . ,(all-the-icons-fileicon "typedoc" :height 0.65 :v-adjust 0.05))
             (TypeParameter . ,(all-the-icons-faicon "hashtag" :height 0.65 :v-adjust 0.07 :face 'font-lock-const-face))
-            (Template . ,(all-the-icons-faicon "code" :height 0.7 :v-adjust 0.02 :face 'font-lock-variable-name-face)))))
-  )
+            (Template . ,(all-the-icons-faicon "code" :height 0.7 :v-adjust 0.02 :face 'font-lock-variable-name-face))))))
+
+(leaf projectile-ripgrep
+  :straight t)
 
 (leaf projectile
   :straight t
@@ -1673,24 +1674,24 @@ set pagesize 1000
 (leaf global-set-keys
   :config
   (mapcar
-   #'(lambda (l) (global-set-key (first l) (second l)))
-   '(("\C-h" delete-backward-char)
-     ("\C-z" scroll-down)
-     ("\e?" apropos)
-     ("\C-x\C-e" compile)
-     ("\C-x\C-n" next-error)
-     ("\C-x\C-v" find-file-other-window)
-     ("\C-x=" count-lines-page)
-     ("\C-xn" myblog-hugo/create-draft)
-     ("\C-xl" goto-line)
-     ("\C-xg" grep)
-     ("\C-xt" toggle-truncate-lines)
-     ("\e\C-g" keyboard-quit)              ; init.el の設定をもとに戻す
-     ("\C-x!" shell-command)
-     ("\C-x|" shell-command-on-region)
-     ("\eh" backward-kill-word)
+   #'(lambda (l) (global-set-key (kbd (first l)) (second l)))
+   '(("C-h" delete-backward-char)
+     ("C-z" scroll-down)
+     ("ESC ?" apropos)
+     ("C-x C-e" compile)
+     ("C-x C-n" next-error)
+     ("C-x C-v" find-file-other-window)
+     ("C-x =" count-lines-page)
+     ("C-x n" myblog-hugo/create-draft)
+     ("C-x l" goto-line)
+     ("C-x g" grep)
+     ("C-x t" toggle-truncate-lines)
+     ("ESC C-g" keyboard-quit)
+     ("C-x !" shell-command)
+     ("C-x |" shell-command-on-region)
+     ("ESC h" backward-kill-word)
      ("%" my:match-paren)
-     ))
+     ("C-x C-;" my:insert-datetime)))
   (defun my:match-paren (arg)
     "Go to the matching parenthesis if on parenthesis otherwise insert %."
     (interactive "p")
@@ -1700,9 +1701,7 @@ set pagesize 1000
      (t (self-insert-command (or arg 1)))))
   (defun my:insert-datetime ()
     (interactive)
-    (insert (format-time-string "%Y/%m/%d %T")))
-  (defmacro foo (key fun) `(global-set-key (kbd ,key) (function ,fun)))
-  (foo "C-x C-;" my:insert-datetime))
+    (insert (format-time-string "%Y/%m/%d %T"))))
 
 (leaf global-configuration
   :config
