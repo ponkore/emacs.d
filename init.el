@@ -268,6 +268,9 @@
         (((class color) (background dark)) :foreground "#31343F"))
       "Face used by Ivy for highlighting the invisible arrow."))
 
+  (leaf ivy-hydra
+    :straight t)
+
   (leaf ivy-rich
     :straight t
     :hook (emacs-startup-hook . ivy-rich-mode)
@@ -650,7 +653,16 @@ static char * arrow_right[] = {
     (leaf org-bullets
       :straight t
       :custom (org-bullets-bullet-list . '("" "" "" "" "" "" ""))
-      :hook (org-mode-hook . org-bullets-mode)))
+      :hook (org-mode-hook . org-bullets-mode))
+    (leaf org-beautify-theme
+      :straight t
+      :disabled t
+      :config
+      (load-theme 'org-beautify t))
+    (leaf org-download
+      :ensure t
+      :custom
+      (org-download-image-dir . "./img")))
 
   (leaf magit
     :straight t
