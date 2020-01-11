@@ -6,6 +6,7 @@
  ;; If you edit it by hand, you could mess it up, so be careful.
  ;; Your init file should contain only one such instance.
  ;; If there is more than one, they won't work right.
+ '(company-box-background ((t (:inherit company-tooltip :background "midnight blue"))))
  '(company-preview ((t (:foreground "darkgray" :underline t))))
  '(company-preview-common ((t (:inherit company-preview))))
  '(company-scrollbar-bg ((t (:background "gray40"))))
@@ -42,6 +43,16 @@
  '(cider-show-error-buffer t t)
  '(column-number-mode 0)
  '(company-begin-commands (quote (self-insert-command)))
+ '(company-box-backends-colors
+   (quote
+    ((company-yasnippet :candidate "yellow" :annotation some-face)
+     (company-elisp :icon "yellow" :selected
+		    (:background "orange" :foreground "black"))
+     (company-dabbrev . "purple"))) t)
+ '(company-box-background
+   (quote
+    ((t
+      (:inherit company-tooltip :background "midnight blue")))) t)
  '(company-box-doc-enable t)
  '(company-box-icons-alist (quote company-box-icons-all-the-icons))
  '(company-box-max-candidates 50)
@@ -59,8 +70,9 @@
  '(custom-safe-themes
    (quote
     ("4639288d273cbd3dc880992e6032f9c817f17c4a91f00f3872009a099f5b3f84" default)))
+ '(dashboard-items (quote ((recents . 15) (projects . 5) (bookmarks . 5))) t)
  '(dired-dwim-target t)
- '(dired-isearch-filenames t)
+ '(dired-isearch-filenames t t)
  '(dired-recursive-copies (quote always))
  '(doom-modeline-buffer-file-name-style (quote truncate-with-project))
  '(doom-modeline-icon t)
@@ -69,6 +81,7 @@
  '(flycheck-disabled-checkers (quote (javascript-jshint javascript-jscs)))
  '(flycheck-display-errors-function (function flycheck-pos-tip-error-messages))
  '(helm-truncate-lines t t)
+ '(inferior-lisp-program "/usr/local/bin/ros run" t)
  '(ivy-count-format "(%d/%d) ")
  '(ivy-extra-directories (quote ("../" "./")))
  '(ivy-format-functions-alist (quote ((t . ivy-format-function-arrow))))
@@ -79,24 +92,35 @@
  '(js-indent-level 2 t)
  '(js2-basic-offset 2 t)
  '(line-number-mode 0)
+ '(migemo-coding-system nil t)
+ '(migemo-command "cmigemo" t)
+ '(migemo-dictionary
+   (\`
+    (expand-file-name "~/.emacs.d/migemo/utf-8/migemo-dict")) t)
+ '(migemo-options (quote ("-q" "--emacs")) t)
+ '(migemo-pattern-alist-length 1024 t)
+ '(migemo-regex-dictionary nil t)
+ '(migemo-use-frequent-pattern-alist t t)
+ '(migemo-use-pattern-alist t t)
+ '(migemo-user-dictionary nil t)
  '(nrepl-hide-special-buffers t t)
  '(nrepl-sync-request-timeout 40 t)
  '(open-junk-file-format "~/Downloads/junk/%Y-%m-%d-%H%M%S." t)
- '(org-adapt-indentation nil)
- '(org-bullets-bullet-list (quote ("" "" "" "" "" "" "")))
- '(org-clock-clocked-in-display (quote none))
- '(org-clock-out-remove-zero-time-clocks t)
+ '(org-adapt-indentation nil t)
+ '(org-bullets-bullet-list (quote ("" "" "" "" "" "" "")) t)
+ '(org-clock-clocked-in-display (quote none) t)
+ '(org-clock-out-remove-zero-time-clocks t t)
  '(org-download-image-dir "./img" t)
  '(org-indent-indentation-per-level 0 t)
- '(org-log-done t)
- '(org-outline-path-complete-in-steps nil)
- '(org-refile-use-outline-path (quote file))
- '(org-return-follows-link t)
- '(org-src-fontify-natively t)
- '(org-startup-truncated t)
+ '(org-log-done t t)
+ '(org-outline-path-complete-in-steps nil t)
+ '(org-refile-use-outline-path (quote file) t)
+ '(org-return-follows-link t t)
+ '(org-src-fontify-natively t t)
+ '(org-startup-truncated t t)
  '(org-todo-keywords
    (quote
-    ((sequence "TODO(t)" "WAITING(w)" "|" "DONE(d)" "CANCELED(c)"))))
+    ((sequence "TODO(t)" "WAITING(w)" "|" "DONE(d)" "CANCELED(c)"))) t)
  '(package-selected-packages
    (quote
     (init-loader leaf leaf-keywords pastels-on-dark-theme)))
@@ -104,11 +128,13 @@
  '(projectile-enable-caching t)
  '(projectile-enable-idle-timer nil)
  '(recentf-max-saved-items 200)
- '(recentf-save-file "c:/Users/fj2260ec/.emacs.d/recentf")
+ '(recentf-save-file "/Users/masao/.emacs.d/recentf")
  '(regexp-opt nil t)
  '(safe-local-variable-values
    (quote
-    ((checkdoc-package-keywords-flag)
+    ((cider-ns-refresh-after-fn . "integrant.repl/resume")
+     (cider-ns-refresh-before-fn . "integrant.repl/suspend")
+     (checkdoc-package-keywords-flag)
      (cider-ns-refresh-after-fn . "reloaded.repl/resume")
      (cider-ns-refresh-before-fn . "reloaded.repl/suspend")
      (cider-default-cljs-repl . "(do (user/go) (user/cljs-repl))")
@@ -121,8 +147,8 @@
  '(shell-command-switch "-c" t)
  '(sql-product (quote postgres) t)
  '(swiper-include-line-number-in-search t)
- '(tide-format-options (quote (:indentSize 2 :tabSize 2)) t)
- '(typescript-indent-level 2 t)
+ '(tide-format-options (quote (:indentSize 2 :tabSize 2)))
+ '(typescript-indent-level 2)
  '(w32-symlinks-handle-shortcuts t)
  '(web-mode-code-indent-offset 2 t)
  '(web-mode-markup-indent-offset 2 t)
