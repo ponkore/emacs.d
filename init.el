@@ -238,6 +238,14 @@
       (emacs-font-setting "Hackgen" 10)))
   (setup-font))
 
+(leaf *modifier
+  :config
+  (leaf *modifier-macos
+    :if (eq system-type 'darwin)
+    :config
+    (setq mac-option-modifier 'super)
+    (setq mac-command-modifier 'meta)))
+
 ;;
 ;; ivy (https://qiita.com/blue0513/items/c0dc35a880170997c3f5)
 ;;
