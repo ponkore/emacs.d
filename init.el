@@ -1181,6 +1181,9 @@ set pagesize 1000
 
   (leaf yaml-mode
     :straight t)
+
+  (leaf log4j-mode
+    :straight t)
   ;; end of major-mode
   )
 
