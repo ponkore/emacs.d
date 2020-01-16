@@ -158,5 +158,4 @@
 # key: ${2:${1:$(yas--key-from-desc yas-text)}}
 # expand-env: ((yas/indent-line 'fixed) (yas/wrap-around-region 'nil))
 # --
-$0")
- '(yas-prompt-functions (quote (my-yas/prompt))))
+$0"))
