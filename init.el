@@ -894,7 +894,7 @@ same directory as the org-buffer and insert a link to this file."
     (leaf web-mode
       :straight t
       :mode ("\\.tsx\\'" . web-mode)
-      :after tide
+      :after flycheck-mode
       :hook
       (web-mode-hook . (lambda ()
                          (when (string-equal "tsx" (file-name-extension buffer-file-name))
