@@ -796,6 +796,7 @@ same directory as the org-buffer and insert a link to this file."
 
     (leaf cider
       :straight t
+      :bind ("C-c M-j" . cider-jack-in)
       :hook
       (cider-repl-mode-hook . company-mode)
       (cider-mode-hook . company-mode)
