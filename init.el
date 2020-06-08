@@ -1184,6 +1184,13 @@ set pagesize 1000
 
   (leaf log4j-mode
     :straight t)
+
+  (leaf dockerfile-mode
+    :straight t
+    :mode ("Dockerfile\\'" . dockerfile-mode))
+
+  (leaf docker-compose-mode
+    :straight t)
   ;; end of major-mode
   )
 
