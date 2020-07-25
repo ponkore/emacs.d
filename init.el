@@ -235,7 +235,7 @@
     (when (eq system-type 'darwin)
       (emacs-font-setting "Ricty Diminished" 16))
     (when (eq system-type 'windows-nt)
-      (emacs-font-setting "Hackgen" 10)))
+      (emacs-font-setting "HackgenNerd" 10)))
   (setup-font))
 
 (leaf *modifier
