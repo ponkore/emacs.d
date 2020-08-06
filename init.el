@@ -235,7 +235,7 @@
     (when (eq system-type 'darwin)
       (emacs-font-setting "Ricty Diminished" 16))
     (when (eq system-type 'windows-nt)
-      (emacs-font-setting "Hackgen" 10)))
+      (emacs-font-setting "HackgenNerd" 10)))
   (setup-font))
 
 (leaf *modifier
@@ -445,26 +445,27 @@ static char * arrow_right[] = {
     (set-face-attribute 'mode-line-color-2  nil :foreground "#fff" :background color2)
     (set-face-attribute 'mode-line          nil :foreground "#f00" :background color3 :box nil)
     (set-face-attribute 'mode-line-inactive nil :foreground "#f66" :background color4))
+  )
 
-  (leaf doom-modeline
-    :straight t
-    :if window-system
-    :commands (doom-modeline-def-modeline)
-    :custom
-    (doom-modeline-buffer-file-name-style . 'truncate-with-project)
-    (doom-modeline-icon . t)
-    (doom-modeline-major-mode-icon . nil)
-    (doom-modeline-minor-modes . nil)
-    :hook (emacs-startup-hook . doom-modeline-mode)
-    :config
-    (line-number-mode 0)
-    (column-number-mode 0)
-    (which-function-mode 0)
-    (doom-modeline-def-modeline
-      'main
-      ;; '(workspace-number bar window-number evil-state ryo-modal xah-fly-keys matches buffer-info remote-host buffer-position parrot selection-info)
-      '(bar matches buffer-info buffer-position selection-info)
-      '(misc-info debug minor-modes input-method major-mode process vcs checker))))
+;; (leaf doom-modeline
+;;     :straight t
+;;     :if window-system
+;;     :commands (doom-modeline-def-modeline)
+;;     :custom
+;;     (doom-modeline-buffer-file-name-style . 'truncate-with-project)
+;;     (doom-modeline-icon . t)
+;;     (doom-modeline-major-mode-icon . nil)
+;;     (doom-modeline-minor-modes . nil)
+;;     :hook (emacs-startup-hook . doom-modeline-mode)
+;;     :config
+;;     (line-number-mode 0)
+;;     (column-number-mode 0)
+;;     (which-function-mode 0)
+;;     (doom-modeline-def-modeline
+;;       'main
+;;       ;; '(workspace-number bar window-number evil-state ryo-modal xah-fly-keys matches buffer-info remote-host buffer-position parrot selection-info)
+;;       '(bar matches buffer-info buffer-position selection-info)
+;;       '(misc-info debug minor-modes input-method major-mode process vcs checker)))
 
 (leaf *utility-package
   :config
@@ -854,6 +855,7 @@ same directory as the org-buffer and insert a link to this file."
   (leaf *php
     :config
     (leaf php-mode
+      :mode ("\\.cgi\\'" . php-mode)
       :straight t
       :hook
       (php-mode-hook . (lambda ()
