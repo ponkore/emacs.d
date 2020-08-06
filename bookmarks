@@ -2,9 +2,4 @@
 ;;; This format is meant to be slightly human-readable;
 ;;; nevertheless, you probably don't want to edit it.
 ;;; -*- End Of Bookmark File Format Version Stamp -*-
-(("workspace"
- (filename . "c:/proj/workspace/")
- (front-context-string . "920_tdai_gw_ekss")
- (rear-context-string . "e 0 06-19 13:19 ")
- (position . 201))
-)
+()
