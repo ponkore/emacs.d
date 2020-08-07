@@ -855,7 +855,7 @@ same directory as the org-buffer and insert a link to this file."
   (leaf *php
     :config
     (leaf php-mode
-      :mode ("\\.cgi\\'" . php-mode)
+      :mode ("\\.\\(cgi\\|phpm\\)\\'" . php-mode)
       :straight t
       :hook
       (php-mode-hook . (lambda ()
