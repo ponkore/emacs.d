@@ -15,7 +15,8 @@
 (require 'package)
 (add-to-list 'package-archives '("melpa" . "https://melpa.org/packages/"))
 (add-to-list 'package-archives '("marmalade" . "https://marmalade-repo.org/packages/"))
-(package-initialize)
+(when (< (string-to-number emacs-version) 27)
+  (package-initialize))
 
 ;;
 ;; initialize straight
@@ -32,6 +33,9 @@
       (goto-char (point-max))
       (eval-print-last-sexp)))
   (load bootstrap-file nil 'nomessage))
+
+(when (>= (string-to-number emacs-version) 27)
+  (setq byte-compile-warnings '(cl-functions)))
 
 (require 'cl)
 
