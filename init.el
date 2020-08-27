@@ -719,6 +719,10 @@ same directory as the org-buffer and insert a link to this file."
     :hook (rst-mode-hook . (lambda ()
                              (setq indent-tabs-mode nil)
                              (setq frame-background-mode 'dark))))
+
+  (leaf adoc-mode
+    :straight t)
+
   ;; (let ((i 1))
   ;;   (while (<= i rst-level-face-max)
   ;;     (let ((face-name (intern (format "rst-level-%d-face" i))))
