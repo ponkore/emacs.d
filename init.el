@@ -1301,12 +1301,10 @@ set pagesize 1000
   (leaf flycheck
     :straight t
     :commands flycheck-mode
-    :after flycheck-pos-tip
+    :hook (flycheck-mode-hook . flycheck-pos-tip-mode)
     :custom
     (flycheck-disabled-checkers . '(javascript-jshint javascript-jscs))
     (flycheck-display-errors-function . #'flycheck-pos-tip-error-messages)
-    ;; (flycheck-add-next-checker 'javascript-jshint
-    ;;                            'javascript-gjslint)
     :hydra
     (hydra-flycheck nil
                     "
