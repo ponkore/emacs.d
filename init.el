@@ -907,6 +907,7 @@ same directory as the org-buffer and insert a link to this file."
     (leaf tide
       :straight t
       :commands setup-tide-mode
+      :after typescript-mode company flycheck
       :custom
       (typescript-indent-level . 2)
       (js-indent-level . 2)
@@ -917,6 +918,8 @@ same directory as the org-buffer and insert a link to this file."
       ;; aligns annotation to the right hand side
       (company-tooltip-align-annotations . t)
       :hook
+      (typescript-mode . tide-setup)
+      (typescript-mode . tide-hl-identifier-mode)
       ;; formats the buffer before saving
       (before-save-hook . tide-format-before-save)
       :config
@@ -924,7 +927,8 @@ same directory as the org-buffer and insert a link to this file."
         (interactive)
         (tide-setup)
         (flycheck-mode +1)
-        (setq flycheck-check-syntax-automatically '(save mode-enabled))
+        ;; (setq flycheck-check-syntax-automatically '(save mode-enabled))
+        (setq flycheck-check-syntax-automatically '(idle-change))
         (eldoc-mode +1)
         (tide-hl-identifier-mode +1)
         ;; company is an optional dependency. You have to
@@ -938,7 +942,8 @@ same directory as the org-buffer and insert a link to this file."
 
   (leaf web-mode
     :straight t
-    :after flycheck-mode tide
+    :mode ("\\.tsx\\'" . web-mode)
+    :after tide
     :hook
     (web-mode-hook . (lambda ()
                        (when (string-equal "tsx" (file-name-extension buffer-file-name))
