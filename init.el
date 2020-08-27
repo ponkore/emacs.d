@@ -904,6 +904,9 @@ same directory as the org-buffer and insert a link to this file."
 
   (leaf javascript/typescript
     :config
+    (leaf add-node-modules-path
+      :straight t
+      :commands add-node-modules-path)
     (leaf tide
       :straight t
       :commands setup-tide-mode
@@ -925,7 +928,9 @@ same directory as the org-buffer and insert a link to this file."
       :config
       (defun setup-tide-mode ()
         (interactive)
+        (add-node-modules-path)
         (tide-setup)
+        (flycheck-add-mode 'javascript-eslint 'web-mode)
         (flycheck-mode +1)
         ;; (setq flycheck-check-syntax-automatically '(save mode-enabled))
         (setq flycheck-check-syntax-automatically '(idle-change))
