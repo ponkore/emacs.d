@@ -868,10 +868,40 @@ same directory as the org-buffer and insert a link to this file."
       :straight t
       :hook
       (php-mode-hook . (lambda ()
+			 (company-mode t)
+			 (subword-mode 1)
+			 (setq-local page-delimiter "\\_<\\(class\\|function\\|namespace\\)\\_>.+$")
+			 (ac-php-core-eldoc-setup)
+			 (add-to-list 'company-backends 'company-ac-php-backend)
+			 (make-local-variable 'company-backends)
                          ;; http://oh-sky.hatenablog.com/entry/2013/07/07/004651
+			 (require 'flycheck-phpstan)
+			 (flycheck-mode t)
+			 (add-to-list 'flycheck-disabled-checkers 'php-phpmd)
+			 (add-to-list 'flycheck-disabled-checkers 'php-phpcs)
                          (setq tab-width 4)
                          (setq indent-tabs-mode nil)
-                         (setq c-basic-offset 4)))))
+                         (setq c-basic-offset 4)))
+      :config
+      (leaf company-php
+	:straight t)
+      (leaf flycheck-phpstan
+	:straight t)
+      :custom
+      (php-manual-url . 'ja)
+      (php-mode-coding-style . 'psr2)
+      :bind
+      (:php-mode-map
+       (";" . self-insert-command)
+       ;; ("[" . #'(smartchr "[]" "array()" "[[]]"))
+       ;; ("]" . #'(smartchr "array " "]" "]]"))
+       ;; ("C-}" . cedit-barf)
+       ;; ("C-)" . cedit-slurp)
+       ("M-." . ac-php-find-symbol-at-point)
+       ("M-," . ac-php-location-stack-back)
+       ("C-c C-c" . psysh-eval-region)
+       ("C-c C--" . php-current-class)
+       ("C-c C-=" . php-current-namespace))))
 
   (leaf javascript/typescript
     :config
