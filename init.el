@@ -775,7 +775,7 @@ same directory as the org-buffer and insert a link to this file."
     (leaf clojure-mode
       :straight t
       :commands define-clojure-indent
-      :mode ("\\(default\\|user\\|emacs\\)\.\\(behaviors\\|keymap\\)" . clojure-mode)
+      :mode ("\\(default\\|user\\|emacs\\)\\.\\(behaviors\\|keymap\\)" . clojure-mode)
       :hook
       (clojure-mode-hook . yas-minor-mode)
       (clojure-mode-hook . smartparens-strict-mode)
