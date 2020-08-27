@@ -823,8 +823,7 @@ same directory as the org-buffer and insert a link to this file."
       :if (eq system-type 'windows-nt)
       :config
       ;; on Windows, use lein.bat instead of lein shell script.
-      (setq cider-lein-command "lein.bat"))
-    )
+      (setq cider-lein-command "lein.bat")))
 
   (leaf *python
     :config
@@ -905,20 +904,9 @@ same directory as the org-buffer and insert a link to this file."
 
   (leaf javascript/typescript
     :config
-    (defun setup-tide-mode ()
-      (interactive)
-      (tide-setup)
-      (flycheck-mode +1)
-      (setq flycheck-check-syntax-automatically '(save mode-enabled))
-      (eldoc-mode +1)
-      (tide-hl-identifier-mode +1)
-      ;; company is an optional dependency. You have to
-      ;; install it separately via package-install
-      ;; `M-x package-install [ret] company`
-      (company-mode +1))
-
     (leaf tide
       :straight t
+      :commands setup-tide-mode
       :custom
       (typescript-indent-level . 2)
       (js-indent-level . 2)
@@ -927,32 +915,44 @@ same directory as the org-buffer and insert a link to this file."
       (web-mode-markup-indent-offset . 2)
       (tide-format-options . '(:indentSize 2 :tabSize 2))
       ;; aligns annotation to the right hand side
-      (company-tooltip-align-annotations . t))
-
-    (leaf typescript-mode
-      :straight t
-      :hook (typescript-mode-hook . setup-tide-mode))
-
-    (leaf web-mode
-      :straight t
-      :mode ("\\.tsx\\'" . web-mode)
-      :after flycheck-mode
+      (company-tooltip-align-annotations . t)
       :hook
-      (web-mode-hook . (lambda ()
-                         (when (string-equal "tsx" (file-name-extension buffer-file-name))
-                           (setup-tide-mode))))
       ;; formats the buffer before saving
       (before-save-hook . tide-format-before-save)
       :config
-      ;; enable typescript-tslint checker
-      (flycheck-add-mode 'typescript-tslint 'web-mode))
-
-    (leaf js2-mode
+      (defun setup-tide-mode ()
+	(interactive)
+	(tide-setup)
+	(flycheck-mode +1)
+	(setq flycheck-check-syntax-automatically '(save mode-enabled))
+	(eldoc-mode +1)
+	(tide-hl-identifier-mode +1)
+	;; company is an optional dependency. You have to
+	;; install it separately via package-install
+	;; `M-x package-install [ret] company`
+	(company-mode +1)))
+    (leaf typescript-mode
       :straight t
-      :mode
-      ("\\.js"   . js2-mode)
-      ("\\.json" . javascript-mode)
-      :hook (js2-mode-hook . setup-tide-mode)))
+      :mode ("\\.\\(ts\\|tsx\\)\\'" . typescript-mode)
+      :hook (typescript-mode-hook . setup-tide-mode)))
+
+  (leaf web-mode
+    :straight t
+    :after flycheck-mode tide
+    :hook
+    (web-mode-hook . (lambda ()
+                       (when (string-equal "tsx" (file-name-extension buffer-file-name))
+                         (setup-tide-mode))))
+    :config
+    ;; enable typescript-tslint checker
+    (flycheck-add-mode 'typescript-tslint 'web-mode))
+
+  (leaf js2-mode
+    :straight t
+    :after tide
+    :mode
+    ("\\.js"   . js2-mode)
+    ("\\.json" . javascript-mode))
 
   (leaf scss-mode
     :straight t
