@@ -106,7 +106,7 @@
 
   ;; charset と coding-system の優先度設定
   (set-charset-priority 'ascii 'japanese-jisx0208 'latin-jisx0201
-			'katakana-jisx0201 'iso-8859-1 'cp1252 'unicode)
+                        'katakana-jisx0201 'iso-8859-1 'cp1252 'unicode)
   (set-coding-system-priority 'utf-8 'euc-jp 'iso-2022-jp 'cp932)
 
   ;; East Asian Ambiguous
@@ -116,45 +116,45 @@
     (let ((table (make-char-table nil)))
       (dolist (range
                '(#x00A1 #x00A4 (#x00A7 . #x00A8) #x00AA (#x00AD . #x00AE)
-			(#x00B0 . #x00B4) (#x00B6 . #x00BA) (#x00BC . #x00BF)
-			#x00C6 #x00D0 (#x00D7 . #x00D8) (#x00DE . #x00E1) #x00E6
-			(#x00E8 . #x00EA) (#x00EC . #x00ED) #x00F0
-			(#x00F2 . #x00F3) (#x00F7 . #x00FA) #x00FC #x00FE
-			#x0101 #x0111 #x0113 #x011B (#x0126 . #x0127) #x012B
-			(#x0131 . #x0133) #x0138 (#x013F . #x0142) #x0144
-			(#x0148 . #x014B) #x014D (#x0152 . #x0153)
-			(#x0166 . #x0167) #x016B #x01CE #x01D0 #x01D2 #x01D4
-			#x01D6 #x01D8 #x01DA #x01DC #x0251 #x0261 #x02C4 #x02C7
-			(#x02C9 . #x02CB) #x02CD #x02D0 (#x02D8 . #x02DB) #x02DD
-			#x02DF (#x0300 . #x036F) (#x0391 . #x03A9)
-			(#x03B1 . #x03C1) (#x03C3 . #x03C9) #x0401
-			(#x0410 . #x044F) #x0451 #x2010 (#x2013 . #x2016)
-			(#x2018 . #x2019) (#x201C . #x201D) (#x2020 . #x2022)
-			(#x2024 . #x2027) #x2030 (#x2032 . #x2033) #x2035 #x203B
-			#x203E #x2074 #x207F (#x2081 . #x2084) #x20AC #x2103
-			#x2105 #x2109 #x2113 #x2116 (#x2121 . #x2122) #x2126
-			#x212B (#x2153 . #x2154) (#x215B . #x215E)
-			(#x2160 . #x216B) (#x2170 . #x2179) (#x2190 . #x2199)
-			(#x21B8 . #x21B9) #x21D2 #x21D4 #x21E7 #x2200
-			(#x2202 . #x2203) (#x2207 . #x2208) #x220B #x220F #x2211
-			#x2215 #x221A (#x221D . #x2220) #x2223 #x2225
-			(#x2227 . #x222C) #x222E (#x2234 . #x2237)
-			(#x223C . #x223D) #x2248 #x224C #x2252 (#x2260 . #x2261)
-			(#x2264 . #x2267) (#x226A . #x226B) (#x226E . #x226F)
-			(#x2282 . #x2283) (#x2286 . #x2287) #x2295 #x2299 #x22A5
-			#x22BF #x2312 (#x2460 . #x24E9) (#x24EB . #x254B)
-			(#x2550 . #x2573) (#x2580 . #x258F) (#x2592 . #x2595)
-			(#x25A0 . #x25A1) (#x25A3 . #x25A9) (#x25B2 . #x25B3)
-			(#x25B6 . #x25B7) (#x25BC . #x25BD) (#x25C0 . #x25C1)
-			(#x25C6 . #x25C8) #x25CB (#x25CE . #x25D1)
-			(#x25E2 . #x25E5) #x25EF (#x2605 . #x2606) #x2609
-			(#x260E . #x260F) (#x2614 . #x2615) #x261C #x261E #x2640
-			#x2642 (#x2660 . #x2661) (#x2663 . #x2665)
-			(#x2667 . #x266A) (#x266C . #x266D) #x266F #x273D
-			(#x2776 . #x277F) (#xE000 . #xF8FF) (#xFE00 . #xFE0F)
-			#xFFFD
-			))
-	(set-char-table-range table range width))
+                        (#x00B0 . #x00B4) (#x00B6 . #x00BA) (#x00BC . #x00BF)
+                        #x00C6 #x00D0 (#x00D7 . #x00D8) (#x00DE . #x00E1) #x00E6
+                        (#x00E8 . #x00EA) (#x00EC . #x00ED) #x00F0
+                        (#x00F2 . #x00F3) (#x00F7 . #x00FA) #x00FC #x00FE
+                        #x0101 #x0111 #x0113 #x011B (#x0126 . #x0127) #x012B
+                        (#x0131 . #x0133) #x0138 (#x013F . #x0142) #x0144
+                        (#x0148 . #x014B) #x014D (#x0152 . #x0153)
+                        (#x0166 . #x0167) #x016B #x01CE #x01D0 #x01D2 #x01D4
+                        #x01D6 #x01D8 #x01DA #x01DC #x0251 #x0261 #x02C4 #x02C7
+                        (#x02C9 . #x02CB) #x02CD #x02D0 (#x02D8 . #x02DB) #x02DD
+                        #x02DF (#x0300 . #x036F) (#x0391 . #x03A9)
+                        (#x03B1 . #x03C1) (#x03C3 . #x03C9) #x0401
+                        (#x0410 . #x044F) #x0451 #x2010 (#x2013 . #x2016)
+                        (#x2018 . #x2019) (#x201C . #x201D) (#x2020 . #x2022)
+                        (#x2024 . #x2027) #x2030 (#x2032 . #x2033) #x2035 #x203B
+                        #x203E #x2074 #x207F (#x2081 . #x2084) #x20AC #x2103
+                        #x2105 #x2109 #x2113 #x2116 (#x2121 . #x2122) #x2126
+                        #x212B (#x2153 . #x2154) (#x215B . #x215E)
+                        (#x2160 . #x216B) (#x2170 . #x2179) (#x2190 . #x2199)
+                        (#x21B8 . #x21B9) #x21D2 #x21D4 #x21E7 #x2200
+                        (#x2202 . #x2203) (#x2207 . #x2208) #x220B #x220F #x2211
+                        #x2215 #x221A (#x221D . #x2220) #x2223 #x2225
+                        (#x2227 . #x222C) #x222E (#x2234 . #x2237)
+                        (#x223C . #x223D) #x2248 #x224C #x2252 (#x2260 . #x2261)
+                        (#x2264 . #x2267) (#x226A . #x226B) (#x226E . #x226F)
+                        (#x2282 . #x2283) (#x2286 . #x2287) #x2295 #x2299 #x22A5
+                        #x22BF #x2312 (#x2460 . #x24E9) (#x24EB . #x254B)
+                        (#x2550 . #x2573) (#x2580 . #x258F) (#x2592 . #x2595)
+                        (#x25A0 . #x25A1) (#x25A3 . #x25A9) (#x25B2 . #x25B3)
+                        (#x25B6 . #x25B7) (#x25BC . #x25BD) (#x25C0 . #x25C1)
+                        (#x25C6 . #x25C8) #x25CB (#x25CE . #x25D1)
+                        (#x25E2 . #x25E5) #x25EF (#x2605 . #x2606) #x2609
+                        (#x260E . #x260F) (#x2614 . #x2615) #x261C #x261E #x2640
+                        #x2642 (#x2660 . #x2661) (#x2663 . #x2665)
+                        (#x2667 . #x266A) (#x266C . #x266D) #x266F #x273D
+                        (#x2776 . #x277F) (#xE000 . #xF8FF) (#xFE00 . #xFE0F)
+                        #xFFFD
+                        ))
+        (set-char-table-range table range width))
       (optimize-char-table table)
       (set-char-table-parent table char-width-table)
       (setq char-width-table table)))
@@ -178,10 +178,10 @@
 
   ;; PuTTY 用の terminal-coding-system の設定
   (apply 'define-coding-system 'utf-8-for-putty
-	 "UTF-8 (translate jis to cp932)"
-	 :encode-translation-table
-	 (get 'japanese-ucs-jis-to-cp932-map 'translation-table)
-	 (coding-system-plist 'utf-8))
+         "UTF-8 (translate jis to cp932)"
+         :encode-translation-table
+         (get 'japanese-ucs-jis-to-cp932-map 'translation-table)
+         (coding-system-plist 'utf-8))
   (set-terminal-coding-system 'utf-8-for-putty))
 
 (leaf *encoding
@@ -426,7 +426,7 @@ static char * arrow_right[] = {
 
     (add-hook 'after-init-hook
               '(lambda ()
-		 (setq-default mode-line-format
+                 (setq-default mode-line-format
                                (list  '(:eval (concat (propertize " [%z] %+ %b " 'face 'mode-line-color-1)
                                                       (propertize " " 'display arrow-right-1)))
                                       '(:eval (concat (propertize " %m " 'face 'mode-line-color-2)
@@ -514,8 +514,8 @@ static char * arrow_right[] = {
       :commands exec-path-from-shell-getenv)
     (defun setup-exec-path ()
       (mapc #'(lambda (f)
-		(add-to-list 'exec-path (expand-file-name f)))
-	    (s-split ":" (exec-path-from-shell-getenv "PATH"))))
+                (add-to-list 'exec-path (expand-file-name f)))
+            (s-split ":" (exec-path-from-shell-getenv "PATH"))))
     (setup-exec-path)))
 
 ;; (let ((envs '("GOROOT" "GOPATH")))
@@ -550,8 +550,8 @@ static char * arrow_right[] = {
     ;; diredから適切なバージョン管理システムの*-statusを起動
     (defun find-path-in-parents (directory base-names)
       (or (find-if 'file-exists-p
-		   (mapcar (lambda (base-name) (concat directory base-name)) base-names))
-	  (if (string= directory "/")
+                   (mapcar (lambda (base-name) (concat directory base-name)) base-names))
+          (if (string= directory "/")
               nil
             (let ((parent-directory (substring directory 0 -1)))
               (find-path-in-parents parent-directory base-names)))))
@@ -559,12 +559,12 @@ static char * arrow_right[] = {
     (defun dired-vc-status (&rest args)
       (interactive)
       (let ((path (find-path-in-parents (dired-current-directory) '(".git" ".svn"))))
-	(cond ((null path)
-	       (message "not version controlled."))
-	      ((string-match-p "\\.svn$" path)
-	       (svn-status (file-name-directory path)))
-	      ((string-match-p "\\.git$" path)
-	       (magit-status-internal (file-name-directory path)))))))
+        (cond ((null path)
+               (message "not version controlled."))
+              ((string-match-p "\\.svn$" path)
+               (svn-status (file-name-directory path)))
+              ((string-match-p "\\.git$" path)
+               (magit-status-internal (file-name-directory path)))))))
   (leaf vc-windows
     :if (eq system-type 'windows-nt)
     :hook
@@ -575,9 +575,9 @@ static char * arrow_right[] = {
     ;; (一時的に default-process-coding-system を '(utf-8 . cp932) に変更する)
     (defadvice vc-svn-command (around vc-svn-coding-system-setup compile)
       (let ((old-default-process-coding-system default-process-coding-system))
-	(setq default-process-coding-system '(utf-8 . cp932))
-	ad-do-it
-	(setq default-process-coding-system old-default-process-coding-system)))
+        (setq default-process-coding-system '(utf-8 . cp932))
+        ad-do-it
+        (setq default-process-coding-system old-default-process-coding-system)))
     (ad-activate-regexp "vc-svn-coding-system-setup")))
 
 (leaf *major-mode
@@ -645,29 +645,29 @@ static char * arrow_right[] = {
           "replace anchor to YYYY-MM string"
           (let* ((ymd (format-time-string "%Y-%m")))
             (replace-regexp-in-string "#YM" ymd name)))
-	(advice-add 'org-extract-archive-file :filter-return #'my:org-add-ymd-to-archive)
-	;; screenshot: https://ladicle.com/post/config/
-	(defun my:org-screenshot ()
-	  "Take a screenshot into a time stamped unique-named file in the
+        (advice-add 'org-extract-archive-file :filter-return #'my:org-add-ymd-to-archive)
+        ;; screenshot: https://ladicle.com/post/config/
+        (defun my:org-screenshot ()
+          "Take a screenshot into a time stamped unique-named file in the
 same directory as the org-buffer and insert a link to this file."
-	  (interactive)
-	  (org-display-inline-images)
-	  (setq filename
-		(concat
-		 (make-temp-name
-		  (concat (file-name-nondirectory (buffer-file-name))
-			  "_imgs/"
-			  (format-time-string "%Y%m%d_%H%M%S_")) ) ".png"))
-	  (unless (file-exists-p (file-name-directory filename))
-	    (make-directory (file-name-directory filename)))
-	  ;; take screenshot
-	  (if (eq system-type 'darwin)
-	      (call-process "screencapture" nil nil nil "-i" filename))
-	  (if (eq system-type 'gnu/linux)
-	      (call-process "import" nil nil nil filename))
-	  ;; insert into file if correctly taken
-	  (if (file-exists-p filename)
-	      (insert (concat "[[file:" filename "]]"))))))
+          (interactive)
+          (org-display-inline-images)
+          (setq filename
+                (concat
+                 (make-temp-name
+                  (concat (file-name-nondirectory (buffer-file-name))
+                          "_imgs/"
+                          (format-time-string "%Y%m%d_%H%M%S_")) ) ".png"))
+          (unless (file-exists-p (file-name-directory filename))
+            (make-directory (file-name-directory filename)))
+          ;; take screenshot
+          (if (eq system-type 'darwin)
+              (call-process "screencapture" nil nil nil "-i" filename))
+          (if (eq system-type 'gnu/linux)
+              (call-process "import" nil nil nil filename))
+          ;; insert into file if correctly taken
+          (if (file-exists-p filename)
+              (insert (concat "[[file:" filename "]]"))))))
     (leaf org-bullets
       :straight t
       :if window-system
@@ -763,12 +763,12 @@ same directory as the org-buffer and insert a link to this file."
       (emacs-lisp-mode-hook . (lambda() (define-key emacs-lisp-mode-map (kbd "C-c RET") 'my:pp-macroexpand-last-sexp)))
       :preface
       (defun my:pp-macroexpand-last-sexp ()
-	(interactive)
-	(if (thing-at-point-looking-at "\(")
-	    (save-excursion
+        (interactive)
+        (if (thing-at-point-looking-at "\(")
+            (save-excursion
               (forward-list)
               (pp-macroexpand-last-sexp nil))
-	  (pp-macroexpand-last-sexp nil)))))
+          (pp-macroexpand-last-sexp nil)))))
 
   (leaf *clojure
     :config
@@ -804,7 +804,7 @@ same directory as the org-buffer and insert a link to this file."
         (do-transaction 'defun))
       (eldoc-mode +1)
       (leaf flycheck-clj-kondo
-	:straight t))
+        :straight t))
 
     (leaf cider
       :straight t
@@ -840,16 +840,16 @@ same directory as the org-buffer and insert a link to this file."
       (defun my:python-mode-hook-0 ()
         (setq-local indent-tabs-mode nil)
         (flycheck-mode +1)))
-;;     (leaf company-jedi
-;; ;; http://nobunaga.hatenablog.jp/entry/2017/09/24/221004
-;; ;; https://qiita.com/ignorant/items/50f8eb2852d0f0214659
-;; ;;
-;; ;; M-x jedi:install-server
-;;       :straight t
-;;       :after company
-;;       :custom
-;;       (jedi:complete-on-dot . t)
-;;       :hook (python-mode-hook . (lambda () (add-to-list 'company-backends 'company-jedi))))
+    ;;     (leaf company-jedi
+    ;; ;; http://nobunaga.hatenablog.jp/entry/2017/09/24/221004
+    ;; ;; https://qiita.com/ignorant/items/50f8eb2852d0f0214659
+    ;; ;;
+    ;; ;; M-x jedi:install-server
+    ;;       :straight t
+    ;;       :after company
+    ;;       :custom
+    ;;       (jedi:complete-on-dot . t)
+    ;;       :hook (python-mode-hook . (lambda () (add-to-list 'company-backends 'company-jedi))))
     (leaf elpy
       ;; https://elpy.readthedocs.io/en/latest/index.html
       :straight t
@@ -867,25 +867,25 @@ same directory as the org-buffer and insert a link to this file."
       :straight t
       :hook
       (php-mode-hook . (lambda ()
-			 (company-mode t)
-			 (subword-mode 1)
-			 (setq-local page-delimiter "\\_<\\(class\\|function\\|namespace\\)\\_>.+$")
-			 (ac-php-core-eldoc-setup)
-			 (add-to-list 'company-backends 'company-ac-php-backend)
-			 (make-local-variable 'company-backends)
+                         (company-mode t)
+                         (subword-mode 1)
+                         (setq-local page-delimiter "\\_<\\(class\\|function\\|namespace\\)\\_>.+$")
+                         (ac-php-core-eldoc-setup)
+                         (add-to-list 'company-backends 'company-ac-php-backend)
+                         (make-local-variable 'company-backends)
                          ;; http://oh-sky.hatenablog.com/entry/2013/07/07/004651
-			 (require 'flycheck-phpstan)
-			 (flycheck-mode t)
-			 (add-to-list 'flycheck-disabled-checkers 'php-phpmd)
-			 (add-to-list 'flycheck-disabled-checkers 'php-phpcs)
+                         (require 'flycheck-phpstan)
+                         (flycheck-mode t)
+                         (add-to-list 'flycheck-disabled-checkers 'php-phpmd)
+                         (add-to-list 'flycheck-disabled-checkers 'php-phpcs)
                          (setq tab-width 4)
                          (setq indent-tabs-mode nil)
                          (setq c-basic-offset 4)))
       :config
       (leaf company-php
-	:straight t)
+        :straight t)
       (leaf flycheck-phpstan
-	:straight t)
+        :straight t)
       :custom
       (php-manual-url . 'ja)
       (php-mode-coding-style . 'psr2)
@@ -921,16 +921,16 @@ same directory as the org-buffer and insert a link to this file."
       (before-save-hook . tide-format-before-save)
       :config
       (defun setup-tide-mode ()
-	(interactive)
-	(tide-setup)
-	(flycheck-mode +1)
-	(setq flycheck-check-syntax-automatically '(save mode-enabled))
-	(eldoc-mode +1)
-	(tide-hl-identifier-mode +1)
-	;; company is an optional dependency. You have to
-	;; install it separately via package-install
-	;; `M-x package-install [ret] company`
-	(company-mode +1)))
+        (interactive)
+        (tide-setup)
+        (flycheck-mode +1)
+        (setq flycheck-check-syntax-automatically '(save mode-enabled))
+        (eldoc-mode +1)
+        (tide-hl-identifier-mode +1)
+        ;; company is an optional dependency. You have to
+        ;; install it separately via package-install
+        ;; `M-x package-install [ret] company`
+        (company-mode +1)))
     (leaf typescript-mode
       :straight t
       :mode ("\\.\\(ts\\|tsx\\)\\'" . typescript-mode)
@@ -1115,25 +1115,25 @@ set pagesize 1000
              (end (cdr bounds))
              (str (thing-at-point 'symbol))
              (wrapped (format "\"%s\"" str)))
-	(delete-region start end)
-	(insert wrapped)
-	(goto-char (+ 2 end))))
+        (delete-region start end)
+        (insert wrapped)
+        (goto-char (+ 2 end))))
 
     (defun move-trailing-comma-to-line-start ()
       (interactive)
       (let* ((eol (save-excursion (end-of-line) (point)))
              (pt (re-search-forward ",[ \t]*$" eol t)))
-	(when pt
-	  (goto-char (- pt 1))
-	  (delete-char 1)
-	  (forward-line)
-	  (let* ((eol (save-excursion (end-of-line) (point)))
-		 (pt (re-search-forward "^[ \t]*--" eol t)))
+        (when pt
+          (goto-char (- pt 1))
+          (delete-char 1)
+          (forward-line)
+          (let* ((eol (save-excursion (end-of-line) (point)))
+                 (pt (re-search-forward "^[ \t]*--" eol t)))
             (when pt (forward-line)))
-	  (let* ((eol (save-excursion (end-of-line) (point))))
+          (let* ((eol (save-excursion (end-of-line) (point))))
             (when (= eol pt) (forward-line)))
-	  (insert "  ,")
-	  (just-one-space)))))
+          (insert "  ,")
+          (just-one-space)))))
 
   (leaf bat-mode
     :if (eq system-type 'windows-nt)
@@ -1191,18 +1191,18 @@ set pagesize 1000
       :hook (calendar-mode-hook . init-japanese-holidays)
       :config
       (defun init-japanese-holidays()
-	(setq calendar-holidays ; 他の国の祝日も表示させたい場合は適当に調整
+        (setq calendar-holidays ; 他の国の祝日も表示させたい場合は適当に調整
               (append japanese-holidays holiday-local-holidays holiday-other-holidays))
-	(setq mark-holidays-in-calendar t) ; 祝日をカレンダーに表示
-	;; 土曜日・日曜日を祝日として表示する場合、以下の設定を追加します。
-	;; 変数はデフォルトで設定済み
-	(setq japanese-holiday-weekend '(0 6)     ; 土日を祝日として表示
+        (setq mark-holidays-in-calendar t) ; 祝日をカレンダーに表示
+        ;; 土曜日・日曜日を祝日として表示する場合、以下の設定を追加します。
+        ;; 変数はデフォルトで設定済み
+        (setq japanese-holiday-weekend '(0 6)     ; 土日を祝日として表示
               japanese-holiday-weekend-marker     ; 土曜日を水色で表示
               '(holiday nil nil nil nil nil japanese-holiday-saturday))
-	(add-hook 'calendar-today-visible-hook 'japanese-holiday-mark-weekend)
-	(add-hook 'calendar-today-invisible-hook 'japanese-holiday-mark-weekend)
-	;; “きょう”をマークするには以下の設定を追加します。
-	(add-hook 'calendar-today-visible-hook 'calendar-mark-today))))
+        (add-hook 'calendar-today-visible-hook 'japanese-holiday-mark-weekend)
+        (add-hook 'calendar-today-invisible-hook 'japanese-holiday-mark-weekend)
+        ;; “きょう”をマークするには以下の設定を追加します。
+        (add-hook 'calendar-today-visible-hook 'calendar-mark-today))))
 
   (leaf diff-mode
     :hook
@@ -1286,14 +1286,14 @@ set pagesize 1000
     :straight t
     :hook (prog-mode-hook . rainbow-delimiters-mode)
     :config
-      (require 'cl-lib)
+    (require 'cl-lib)
 
-      (require 'color)
-      ;;(global-rainbow-delimiters-mode)
-      (cl-loop for index from 1 to rainbow-delimiters-max-face-count
-	       do
-	       (let ((face (intern (format "rainbow-delimiters-depth-%d-face" index))))
-		 (cl-callf color-saturate-name (face-foreground face) 30))))
+    (require 'color)
+    ;;(global-rainbow-delimiters-mode)
+    (cl-loop for index from 1 to rainbow-delimiters-max-face-count
+             do
+             (let ((face (intern (format "rainbow-delimiters-depth-%d-face" index))))
+               (cl-callf color-saturate-name (face-foreground face) 30))))
 
   (leaf flycheck-pos-tip
     :straight t)
@@ -1338,11 +1338,11 @@ set pagesize 1000
     (defun toggle-tab-mark ()
       (interactive)
       (if (equal whitespace-style whitespace-style-with-tab)
-	  (setq whitespace-style whitespace-style-without-tab)
-	(setq whitespace-style whitespace-style-with-tab)))
+          (setq whitespace-style whitespace-style-without-tab)
+        (setq whitespace-style whitespace-style-with-tab)))
     (setq whitespace-space-regexp "\\(\x3000+\\)")
     (setq whitespace-display-mappings '((space-mark ?\x3000 [?\□])
-					(tab-mark   ?\t   [?\xBB ?\t])))
+                                        (tab-mark   ?\t   [?\xBB ?\t])))
     (global-whitespace-mode t)
     (set-face-attribute 'whitespace-trailing nil :foreground "DeepPink" :underline t)
     (set-face-attribute 'whitespace-tab nil :foreground "LightSkyBlue" :underline t)
@@ -1367,13 +1367,13 @@ set pagesize 1000
                             "p:/.+$"
                             ,(concat (expand-file-name "~/") ".emacs.d/elpa/.*$")
                             ,(expand-file-name "~/.emacs.d/recentf")
-			    ))
+                            ))
     ;; from http://qiita.com/itiut@github/items/d917eafd6ab255629346
     (defmacro with-suppressed-message (&rest body)
       "Suppress new messages temporarily in the echo area and the `*Messages*' buffer while BODY is evaluated."
       (declare (indent 0))
       (let ((message-log-max nil))
-	`(with-temp-message (or (current-message) "") ,@body)))
+        `(with-temp-message (or (current-message) "") ,@body)))
     (setq recentf-auto-save-timer (run-with-idle-timer 120 t '(lambda () (with-suppressed-message (recentf-save-list)))))
     (recentf-mode 1))
 
@@ -1441,9 +1441,9 @@ set pagesize 1000
     (company-box-background . '((t (:inherit company-tooltip :background "midnight blue"))))
 
     (company-box-backends-colors . '((company-yasnippet . (:candidate "yellow" :annotation some-face))
-				     (company-elisp . (:icon "yellow" :selected
-							     (:background "orange" :foreground "black")))
-				   (company-dabbrev . "purple")))
+                                     (company-elisp . (:icon "yellow" :selected
+                                                             (:background "orange" :foreground "black")))
+                                     (company-dabbrev . "purple")))
     :config
     ;; great configuration for company-box with all-the-icons
     ;; https://ladicle.com/post/config/#company
@@ -1562,8 +1562,8 @@ set pagesize 1000
     :if (eq system-type 'darwin)
     :config
     (setq initial-frame-alist
-	  (append
-	   '((ns-transparent-titlebar . t) ;; タイトルバーを透過
+          (append
+           '((ns-transparent-titlebar . t) ;; タイトルバーを透過
              (vertical-scroll-bars . nil) ;; スクロールバーを消す
              ;; (ns-appearance . dark) ;; 26.1 {light, dark}
              (internal-border-width . 0))))
@@ -1837,14 +1837,14 @@ set pagesize 1000
     :config
     (defun read-file-and-list-each-lines (filename)
       (save-excursion
-	(let* ((buffer (find-file-noselect filename))
+        (let* ((buffer (find-file-noselect filename))
                (ret nil))
-	  (set-buffer buffer)
-	  (goto-char (point-min))
-	  (while (re-search-forward "^.+$" nil t)
+          (set-buffer buffer)
+          (goto-char (point-min))
+          (while (re-search-forward "^.+$" nil t)
             (setq ret (cons (match-string-no-properties 0) ret)))
-	  (kill-buffer buffer)
-	  (reverse ret)))))
+          (kill-buffer buffer)
+          (reverse ret)))))
   (leaf goto-line-beginning-or-indent
     ;; http://qiita.com/ShingoFukuyama/items/62269c4904ca085f9149
     :config
@@ -1852,7 +1852,7 @@ set pagesize 1000
       (interactive)
       (or $position (setq $position (point)))
       (let (($starting-position (progn (back-to-indentation) (point))))
-	(if (eq $starting-position $position)
+        (if (eq $starting-position $position)
             (move-beginning-of-line 1))))
     (global-set-key (kbd "C-a") 'my:goto-line-beginning-or-indent))
 
@@ -1888,27 +1888,27 @@ thumbnail = \"/img/%Y-%m/%d/{{shortname}}.png\"
              (directory (file-name-directory filename))
              (draft-content myblog-hugo/draft-template)
              (buf (set-buffer (find-file-noselect filename t))))
-	(with-current-buffer buf
-	  (goto-char (point-min))
-	  (insert draft-content)
-	  ;; (basic-save-buffer)
-	  (switch-to-buffer buf)
-	  (goto-char (point-max)))))
+        (with-current-buffer buf
+          (goto-char (point-min))
+          (insert draft-content)
+          ;; (basic-save-buffer)
+          (switch-to-buffer buf)
+          (goto-char (point-max)))))
 
     (defun myblog-hugo/get-shortname ()
       "frontmatter にある shortname を取得する"
       (goto-char (point-min))
       (when (re-search-forward "shortname* = *\"\\(.*\\)\"" nil t)
-	(let* ((matched (match-string-no-properties 1)))
-	  matched)))
+        (let* ((matched (match-string-no-properties 1)))
+          matched)))
 
     (defun myblog-hugo/apply-current-time (field-name end)
       "frontmatter にある keyword = format の format に現在時刻を適用する。"
       (let* ((left-part (concat "\\(" field-name " *= *\\[?"))
              (right-part (concat "\"" "\\)" "\\(.+\\)" "\\(\"\\]?\\)")))
-	(when (re-search-forward (concat left-part right-part) end t)
-	  (let* ((matched (match-string-no-properties 2))
-		 (formatted (format-time-string matched (current-time))))
+        (when (re-search-forward (concat left-part right-part) end t)
+          (let* ((matched (match-string-no-properties 2))
+                 (formatted (format-time-string matched (current-time))))
             (replace-match (concat "\\1" formatted "\\3"))
             (goto-char (point-min))))))
 
@@ -1916,7 +1916,7 @@ thumbnail = \"/img/%Y-%m/%d/{{shortname}}.png\"
       "frontmatter に含まれる {{shortname}} を置き換える"
       (goto-char (point-min))
       (while (re-search-forward "{{shortname}}" end t)
-	(replace-match shortname)))
+        (replace-match shortname)))
 
     (defun myblog-hugo/publish ()
       "publish current draft buffer to hugo post directory."
@@ -1925,24 +1925,24 @@ thumbnail = \"/img/%Y-%m/%d/{{shortname}}.png\"
              (post-destdir (format-time-string myblog-hugo/base-directory-format-string (current-time)))
              (shortname (downcase (myblog-hugo/get-shortname)))
              (destfile (concat post-destdir "/" shortname ".md")))
-	(goto-char (point-min))
-	(re-search-forward "\\+\\+\\+")
-	(forward-char)
-	(re-search-forward "\\+\\+\\+")
-	(forward-char -3)
-	(setq end (point))
-	;;
-	(goto-char (point-min))
-	(myblog-hugo/apply-current-time "date" end)
-	(myblog-hugo/apply-current-time "archives" end)
-	(myblog-hugo/apply-current-time "url" end)
-	(myblog-hugo/apply-current-time "thumbnail" end)
-	(myblog-hugo/apply-shortname shortname end)
-	;;
-	(unless (file-exists-p post-destdir)
-	  (make-directory post-destdir t))
-	(set-visited-file-name destfile)
-	(basic-save-buffer))))
+        (goto-char (point-min))
+        (re-search-forward "\\+\\+\\+")
+        (forward-char)
+        (re-search-forward "\\+\\+\\+")
+        (forward-char -3)
+        (setq end (point))
+        ;;
+        (goto-char (point-min))
+        (myblog-hugo/apply-current-time "date" end)
+        (myblog-hugo/apply-current-time "archives" end)
+        (myblog-hugo/apply-current-time "url" end)
+        (myblog-hugo/apply-current-time "thumbnail" end)
+        (myblog-hugo/apply-shortname shortname end)
+        ;;
+        (unless (file-exists-p post-destdir)
+          (make-directory post-destdir t))
+        (set-visited-file-name destfile)
+        (basic-save-buffer))))
 
   (leaf google-search
     :config
@@ -1957,15 +1957,15 @@ thumbnail = \"/img/%Y-%m/%d/{{shortname}}.png\"
       (apply (function concat)
              (mapcar
               (lambda (ch)
-		(cond
-		 ((eq ch ?\n)               ; newline
-		  "%0D%0A")
-		 ((string-match "[-a-zA-Z0-9_:/]" (char-to-string ch)) ; xxx?
-		  (char-to-string ch))      ; printable
-		 ((char-equal ch ?\x20)     ; space
-		  "+")
-		 (t
-		  (format "%%%02X" ch))))   ; escape
+                (cond
+                 ((eq ch ?\n)               ; newline
+                  "%0D%0A")
+                 ((string-match "[-a-zA-Z0-9_:/]" (char-to-string ch)) ; xxx?
+                  (char-to-string ch))      ; printable
+                 ((char-equal ch ?\x20)     ; space
+                  "+")
+                 (t
+                  (format "%%%02X" ch))))   ; escape
               ;; Coerce a string to a list of chars.
               (append (encode-coding-string (or str "") (or coding 'iso-2022-jp))
                       nil))))
@@ -1983,15 +1983,15 @@ thumbnail = \"/img/%Y-%m/%d/{{shortname}}.png\"
                      (eq last-command 'exchange-point-and-mark))
                     (buffer-substring-no-properties
                      (region-beginning) (region-end)))
-		   (t (thing-at-point 'word)))
+                   (t (thing-at-point 'word)))
              current-prefix-arg))
       (unless flag
-	(setq str (read-from-minibuffer "Search word: " str)))
+        (setq str (read-from-minibuffer "Search word: " str)))
       (browse-url
        (concat
-	"http://www.google.com/search?q="
-	(my-url-encode-string str 'shift_jis)
-	"&hl=ja&ie=Shift_JIS&lr=lang_ja"))))
+        "http://www.google.com/search?q="
+        (my-url-encode-string str 'shift_jis)
+        "&hl=ja&ie=Shift_JIS&lr=lang_ja"))))
 
   (leaf grep-r
     :config
@@ -1999,21 +1999,21 @@ thumbnail = \"/img/%Y-%m/%d/{{shortname}}.png\"
     (require 'grep)
 
     (when-let (cmd (or (executable-find "yagrep")
-		       (executable-find "grep")))
+                       (executable-find "grep")))
       (setq grep-command-before-query (concat cmd " -nH -r -e")))
 
     (defun grep-default-command ()
       (if current-prefix-arg
-	  (let ((grep-command-before-target
-		 (concat grep-command-before-query
-			 (shell-quote-argument (grep-tag-default)))))
+          (let ((grep-command-before-target
+                 (concat grep-command-before-query
+                         (shell-quote-argument (grep-tag-default)))))
             (cons (if buffer-file-name
                       (concat grep-command-before-target
                               " *."
                               (file-name-extension buffer-file-name))
                     (concat grep-command-before-target " ."))
-		  (+ (length grep-command-before-target) 1)))
-	(car grep-command)))
+                  (+ (length grep-command-before-target) 1)))
+        (car grep-command)))
     (setq grep-command (cons (concat grep-command-before-query " .")
                              (+ (length grep-command-before-query) 1)))
 
@@ -2032,13 +2032,10 @@ thumbnail = \"/img/%Y-%m/%d/{{shortname}}.png\"
     (defadvice grep (around grep-coding-system-setup compile)
       ""
       (let ((old-default-process-coding-system default-process-coding-system))
-	(setq default-process-coding-system '(utf-8 . cp932))
-	ad-do-it
-	(setq default-process-coding-system old-default-process-coding-system)))
+        (setq default-process-coding-system '(utf-8 . cp932))
+        ad-do-it
+        (setq default-process-coding-system old-default-process-coding-system)))
     ;; (ad-activate-regexp "grep-coding-system-setup")
     ;; (ad-deactivate-regexp "grep-coding-system-setup")
     )
   )
-;;
-;; end
-;;
