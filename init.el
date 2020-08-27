@@ -797,7 +797,10 @@ same directory as the org-buffer and insert a link to this file."
         (render 'defun)
         ;;
         (fact 'defun)
-        (do-transaction 'defun)))
+        (do-transaction 'defun))
+      (eldoc-mode +1)
+      (leaf flycheck-clj-kondo
+	:straight t))
 
     (leaf cider
       :straight t
@@ -817,9 +820,7 @@ same directory as the org-buffer and insert a link to this file."
       :config
       ;; on Windows, use lein.bat instead of lein shell script.
       (setq cider-lein-command "lein.bat"))
-
-    (leaf flycheck-clj-kondo
-      :straight t))
+    )
 
   (leaf *python
     :config
