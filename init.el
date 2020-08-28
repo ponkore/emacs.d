@@ -942,13 +942,11 @@ same directory as the org-buffer and insert a link to this file."
         (company-mode +1)))
     (leaf typescript-mode
       :straight t
-      :mode ("\\.\\(ts\\|tsx\\)\\'" . typescript-mode)
       :hook (typescript-mode-hook . setup-tide-mode)))
 
   (leaf web-mode
     :straight t
     :mode ("\\.tsx\\'" . web-mode)
-    :after tide
     :hook
     (web-mode-hook . (lambda ()
                        (when (string-equal "tsx" (file-name-extension buffer-file-name))
@@ -1310,7 +1308,7 @@ set pagesize 1000
 
   (leaf flycheck
     :straight t
-    :commands flycheck-mode
+    :commands flycheck-mode flycheck-add-mode
     :hook (flycheck-mode-hook . flycheck-pos-tip-mode)
     :custom
     (flycheck-disabled-checkers . '(javascript-jshint javascript-jscs))
