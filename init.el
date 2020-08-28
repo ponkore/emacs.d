@@ -1574,6 +1574,22 @@ set pagesize 1000
              ;; (ns-appearance . dark) ;; 26.1 {light, dark}
              (internal-border-width . 0))))
     (setq default-frame-alist initial-frame-alist))
+  (leaf frame-setting-windows
+    :if (eq system-type 'windows-nt)
+    :config
+    (setq initial-frame-alist
+          (append
+           '((ns-transparent-titlebar . t) ;; タイトルバーを透過
+             (vertical-scroll-bars . nil) ;; スクロールバーを消す
+             ;; (ns-appearance . dark) ;; 26.1 {light, dark}
+             (internal-border-width . 0)
+             ;; position
+             (top . 40)
+             (left . 670)
+             (width . 136)
+             (height . 50))))
+    (setq default-frame-alist initial-frame-alist))
+
   (leaf frame-setting-common
     :config
     ;; フレームタイトルの設定
