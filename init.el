@@ -367,9 +367,9 @@
     (doom-modeline-major-mode-icon . nil)
     (doom-modeline-minor-modes . t)
     (doom-modeline-buffer-encoding . t)
-    ;; :custom-face
-    ;; (mode-line          . '((t (:background "violet red" :foreground "black" :box -1))))
-    ;; (mode-line-inactive . '((t (:background "violet red" :foreground "black" :box -1))))
+    :custom-face
+    (mode-line                       . '((t (:background "firebrick3" :foreground "snow" :box nil))))
+    (doom-modeline-buffer-minor-mode . '((t (:inherit mode-line :slant normal))))
     :hook (emacs-startup-hook . doom-modeline-mode)
     :config
     (line-number-mode 0)
