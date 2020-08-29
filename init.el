@@ -1360,6 +1360,21 @@ set pagesize 1000
     (markdown-mode-hook . fci-mode)
     (git-commit-mode-hook . fci-mode))
 
+  (leaf git-gutter
+    :straight t
+    :custom
+    (git-gutter:modified-sign . "~")
+    (git-gutter:added-sign    . "+")
+    (git-gutter:deleted-sign  . "-")
+    (git-gutter:window-width  . 0)
+    :custom-face
+    (git-gutter:modified . '((t (:background "#f1fa8c"))))
+    (git-gutter:added    . '((t (:background "#50fa7b"))))
+    (git-gutter:deleted  . '((t (:background "#ff79c6"))))
+    :config
+    (git-gutter:linum-setup)
+    (global-git-gutter-mode +1))
+
   (leaf cua-mode
     :custom
     (cua-enable-cua-keys . nil)
