@@ -1375,6 +1375,21 @@ set pagesize 1000
     (git-gutter:linum-setup)
     (global-git-gutter-mode +1))
 
+  (leaf highlight-indent-guides
+    :straight t
+    :hook
+    (prog-mode-hook . highlight-indent-guides-mode)
+    (yaml-mode-hook . highlight-indent-guides-mode)
+    :custom
+    (highlight-indent-guides-auto-enabled . t)
+    (highlight-indent-guides-responsive   . t)
+    (highlight-indent-guides-method       . 'character)
+    (highlight-indent-guides-character    . ?|)
+    :custom-face
+    (highlight-indent-guides-odd-face       . '((t (:background "darkgray"))))
+    (highlight-indent-guides-even-face      . '((t (:background "dimgray"))))
+    (highlight-indent-guides-character-face . '((t (:background "dimgray")))))
+
   (leaf cua-mode
     :custom
     (cua-enable-cua-keys . nil)
