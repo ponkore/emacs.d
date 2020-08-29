@@ -375,10 +375,39 @@
     (line-number-mode 0)
     (column-number-mode 0)
     (which-function-mode 0)
+    ;;
+    (doom-modeline-def-segment my:buffer-encoding
+      "Displays the encoding and eol style of the buffer."
+      (when doom-modeline-buffer-encoding
+        (propertize
+         (concat
+          (let ((sys (coding-system-plist buffer-file-coding-system)))
+            (cond ((memq (plist-get sys :category)
+                         '(coding-category-undecided coding-category-utf-8))
+                   " U")
+                  ((memq (plist-get sys :name)
+                         '(coding-category-undecided japanese-iso-8bit))
+                   " E")
+                  ((memq (plist-get sys :name)
+                         '(coding-category-undecided iso-2022-jp))
+                   " J")
+                  ((memq (plist-get sys :name)
+                         '(coding-category-undecided japanese-shift-jis japanese-cp932))
+                   " S")
+                  (t " =")))
+          (pcase (coding-system-eol-type buffer-file-coding-system)
+            (0 ".LF")
+            (1 ".CRLF")
+            (2 ".CR")))
+         'face (if (doom-modeline--active) 'mode-line 'mode-line-inactive)
+         'help-echo 'mode-line-mule-info-help-echo
+         'mouse-face '(:box 0)
+         'local-map mode-line-coding-system-map)))
+    ;;
     (doom-modeline-def-modeline
      'main
      ;; '(workspace-number bar window-number evil-state ryo-modal xah-fly-keys matches buffer-info remote-host buffer-position parrot selection-info)
-     '(bar buffer-encoding "/" matches buffer-info buffer-position selection-info)
+     '(bar my:buffer-encoding "/" matches buffer-info buffer-position selection-info)
      '(misc-info debug minor-modes "-" input-method major-mode process vcs checker)))
   )
 
