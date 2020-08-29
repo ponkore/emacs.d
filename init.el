@@ -357,119 +357,30 @@
 (leaf *modelines
   :config
 
-  (leaf powerline
-    :disabled t
+  (leaf doom-modeline
+    :straight t
+    :if window-system
+    :commands (doom-modeline-def-modeline)
+    :custom
+    (doom-modeline-buffer-file-name-style . 'truncate-with-project)
+    (doom-modeline-icon . (display-graphic-p))
+    (doom-modeline-major-mode-icon . nil)
+    (doom-modeline-minor-modes . t)
+    (doom-modeline-buffer-encoding . t)
+    ;; :custom-face
+    ;; (mode-line          . '((t (:background "violet red" :foreground "black" :box -1))))
+    ;; (mode-line-inactive . '((t (:background "violet red" :foreground "black" :box -1))))
+    :hook (emacs-startup-hook . doom-modeline-mode)
     :config
-    ;; powerline.el
-    (defun arrow-right-xpm (color1 color2)
-      "Return an XPM right arrow string representing."
-      (format "/* XPM */
-static char * arrow_right[] = {
-\"12 18 2 1\",
-\". c %s\",
-\"  c %s\",
-\".           \",
-\"..          \",
-\"...         \",
-\"....        \",
-\".....       \",
-\"......      \",
-\".......     \",
-\"........    \",
-\".........   \",
-\".........   \",
-\"........    \",
-\".......     \",
-\"......      \",
-\".....       \",
-\"....        \",
-\"...         \",
-\"..          \",
-\".           \"};"  color1 color2))
-
-    (defun arrow-left-xpm (color1 color2)
-      "Return an XPM right arrow string representing."
-      (format "/* XPM */
-static char * arrow_right[] = {
-\"12 18 2 1\",
-\". c %s\",
-\"  c %s\",
-\"           .\",
-\"          ..\",
-\"         ...\",
-\"        ....\",
-\"       .....\",
-\"      ......\",
-\"     .......\",
-\"    ........\",
-\"   .........\",
-\"   .........\",
-\"    ........\",
-\"     .......\",
-\"      ......\",
-\"       .....\",
-\"        ....\",
-\"         ...\",
-\"          ..\",
-\"           .\"};"  color2 color1))
-
-
-    (defconst color1 "#FF6699")
-    (defconst color3 "#CDC0B0")
-    (defconst color2 "#FF0066")
-    (defconst color4 "#CDC0B0")
-
-    (defvar arrow-right-1 (create-image (arrow-right-xpm color1 color2) 'xpm t :ascent 'center))
-    (defvar arrow-right-2 (create-image (arrow-right-xpm color2 "None") 'xpm t :ascent 'center))
-    (defvar arrow-left-1  (create-image (arrow-left-xpm color2 color1) 'xpm t :ascent 'center))
-    (defvar arrow-left-2  (create-image (arrow-left-xpm "None" color2) 'xpm t :ascent 'center))
-
-    (add-hook 'after-init-hook
-              '(lambda ()
-                 (setq-default mode-line-format
-                               (list  '(:eval (concat (propertize " [%z] %+ %b " 'face 'mode-line-color-1)
-                                                      (propertize " " 'display arrow-right-1)))
-                                      '(:eval (concat (propertize " %m " 'face 'mode-line-color-2)
-                                                      (propertize " " 'display arrow-right-2)))
-                                      minor-mode-alist
-
-                                      ;; Justify right by filling with spaces to right fringe - 16
-                                      ;; (16 should be computed rahter than hardcoded)
-                                      '(:eval (propertize " " 'display '((space :align-to (- right-fringe 17)))))
-
-                                      '(:eval (concat (propertize " " 'display arrow-left-2)
-                                                      (propertize " %p " 'face 'mode-line-color-2)))
-                                      '(:eval (concat (propertize " " 'display arrow-left-1)
-                                                      (propertize "%4l:%2c  " 'face 'mode-line-color-1)))
-                                      ))))
-
-    (make-face 'mode-line-color-1)
-    (set-face-attribute 'mode-line-color-1  nil :foreground "#fff" :background color1)
-    (make-face 'mode-line-color-2)
-    (set-face-attribute 'mode-line-color-2  nil :foreground "#fff" :background color2)
-    (set-face-attribute 'mode-line          nil :foreground "#f00" :background color3 :box nil)
-    (set-face-attribute 'mode-line-inactive nil :foreground "#f66" :background color4))
+    (line-number-mode 0)
+    (column-number-mode 0)
+    (which-function-mode 0)
+    (doom-modeline-def-modeline
+     'main
+     ;; '(workspace-number bar window-number evil-state ryo-modal xah-fly-keys matches buffer-info remote-host buffer-position parrot selection-info)
+     '(bar buffer-encoding "/" matches buffer-info buffer-position selection-info)
+     '(misc-info debug minor-modes "-" input-method major-mode process vcs checker)))
   )
-
-;; (leaf doom-modeline
-;;     :straight t
-;;     :if window-system
-;;     :commands (doom-modeline-def-modeline)
-;;     :custom
-;;     (doom-modeline-buffer-file-name-style . 'truncate-with-project)
-;;     (doom-modeline-icon . t)
-;;     (doom-modeline-major-mode-icon . nil)
-;;     (doom-modeline-minor-modes . nil)
-;;     :hook (emacs-startup-hook . doom-modeline-mode)
-;;     :config
-;;     (line-number-mode 0)
-;;     (column-number-mode 0)
-;;     (which-function-mode 0)
-;;     (doom-modeline-def-modeline
-;;       'main
-;;       ;; '(workspace-number bar window-number evil-state ryo-modal xah-fly-keys matches buffer-info remote-host buffer-position parrot selection-info)
-;;       '(bar matches buffer-info buffer-position selection-info)
-;;       '(misc-info debug minor-modes input-method major-mode process vcs checker)))
 
 (leaf *utility-package
   :config
