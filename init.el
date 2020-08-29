@@ -1988,7 +1988,7 @@ thumbnail = \"/img/%Y-%m/%d/{{shortname}}.png\"
 
     (when-let (cmd (or (executable-find "yagrep")
                        (executable-find "grep")))
-      (setq grep-command-before-query (concat cmd " -nH -r -e")))
+      (setq grep-command-before-query (concat cmd " -nH -r -e ")))
 
     (defun grep-default-command ()
       (if current-prefix-arg
