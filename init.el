@@ -1273,6 +1273,9 @@ set pagesize 1000
 
   (leaf git-gutter
     :straight t
+    :bind
+    ;; hydra-git-gutter起動のキーバインド
+    ("C-c g" . hydra-git-gutter/body)
     :custom
     (git-gutter:modified-sign . "~")
     (git-gutter:added-sign    . "+")
@@ -1284,7 +1287,23 @@ set pagesize 1000
     (git-gutter:deleted  . '((t (:background "#ff79c6"))))
     :config
     (git-gutter:linum-setup)
-    (global-git-gutter-mode +1))
+    (global-git-gutter-mode +1)
+    ;; git-gutter:popup-hunkをそのまま割り当てるとdiffウィンドウを閉じれないので
+    ;; トグルできる関数を定義
+    (defun git-gutter:toggle-popup-hunk ()
+      "Toggle git-gutter hunk window."
+      (interactive)
+      (if (window-live-p (git-gutter:popup-buffer-window))
+          (delete-window (git-gutter:popup-buffer-window))
+        (git-gutter:popup-hunk)))
+    :hydra
+    (hydra-git-gutter nil
+                      "git hunk"
+                      ("p" git-gutter:previous-hunk "previous")
+                      ("n" git-gutter:next-hunk "next")
+                      ("s" git-gutter:stage-hunk "stage")
+                      ("r" git-gutter:revert-hunk "revert")
+                      ("SPC" git-gutter:toggle-popup-hunk "toggle diffinfo")))
 
   ;; (leaf highlight-indent-guides
   ;;   :straight t
