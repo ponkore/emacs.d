@@ -627,6 +627,29 @@ same directory as the org-buffer and insert a link to this file."
   (leaf rst
     :straight t
     :mode ("\\.\\(rst|rest\\)$" . rst-mode)
+    :bind
+    (:rst-mode-map
+     ;; remove rst-deprecated-* bindings
+     ("C-c C-b" . nil)
+     ("C-c C-d" . nil)
+     ("C-c C-e" . nil)
+     ("C-c C-f" . nil)
+     ("C-c TAB" . nil)
+     ("C-c RET" . nil)
+     ("C-c C-n" . nil)
+     ("C-c C-p" . nil)
+     ("C-c C-s" . nil)
+     ("C-c C-u" . nil)
+     ("C-c C-v" . nil)
+     ("C-c C-w" . nil)
+     ("C-c 1" . nil)
+     ("C-c 2" . nil)
+     ("C-c 3" . nil)
+     ("C-c 4" . nil)
+     ("C-c 5" . nil)
+     ("C-c C-l <t>" . nil)
+     ("C-c C-r <t>" . nil)
+     ("C-c C-a <t>" . nil))
     :hook (rst-mode-hook . (lambda ()
                              (setq indent-tabs-mode nil)
                              (setq frame-background-mode 'dark))))
