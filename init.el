@@ -686,7 +686,7 @@ same directory as the org-buffer and insert a link to this file."
   (leaf magit
     :straight t
     :hook (magit-mode-hook . my:magit-setup-diff)
-    :commands magit-status-internal
+    :commands magit-status-internal git-commit-mode git-commit-mode-hook
     :config
     (defun magit-expand-git-file-name--msys (args)
       "Handle Msys directory names such as /c/* by changing them to C:/*"
@@ -1353,6 +1353,12 @@ set pagesize 1000
     (set-face-attribute 'whitespace-trailing nil :foreground "DeepPink" :underline t)
     (set-face-attribute 'whitespace-tab nil :foreground "LightSkyBlue" :underline t)
     (set-face-attribute 'whitespace-space nil :foreground "GreenYellow" :weight 'bold))
+
+  (leaf fill-column-indicator
+    :straight t
+    :hook
+    (markdown-mode-hook . fci-mode)
+    (git-commit-mode-hook . fci-mode))
 
   (leaf cua-mode
     :custom
