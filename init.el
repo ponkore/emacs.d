@@ -813,15 +813,22 @@ same directory as the org-buffer and insert a link to this file."
     ;;       :custom
     ;;       (jedi:complete-on-dot . t)
     ;;       :hook (python-mode-hook . (lambda () (add-to-list 'company-backends 'company-jedi))))
+
+    (leaf jedi
+      :straight t)
+
     (leaf elpy
       ;; https://elpy.readthedocs.io/en/latest/index.html
       :straight t
+      :after python-mode
       :config
-      (package-initialize)
       (elpy-enable)
-      (setenv "WORKON_HOME" "~/.pyenv/versions/")
+      (setenv "WORKON_HOME" "~/.pyenv/pyenv-win/versions/") ;; windows
+      (setq elpy-rpc-virtualenv-path 'default)
       (setq elpy-rpc-backend "jedi")
-      (setq python-shell-interpreter "~/.pyenv/shims/python3")))
+      (pyvenv-workon (expand-file-name "~/.emacs.d/elpy/rpc-venv"))
+      ;; (setq python-shell-interpreter "~/.pyenv/shims/python3")
+      ))
 
   (leaf *php
     :config
