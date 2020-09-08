@@ -368,7 +368,7 @@
     (doom-modeline-minor-modes . t)
     (doom-modeline-buffer-encoding . t)
     :custom-face
-    (mode-line                       . '((t (:background "firebrick3" :foreground "snow" :box nil))))
+    (mode-line                       . '((t (:background "medium blue" :foreground "snow" :box nil)))) ;; firebrick3
     (doom-modeline-buffer-minor-mode . '((t (:inherit mode-line :slant normal))))
     :hook (emacs-startup-hook . doom-modeline-mode)
     :config
