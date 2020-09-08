@@ -870,6 +870,9 @@ same directory as the org-buffer and insert a link to this file."
     (leaf add-node-modules-path
       :straight t
       :commands add-node-modules-path)
+    (leaf prettier-js
+      :straight t
+      :commands prettier-js-mode)
     (leaf tide
       :straight t
       :commands setup-tide-mode
@@ -902,7 +905,9 @@ same directory as the org-buffer and insert a link to this file."
         ;; company is an optional dependency. You have to
         ;; install it separately via package-install
         ;; `M-x package-install [ret] company`
-        (company-mode +1)))
+        (company-mode +1)
+        ;;
+        (prettier-js-mode)))
     (leaf typescript-mode
       :straight t
       :hook (typescript-mode-hook . setup-tide-mode)))
