@@ -396,7 +396,7 @@
                    " S")
                   (t " =")))
           (pcase (coding-system-eol-type buffer-file-coding-system)
-            (0 ".LF")
+            (0 "")
             (1 ".CRLF")
             (2 ".CR")))
          'face (if (doom-modeline--active) 'mode-line 'mode-line-inactive)
@@ -407,7 +407,7 @@
     (doom-modeline-def-modeline
      'main
      ;; '(workspace-number bar window-number evil-state ryo-modal xah-fly-keys matches buffer-info remote-host buffer-position parrot selection-info)
-     '(bar my:buffer-encoding "/" matches buffer-info buffer-position selection-info)
+     '(bar my:buffer-encoding matches buffer-info buffer-position selection-info)
      '(misc-info debug minor-modes "-" input-method major-mode process vcs checker)))
   )
 
