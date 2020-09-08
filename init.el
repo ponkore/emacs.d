@@ -1338,7 +1338,6 @@ set pagesize 1000
     (git-gutter:added    . '((t (:background "#50fa7b"))))
     (git-gutter:deleted  . '((t (:background "#ff79c6"))))
     :config
-    (git-gutter:linum-setup)
     (global-git-gutter-mode +1)
     ;; git-gutter:popup-hunkをそのまま割り当てるとdiffウィンドウを閉じれないので
     ;; トグルできる関数を定義
