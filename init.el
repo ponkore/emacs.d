@@ -697,7 +697,7 @@ same directory as the org-buffer and insert a link to this file."
     (markdown-mode-hook . my:setup-markdown-mode)
     (gfm-mode-hook      . my:setup-markdown-mode)
     :config
-    (setq markdown-command (concat "pandoc -F pandoc-crossref --template=default.html --metadata=metadata.yml --self-contained -s --from gfm+footnotes --to html --metadata " (expand-file-name "~/AppData/Roaming/pandoc/metadata.yml")))
+    (setq markdown-command (concat "pandoc -F pandoc-crossref --template=default.html --self-contained -s --from gfm+footnotes --to html --metadata " (expand-file-name "~/AppData/Roaming/pandoc/metadata.yml")))
     :custom
     (markdown-open-command . "c:/Program Files/Typora/Typora.exe")
     (markdown-use-pandoc-style-yaml-metadata . t)
