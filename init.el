@@ -691,6 +691,8 @@ same directory as the org-buffer and insert a link to this file."
       (setq line-move-visual t)
       (setq truncate-lines nil)
       (electric-indent-local-mode -1))
+    :bind
+    ("C-c ." . hydra-markdown/body)
     :hook
     (markdown-mode-hook . my:setup-markdown-mode)
     (gfm-mode-hook      . my:setup-markdown-mode)
@@ -699,7 +701,48 @@ same directory as the org-buffer and insert a link to this file."
     :custom
     (markdown-open-command . "c:/Program Files/Typora/Typora.exe")
     (markdown-use-pandoc-style-yaml-metadata . t)
-    (markdown-header-scaling . t))
+    (markdown-header-scaling . t)
+    :hydra
+    (hydra-markdown (:hint nil :exit t)
+      "
+^Format^      ^Insert^        ^Head.Foot^     ^Code.Link^      ^Move^           ^Pndoc
+^^^^^^-----------------------------------------------------------------------------------
+_s_torong     _b_lockquote    H1~H6:_a_uto    _c_ode block     _p_romote        _H_tml
+italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         _P_DF
+リスト:_._    _t_able         _r_eference     _l_ink           _j_:move-up      _D_ocx
+取消線:_x_    hr:_-_          _i_mage         _u_ri            _k_:move-down    Pre_v_iew"
+      ("s" markdown-insert-bold)
+      ("/" markdown-insert-italic)
+      ("-" markdown-insert-hr)
+      ("x" markdown-insert-strike-through)
+      ("b" markdown-insert-blockquote)
+      (":" markdown-insert-pre)
+      ("t" markdown-insert-table)
+      ("c" markdown-insert-gfm-code-block)
+      ("n" markdown-insert-code)
+      ("K" markdown-insert-kbd)
+      ("a" markdown-insert-header-dwim)
+      ("1" markdown-insert-header-atx-1)
+      ("2" markdown-insert-header-atx-2)
+      ("3" markdown-insert-header-atx-3)
+      ("4" markdown-insert-header-atx-4)
+      ("5" markdown-insert-header-atx-5)
+      ("6" markdown-insert-header-atx-6)
+      ("." markdown-insert-list-item)
+      ("i" markdown-insert-imaget)
+      ("l" markdown-insert-link)
+      ("u" markdown-insert-uri)
+      ("f" markdown-insert-footnote)
+      ("r" markdown-insert-reference-link-dwim)
+      ("p" markdown-promote)
+      ("d" markdown-demote)
+      ("j" markdown-move-down)
+      ("k" markdown-move-up)
+      ;; Pndoc
+      ("H" md2html :exit t)
+      ("P" md2pdf :exit t)
+      ("D" md2docx :exit t)
+      ("v" markdown-preview :exit t)))
 
   (leaf rst
     :straight t
