@@ -646,12 +646,21 @@ same directory as the org-buffer and insert a link to this file."
 
   (leaf markdown-mode
     :straight t
-    :mode ("\\.\\(markdown\\|md\\)\\.txt\\'" . markdown-mode)
+    :mode ("\\.\\(markdown\\|md\\|mkd\\)\\'" . gfm-mode)
+    :preface
+    (defun my:disable-electric-indent-local-mode ()
+      (electric-indent-local-mode -1))
+    :hook
+    (markdown-mode-hook . my:disable-electric-indent-local-mode)
+    (gfm-mode-hook      . my:disable-electric-indent-local-mode)
     :config
     (defface markdown-inline-code-face
       '((t (:inherit (markdown-code-face font-lock-constant-face))))
       "Face for inline code."
-      :group 'markdown-faces))
+      :group 'markdown-faces)
+    :custom
+    (markdown-command . "pandoc -F pandoc-crossref --template=md2html.html --metadata=metadata.yml --self-contained -s --from gfm --to html5")
+    (markdown-open-command . "c:/Program Files/Typora/Typora.exe"))
 
   (leaf rst
     :straight t
