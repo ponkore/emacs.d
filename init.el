@@ -486,6 +486,8 @@
     (dired-recursive-copies . 'always)
     ;; diredバッファでC-sした時にファイル名だけにマッチするように
     (dired-isearch-filenames . t)
+    ;;
+    (ls-lisp-dirs-first . t)
     :config
     ;; バージョン管理システム
     ;; diredから適切なバージョン管理システムの*-statusを起動
@@ -1321,7 +1323,8 @@ set pagesize 1000
            ("<C-tab>" . yas-expand)
            ("C-x i i" . yas-insert-snippet)
            ("C-x i n" . yas-new-snippet)
-           ("C-x i v" . yas-visit-snippet-file))
+           ("C-x i v" . yas-visit-snippet-file)
+           ("C-x i l" . yas-describe-tables))
     :commands yas-expand yas-global-mode yas-insert-snippet yas-visit-snippet-file
     :hook (emacs-startup-hook . yas-global-mode))
 
