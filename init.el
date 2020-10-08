@@ -955,6 +955,7 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
       :bind
       (:php-mode-map
        (";" . self-insert-command)
+       ("{" . self-insert-command)
        ;; ("[" . #'(smartchr "[]" "array()" "[[]]"))
        ;; ("]" . #'(smartchr "array " "]" "]]"))
        ;; ("C-}" . cedit-barf)
