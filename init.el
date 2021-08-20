@@ -1,26 +1,70 @@
-;; -*- lexical-binding: t; indent-tabs-mode: nil -*-
-;;
-;; ~/.emacs.d/init.el
-;;
-(when (eq window-system 'w32)
-  (setq w32-get-true-file-attributes nil)
-  (setenv "HOME" (getenv "USERPROFILE")))
+;;; init.el --- My init.el  -*- lexical-binding: t; indent-tabs-mode: nil -*-
+
+;; Copyright (C) 2020  Masao KATO
+
+;; Author: Masao KATO <ponkore@gmail.com>
+
+;; This program is free software: you can redistribute it and/or modify
+;; it under the terms of the GNU General Public License as published by
+;; the Free Software Foundation, either version 3 of the License, or
+;; (at your option) any later version.
+
+;; This program is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;; GNU General Public License for more details.
+
+;; You should have received a copy of the GNU General Public License
+;; along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+;;; Commentary:
+
+;; My init.el.
+
+;;; Code:
 
 ;; only for my office environment
 (load (expand-file-name "~/.emacs.d/config-proxy.el") t)
 
-;;
-;; initialize Emacs package system.
-;;
-(require 'package)
-(add-to-list 'package-archives '("melpa" . "https://melpa.org/packages/"))
-(add-to-list 'package-archives '("marmalade" . "https://marmalade-repo.org/packages/"))
-(when (< (string-to-number emacs-version) 27)
-  (package-initialize))
+;; this enables this running method
+;;   emacs -q -l ~/.debug.emacs.d/init.el
+(eval-and-compile
+  (when (or load-file-name byte-compile-current-file)
+    (setq user-emacs-directory
+          (expand-file-name
+           (file-name-directory (or load-file-name byte-compile-current-file))))))
+
+;; <leaf-install-code>
+(eval-and-compile
+  (customize-set-variable
+   'package-archives '(("gnu"   . "https://elpa.gnu.org/packages/")
+                       ("melpa" . "https://melpa.org/packages/")
+                       ("marmalade" . "https://marmalade-repo.org/packages/")
+                       ("org"   . "https://orgmode.org/elpa/")))
+  (package-initialize)
+  (unless (package-installed-p 'leaf)
+    (package-refresh-contents)
+    (package-install 'leaf))
+
+  (leaf leaf-keywords
+    :ensure t
+    :init
+    ;; optional packages if you want to use :hydra, :el-get, :blackout,,,
+    (leaf hydra :ensure t)
+    (leaf el-get :ensure t)
+    (leaf blackout :ensure t)
+
+    :config
+    ;; initialize leaf-keywords.el
+    (leaf-keywords-init)))
+;; </leaf-install-code>
 
 ;;
 ;; initialize straight
 ;;
+(leaf leaf-tree :ensure t)
+(leaf leaf-convert :ensure t)
+
 (defvar bootstrap-version)
 (let ((bootstrap-file
        (expand-file-name "straight/repos/straight.el/bootstrap.el" user-emacs-directory))
@@ -37,19 +81,8 @@
 (when (>= (string-to-number emacs-version) 27)
   (setq byte-compile-warnings '(cl-functions)))
 
-(require 'cl)
-
 ;; Avoid to write `package-selected-packages` in init.el
 (load (setq custom-file (expand-file-name "custom.el" user-emacs-directory)))
-
-;; install packages
-(let ((not-installed (loop for x in package-selected-packages
-                           when (not (package-installed-p x))
-                           collect x)))
-  (when not-installed
-    (package-refresh-contents)
-    (dolist (pkg not-installed)
-      (package-install pkg))))
 
 ;; ~/.emacs.d/site-lisp 以下全部読み込み
 (let ((default-directory (expand-file-name "~/.emacs.d/site-lisp")))
@@ -61,18 +94,15 @@
 (load-theme 'pastels-on-dark t)
 (enable-theme 'pastels-on-dark)
 
-;;
-;; setup usgin `leaf.el`
-;;
-(require 'leaf)
-
-(leaf leaf-keywords
-  :require t
-  :config
-  (leaf-keywords-init))
-
 (leaf diminish :straight t)
 (leaf hydra :straight t)
+
+;;
+;; ~/.emacs.d/init.el
+;;
+(when (eq window-system 'w32)
+  (setq w32-get-true-file-attributes nil)
+  (setenv "HOME" (getenv "USERPROFILE")))
 
 (leaf *japanese-env
   :config
