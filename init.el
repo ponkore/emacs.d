@@ -484,6 +484,7 @@
     :commands s-join s-split)
 
   (leaf *setup-exec-path
+    :if (not (eq system-type 'windows-nt))
     :config
     (leaf exec-path-from-shell
       :straight t
