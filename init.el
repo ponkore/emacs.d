@@ -1691,14 +1691,16 @@ set pagesize 1000
 
 (leaf windows-ime
   :if (eq system-type 'windows-nt)
-  :after *encoding
+  ;; :after *encoding
   :config
-
   ;; 日本語入力のための設定
   (set-keyboard-coding-system 'cp932)
 
   (prefer-coding-system 'utf-8-dos)
   (set-file-name-coding-system 'cp932)
+
+  ;; tr-ime setup
+  (tr-ime-advanced-install)
 
   ;; 標準IMEの設定
   (setq default-input-method "W32-IME")
@@ -1711,10 +1713,10 @@ set pagesize 1000
   (w32-ime-initialize)
 
   ;; IME OFF時の初期カーソルカラー
-  ;; (set-cursor-color "red")
+  (set-cursor-color "white")
   ;; IME ON/OFF時のカーソルカラー
-  ;; (add-hook 'input-method-activate-hook (lambda() (set-cursor-color "green")))
-  ;; (add-hook 'input-method-inactivate-hook (lambda() (set-cursor-color "red")))
+  (add-hook 'input-method-activate-hook (lambda() (set-cursor-color "green")))
+  (add-hook 'input-method-inactivate-hook (lambda() (set-cursor-color "white")))
 
   ;; バッファ切り替え時にIME状態を引き継ぐ
   (setq w32-ime-buffer-switch-p nil)
