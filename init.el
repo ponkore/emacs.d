@@ -492,7 +492,8 @@
     (defun setup-exec-path ()
       (mapc #'(lambda (f)
                 (add-to-list 'exec-path (expand-file-name f)))
-            (s-split ":" (exec-path-from-shell-getenv "PATH"))))
+            (s-split ":" (exec-path-from-shell-getenv "PATH")))
+      (setenv "PATH" (s-join ":" exec-path)))
     (setup-exec-path)))
 
 ;; (let ((envs '("GOROOT" "GOPATH")))
@@ -1062,11 +1063,11 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
                          (setup-tide-mode))))
     :config
     ;; enable typescript-tslint checker
-    (flycheck-add-mode 'typescript-tslint 'web-mode))
+    (flycheck-add-mode 'typescript-tslint 'web-mode)
+    (prettier-js-mode))
 
   (leaf js2-mode
     :straight t
-    :after tide
     :mode
     ("\\.js"   . js2-mode)
     ("\\.json" . javascript-mode))
