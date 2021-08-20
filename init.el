@@ -727,7 +727,7 @@ same directory as the org-buffer and insert a link to this file."
     :mode ("\\.\\(markdown\\|md\\|mkd\\)\\'" . gfm-mode)
     :preface
     (defun my:setup-markdown-mode ()
-      (setq line-move-visual t)
+      (setq line-move-visual nil)
       (setq truncate-lines nil)
       (electric-indent-local-mode -1))
     :bind
@@ -740,7 +740,7 @@ same directory as the org-buffer and insert a link to this file."
     :custom
     (markdown-open-command . "c:/Program Files/Typora/Typora.exe")
     (markdown-use-pandoc-style-yaml-metadata . t)
-    (markdown-header-scaling . t)
+    (markdown-header-scaling . nil)
     :hydra
     (hydra-markdown (:hint nil :exit t)
       "
@@ -777,7 +777,7 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
       ("d" markdown-demote)
       ("j" markdown-move-down)
       ("k" markdown-move-up)
-      ;; Pndoc
+      ;; Pandoc
       ("H" md2html :exit t)
       ("P" md2pdf :exit t)
       ("D" md2docx :exit t)
