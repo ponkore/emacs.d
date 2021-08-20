@@ -965,6 +965,9 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
     (leaf php-mode
       :mode ("\\.\\(cgi\\|phpm\\)\\'" . php-mode)
       :straight t
+      :custom
+      (ac-php-php-executable . "c:/Apps/php-7.4.22-Win32-vc15-x64/php.exe")
+      (ac-php-debug-flag . nil)
       :hook
       (php-mode-hook . (lambda ()
                          (company-mode t)
