@@ -280,6 +280,12 @@
     (setq mac-option-modifier 'super)
     (setq mac-command-modifier 'meta)))
 
+(leaf autorevert
+  :doc "revert buffers when files on disk change"
+  :tag "builtin"
+  :custom ((auto-revert-interval . 1))
+  :global-minor-mode global-auto-revert-mode)
+
 ;;
 ;; ivy (https://qiita.com/blue0513/items/c0dc35a880170997c3f5)
 ;;
