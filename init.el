@@ -509,7 +509,7 @@
     (:dired-mode-map
      ("V" . dired-vc-status)
      ("K" . dired-k)
-     ("g" . dired-k)
+     ("G" . ripgrep-regexp)
      ("." . hydra-dired/body))
     :hook
     (dired-mode-hook . dired-k)
@@ -567,7 +567,7 @@ _R_ename    ch_M_od        _t_oggle       _e_dit    _[_ hide detail     _._toggg
                  ("?" dired-summary :exit t)
                  ("R" dired-do-rename)
                  ("a" dired-list-all-mode)
-                 ("g" revert-buffe)
+                 ("g" revert-buffer)
                  ("e" wdired-change-to-wdired-mode :exit t)
                  ("s" dired-sort-toggle-or-edit)
                  ;; ("T" counsel-tramp :exit t)
@@ -732,7 +732,7 @@ same directory as the org-buffer and insert a link to this file."
       (setq truncate-lines nil)
       (electric-indent-local-mode -1))
     :bind
-    ("C-c ." . hydra-markdown/body)
+    (:markdown-mode-map ("C-c ." . hydra-markdown/body))
     :hook
     (markdown-mode-hook . my:setup-markdown-mode)
     (gfm-mode-hook      . my:setup-markdown-mode)
@@ -2227,4 +2227,27 @@ thumbnail = \"/img/%Y-%m/%d/{{shortname}}.png\"
     ;; (ad-activate-regexp "grep-coding-system-setup")
     ;; (ad-deactivate-regexp "grep-coding-system-setup")
     )
+
+  (leaf ripgrep
+    :straight t
+    :config
+    (defun ripgrep-regexp (regexp &optional args)
+      "Run a ripgrep search with `REGEXP' rooted at `.'.
+`ARGS' provides Ripgrep command line arguments."
+      (interactive
+       (list (read-from-minibuffer "Ripgrep search for: " (thing-at-point 'symbol))))
+      (let ((default-directory (dired-current-directory)))
+        (compilation-start
+         (mapconcat 'identity
+                    (append (list ripgrep-executable)
+                            ripgrep-arguments
+                            args
+                            ripgrep--base-arguments
+                            (when ripgrep-highlight-search '("--color=always"))
+                            (when (and case-fold-search
+                                       (isearch-no-upper-case-p regexp t))
+                              '("--ignore-case"))
+                            '("--")
+                            (list (shell-quote-argument regexp) ".")) " ")
+         'ripgrep-search-mode))))
   )
