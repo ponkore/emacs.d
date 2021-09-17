@@ -2039,7 +2039,7 @@ set pagesize 1000
           (kill-buffer buffer)
           (reverse ret)))))
 
-  (leaf *count-word-in-buffer
+  (leaf *count-words-in-buffer
     :config
     :bind
     ("C-x =" . count-words-in-buffer)
