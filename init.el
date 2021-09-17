@@ -510,6 +510,7 @@
      ("V" . dired-vc-status)
      ("K" . dired-k)
      ("G" . ripgrep-regexp)
+     ("g" . my:dired-revert-buffer)
      ("." . hydra-dired/body))
     :hook
     (dired-mode-hook . dired-k)
@@ -527,6 +528,10 @@
     ;;
     (ls-lisp-dirs-first . t)
     :config
+    (defun my:dired-revert-buffer ()
+      (interactive)
+      (revert-buffer)
+      (dired-k))
     ;; バージョン管理システム
     ;; diredから適切なバージョン管理システムの*-statusを起動
     (defun find-path-in-parents (directory base-names)
@@ -1916,7 +1921,6 @@ set pagesize 1000
      ("C-x C-e" compile)
      ("C-x C-n" next-error)
      ("C-x C-v" find-file-other-window)
-     ("C-x =" count-lines-page)
      ("C-x n" myblog-hugo/create-draft)
      ("C-x l" goto-line)
      ("C-x g" grep)
@@ -2034,6 +2038,17 @@ set pagesize 1000
             (setq ret (cons (match-string-no-properties 0) ret)))
           (kill-buffer buffer)
           (reverse ret)))))
+
+  (leaf *count-word-in-buffer
+    :config
+    :bind
+    ("C-x =" . count-words-in-buffer)
+    :commands count-wordds-in-buffer
+    (defun count-words-in-buffer ()
+      (interactive)
+      (save-excursion
+        (count-words--message "Region" (point-min) (point-max)))))
+
   (leaf goto-line-beginning-or-indent
     ;; http://qiita.com/ShingoFukuyama/items/62269c4904ca085f9149
     :config
