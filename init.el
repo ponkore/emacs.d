@@ -1668,11 +1668,13 @@ set pagesize 1000
   (:projectile-command-map
    ("s" . my:projectile-search-dwim)
    ("<f12>" . projectile-toggle-between-implementation-and-test))
+  ("C-c p" . projectile-command-map)
   :custom
   (projectile-enable-idle-timer . nil)
   (projectile-enable-caching . t)
   (projectile-completion-system . 'ivy)
   :preface
+  (require 'ripgrep)
   (defun my:projectile-search-dwim (search-term)
     "Merge version to search document via grep/ag/rg.
       Use fast alternative if it exists, fallback grep if no alternatives in system.
@@ -1912,25 +1914,25 @@ set pagesize 1000
   (file-name-shadow-mode -1))
 
 (leaf global-set-keys
-  :config
-  (mapcar
-   #'(lambda (l) (global-set-key (kbd (first l)) (second l)))
-   '(("C-h" delete-backward-char)
-     ("C-z" scroll-down)
-     ("ESC ?" apropos)
-     ("C-x C-e" compile)
-     ("C-x C-n" next-error)
-     ("C-x C-v" find-file-other-window)
-     ("C-x n" myblog-hugo/create-draft)
-     ("C-x l" goto-line)
-     ("C-x g" grep)
-     ("C-x t" toggle-truncate-lines)
-     ("ESC C-g" keyboard-quit)
-     ("C-x !" shell-command)
-     ("C-x |" shell-command-on-region)
-     ("ESC h" backward-kill-word)
-     ("%" my:match-paren)
-     ("C-x C-;" my:insert-datetime)))
+  :bind
+  ("C-h" . delete-backward-char)
+  ("C-z" . scroll-down)
+  ("ESC ?" . apropos)
+  ("C-x C-e" . compile)
+  ("C-x C-n" . next-error)
+  ("C-x C-v" . find-file-other-window)
+  ("C-x n" . myblog-hugo/create-draft)
+  ("C-x l" . goto-line)
+  ("C-x g" . grep)
+  ("C-x t" . toggle-truncate-lines)
+  ("ESC C-g" . keyboard-quit)
+  ("C-x !" . shell-command)
+  ("C-x |" . shell-command-on-region)
+  ("ESC h" . backward-kill-word)
+  ("%" . my:match-paren)
+  ("C-x C-;" . my:insert-datetime)
+  ("C-x C-M-r" . revert-buffer)
+  :init
   (defun my:match-paren (arg)
     "Go to the matching parenthesis if on parenthesis otherwise insert %."
     (interactive "p")
@@ -2040,10 +2042,9 @@ set pagesize 1000
           (reverse ret)))))
 
   (leaf *count-words-in-buffer
-    :config
     :bind
     ("C-x =" . count-words-in-buffer)
-    :commands count-wordds-in-buffer
+    :init
     (defun count-words-in-buffer ()
       (interactive)
       (save-excursion
@@ -2051,14 +2052,15 @@ set pagesize 1000
 
   (leaf goto-line-beginning-or-indent
     ;; http://qiita.com/ShingoFukuyama/items/62269c4904ca085f9149
-    :config
+    :bind
+    ("C-a" . my:goto-line-beginning-or-indent)
+    :init
     (defun my:goto-line-beginning-or-indent (&optional $position)
       (interactive)
       (or $position (setq $position (point)))
       (let (($starting-position (progn (back-to-indentation) (point))))
         (if (eq $starting-position $position)
-            (move-beginning-of-line 1))))
-    (global-set-key (kbd "C-a") 'my:goto-line-beginning-or-indent))
+            (move-beginning-of-line 1)))))
 
   (leaf myblog-hugo
     :config
@@ -2243,10 +2245,9 @@ thumbnail = \"/img/%Y-%m/%d/{{shortname}}.png\"
     ;; (ad-deactivate-regexp "grep-coding-system-setup")
     )
 
-  (leaf ripgrep
-    :straight t
-    :config
-    (defun ripgrep-regexp (regexp &optional args)
+  (leaf ripgrep*
+    :init
+    (defun my:ripgrep-regexp (regexp &optional args)
       "Run a ripgrep search with `REGEXP' rooted at `.'.
 `ARGS' provides Ripgrep command line arguments."
       (interactive
