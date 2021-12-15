@@ -90,10 +90,6 @@
   (if (fboundp 'normal-top-level-add-subdirs-to-load-path)
       (normal-top-level-add-subdirs-to-load-path)))
 
-;; set theme
-(load-theme 'pastels-on-dark t)
-(enable-theme 'pastels-on-dark)
-
 (leaf diminish :straight t)
 (leaf hydra :straight t)
 
@@ -268,8 +264,10 @@
     (interactive)
     (when (eq system-type 'darwin)
       (emacs-font-setting "Ricty Diminished" 16))
+    ;; (when (eq system-type 'windows-nt)
+    ;;   (emacs-font-setting "HackgenNerd" 10))
     (when (eq system-type 'windows-nt)
-      (emacs-font-setting "HackgenNerd" 10)))
+      (emacs-font-setting "Ricty Diminished" 10)))
   (setup-font))
 
 (leaf *modifier
@@ -495,9 +493,6 @@
             (s-split ":" (exec-path-from-shell-getenv "PATH")))
       (setenv "PATH" (s-join ":" exec-path)))
     (setup-exec-path)))
-
-;; (let ((envs '("GOROOT" "GOPATH")))
-;;   (exec-path-from-shell-copy-envs envs))
 
 (leaf *dired
   :config
@@ -969,27 +964,28 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
   (leaf *php
     :config
     (leaf php-mode
-      :mode ("\\.\\(cgi\\|phpm\\)\\'" . php-mode)
+      :mode ("\\.\\(cgi\\|phpm\\|inc\\)\\'" . php-mode)
       :straight t
       :custom
       (ac-php-php-executable . "c:/Apps/php-7.4.22-Win32-vc15-x64/php.exe")
+      (flycheck-php-phpcs-executable . "phpcs")
       (ac-php-debug-flag . nil)
       :hook
       (php-mode-hook . (lambda ()
                          (company-mode t)
                          (subword-mode 1)
+                         (setq tab-width 4)
+                         (setq indent-tabs-mode nil)
+                         (setq c-basic-offset 4)
                          (setq-local page-delimiter "\\_<\\(class\\|function\\|namespace\\)\\_>.+$")
                          (ac-php-core-eldoc-setup)
                          (add-to-list 'company-backends 'company-ac-php-backend)
                          (make-local-variable 'company-backends)
-                         ;; http://oh-sky.hatenablog.com/entry/2013/07/07/004651
-                         (require 'flycheck-phpstan)
-                         (flycheck-mode t)
+                         ;; (require 'flycheck-phpstan)
                          (add-to-list 'flycheck-disabled-checkers 'php-phpmd)
-                         (add-to-list 'flycheck-disabled-checkers 'php-phpcs)
-                         (setq tab-width 4)
-                         (setq indent-tabs-mode nil)
-                         (setq c-basic-offset 4)))
+                         ;; (add-to-list 'flycheck-disabled-checkers 'php-phpcs)
+                         (setq flycheck-phpcs-standard "PSR2")
+                         (flycheck-mode t)))
       :config
       (leaf company-php
         :straight t)
@@ -1704,7 +1700,7 @@ set pagesize 1000
   ;; 日本語入力のための設定
   (set-keyboard-coding-system 'cp932)
 
-  (prefer-coding-system 'utf-8-dos)
+  (prefer-coding-system 'utf-8-unix)
   (set-file-name-coding-system 'cp932)
 
   ;; tr-ime setup
@@ -1719,6 +1715,15 @@ set pagesize 1000
 
   ;; IMEの初期化
   (w32-ime-initialize)
+
+  ;; IME 制御 (yes/no などの入力の時に IME を off にする)
+  (wrap-function-to-control-ime 'universal-argument t nil)
+  (wrap-function-to-control-ime 'read-string nil nil)
+  (wrap-function-to-control-ime 'read-char nil nil)
+  (wrap-function-to-control-ime 'read-from-minibuffer nil nil)
+  (wrap-function-to-control-ime 'y-or-n-p nil nil)
+  (wrap-function-to-control-ime 'yes-or-no-p nil nil)
+  (wrap-function-to-control-ime 'map-y-or-n-p nil nil)
 
   ;; IME OFF時の初期カーソルカラー
   (set-cursor-color "white")
@@ -1766,10 +1771,19 @@ set pagesize 1000
 
   (leaf frame-setting-common
     :config
+    (leaf theme
+      :config
+      (leaf color-theme-sanityinc-tomorrow
+        :straight t
+        :config
+        (color-theme-sanityinc-tomorrow-blue))
+      ;; (load-theme 'pastels-on-dark t)
+      ;; (enable-theme 'pastels-on-dark)
+      )
     ;; フレームタイトルの設定
     (setq frame-title-format "%b")
     ;; 背景の透明度
-    (set-frame-parameter nil 'alpha 90)
+    (set-frame-parameter nil 'alpha 95)
     ;; カーソル点滅表示
     (blink-cursor-mode 0)
     ;; メニューバーを消す
@@ -1789,6 +1803,8 @@ set pagesize 1000
     (setq next-screen-context-lines 1)
     ;; バッファ中の行番号表示
     (global-linum-mode t)
+    ;; 下線を引く
+    (global-hl-line-mode t)
     ;; 行番号のフォーマット
     ;; (set-face-attribute 'linum nil :foreground "red" :height 0.8)
     (set-face-attribute 'linum nil :height 0.8)
