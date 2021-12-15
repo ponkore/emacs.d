@@ -284,10 +284,84 @@
   :custom ((auto-revert-interval . 1))
   :global-minor-mode global-auto-revert-mode)
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(leaf *interactive-search-next
+  :config
+  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+  ;; https://blog.tomoya.dev/posts/a-new-wave-has-arrived-at-emacs/
+  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+  (leaf marginalia
+    :straight t)
+
+  (leaf vertico
+    :straight t
+    :config
+    (load-library "vertico-directory"))
+
+  (leaf *vertico
+    :config
+    (defun after-init-hook ()
+      (vertico-mode)
+      ;; 補完候補を最大20行まで表示する
+      (setq vertico-count 20)
+      (marginalia-mode)
+      ;; savehist-modeを使ってVerticoの順番を永続化する
+      (savehist-mode))
+    (add-hook 'after-init-hook #'after-init-hook))
+
+  (leaf vertico-directory
+    :after vertico
+    :commands vertico-directory-delete-char
+    :bind (:vertico-map
+           ("C-l" . vertico-directory-delete-char))
+    :hook
+    (rfn-eshadow-update-overlay . vertico-directory-tidy))
+
+  (leaf consult
+    :straight t
+    :bind
+    ("C-x C-r" . consult-recent-file)
+    ("C-x l" . consult-goto-line)
+    ("C-x b" . consult-buffer))
+
+  (leaf embark
+    :straight t
+    :after embark consult
+    :config
+    (leaf embark-consult
+      :straight t)
+    ;; Embarkを起動する
+    (global-set-key (kbd "C-S-a") 'embark-act))
+
+  (leaf orderless
+    :straight t
+    :config
+    ;; 補完スタイルにorderlessを利用する
+    (setq completion-styles '(orderless)))
+
+  ;; C-uを付けるとカーソル位置の文字列を使うmy-consult-lineコマンドを定義する
+  (defun my-consult-line (&optional at-point)
+    "Consult-line uses things-at-point if set C-u prefix."
+    (interactive "P")
+    (if at-point
+        (consult-line (thing-at-point 'symbol))
+      (consult-line)))
+
+  ;; C-s（isearch-forward）をmy-consult-lineコマンドに割り当てる
+  (global-set-key (kbd "C-s") 'my-consult-line)
+
+  ;; C-s/C-rで行を移動できるようにする
+  (with-eval-after-load 'vertico
+    (define-key vertico-map (kbd "C-r") 'vertico-previous)
+    (define-key vertico-map (kbd "C-s") 'vertico-next))
+  )
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 ;;
 ;; ivy (https://qiita.com/blue0513/items/c0dc35a880170997c3f5)
 ;;
 (leaf *interactive-search
+  :disabled t
   :config
 
   (leaf ivy
@@ -1938,7 +2012,7 @@ set pagesize 1000
   ("C-x C-n" . next-error)
   ("C-x C-v" . find-file-other-window)
   ("C-x n" . myblog-hugo/create-draft)
-  ("C-x l" . goto-line)
+  ;; ("C-x l" . goto-line)
   ("C-x g" . grep)
   ("C-x t" . toggle-truncate-lines)
   ("ESC C-g" . keyboard-quit)
