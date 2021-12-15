@@ -96,7 +96,7 @@
 ;;
 ;; ~/.emacs.d/init.el
 ;;
-(when (eq window-system 'w32)
+(when (eq system-type 'windows-nt)
   (setq w32-get-true-file-attributes nil)
   (setenv "HOME" (getenv "USERPROFILE")))
 
@@ -1694,7 +1694,7 @@ set pagesize 1000
   (open-junk-file-format . "~/Downloads/junk/%Y-%m-%d-%H%M%S."))
 
 (leaf windows-ime
-  :if (eq system-type 'windows-nt)
+  :if (eq window-system 'w32)
   ;; :after *encoding
   :config
   ;; 日本語入力のための設定
