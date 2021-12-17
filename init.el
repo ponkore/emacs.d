@@ -308,7 +308,6 @@
      ("C-r" . vertico-previous) ;; C-s/C-rで行を移動できるようにする
      ("C-s" . vertico-next))
     :config
-    (load-library "vertico-directory")
     (advice-add #'vertico--format-candidate :around
                 (lambda (orig cand prefix suffix index _start)
                   (setq cand (funcall orig cand prefix suffix index _start))
@@ -327,7 +326,11 @@
 
   (leaf vertico-directory
     :after vertico
-    :commands vertico-directory-delete-char
+    :commands
+    vertico-directory-delete-char
+    vertico-directory-enter
+    vertico-directory-delete-word
+    vertico-directory-tidy
     :bind
     (:vertico-map
      ("C-l" . vertico-directory-delete-char)
@@ -339,22 +342,16 @@
     :custom
     `((file-name-shadow-properties . '(invisible t intangible t)))
     :config
-    (file-name-shadow-mode +1))
-
-  ;; (straight-use-package '( vertico :files (:defaults "extensions/*")
-  ;;                          :includes (vertico-buffer
-  ;;                                     vertico-directory
-  ;;                                     vertico-flat
-  ;;                                     vertico-indexed
-  ;;                                     vertico-mouse
-  ;;                                     vertico-quick
-  ;;                                     vertico-repeat
-  ;;                                     vertico-reverse)))
-
-  ;; (use-package vertico-directory
-  ;;              :load-path "straight/build/vertico/extensions" ; is beter than straight/repos/vertico/extensions
-  ;;              ;; ...
-  ;;              )
+    (file-name-shadow-mode +1)
+    (straight-use-package '(vertico :files (:defaults "extensions/*")
+                                    :includes (vertico-buffer
+                                               vertico-directory
+                                               vertico-flat
+                                               vertico-indexed
+                                               vertico-mouse
+                                               vertico-quick
+                                               vertico-repeat
+                                               vertico-reverse))))
 
   (leaf consult
     :straight t
@@ -393,7 +390,26 @@
                                      orderless-flex
                                      orderless-regexp
                                      orderless-initialism
-                                     orderless-literal)))))
+                                     orderless-literal))))
+
+  ;; (leaf corfu
+  ;;   :straight t
+  ;;   :commands corfu-global-mode
+  ;;   :custom
+  ;;   (corfu-cycle . t) ;; Enable cycling for `corfu-next/previous'
+  ;;   (corfu-auto . t)  ;; Enable auto completion
+  ;;   ;; (corfu-commit-predicate nil)   ;; Do not commit selected candidates on next input
+  ;;   ;; (corfu-quit-at-boundary t)     ;; Automatically quit at word boundary
+  ;;   ;; (corfu-quit-no-match t)        ;; Automatically quit if there is no match
+  ;;   ;; (corfu-preview-current nil)    ;; Disable current candidate preview
+  ;;   ;; (corfu-preselect-first nil)    ;; Disable candidate preselection
+  ;;   ;; (corfu-echo-documentation nil) ;; Disable documentation in the echo area
+  ;;   ;; (corfu-scroll-margin 5)        ;; Use scroll margin
+  ;;   :init
+  ;;   (corfu-global-mode))
+  )
+
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;;
@@ -1691,14 +1707,27 @@ set pagesize 1000
      ("C-M-i" . company-complete)) ;; 各種メジャーモードでも C-M-iで company-modeの補完を使う
     :hook
     (emacs-startup-hook . global-company-mode)
-    :custom
-    (company-idle-delay . 0)
-    (company-echo-delay . 0)
-    (company-minimum-prefix-length . 1) ;; 1文字入力で補完されるように
-    (company-selection-wrap-around . t) ;; 候補の一番上でselect-previousしたら一番下に、一番下でselect-nextしたら一番上に行くように
-    (company-tooltip-limit . 20)
-    (company-tooltip-align-annotations . t)
-    (company-begin-commands . '(self-insert-command)))
+    ;; :custom
+    ;; `((company-idle-delay . 0)
+    ;;   (company-echo-delay . 0)
+    ;;   (company-minimum-prefix-length . 1) ;; 1文字入力で補完されるように
+    ;;   (company-selection-wrap-around . t) ;; 候補の一番上でselect-previousしたら一番下に、一番下でselect-nextしたら一番上に行くように
+    ;;   (company-tooltip-limit . 20)
+    ;;   (company-tooltip-align-annotations . t)
+    ;;   (company-begin-commands . '(self-insert-command))
+
+    ;;   (company-box-background . '((t (:inherit company-tooltip :background "midnight blue"))))
+    ;;   (company-preview . '((t (:foreground "darkgray" :underline t))))
+    ;;   (company-preview-common . '((t (:inherit company-preview))))
+    ;;   (company-scrollbar-bg . '((t (:background "gray40"))))
+    ;;   (company-scrollbar-fg . '((t (:background "orange"))))
+    ;;   (company-tooltip . '((t (:background "lightgray" :foreground "black"))))
+    ;;   (company-tooltip-common . '((((type x)) (:inherit company-tooltip :weight bold)) (t (:inherit company-tooltip))))
+    ;;   (company-tooltip-common-selection . '((((type x)) (:inherit company-tooltip-selection :weight bold)) (t (:inherit company-tooltip-selection))))
+    ;;   (company-tooltip-selection . '((t (:background "steelblue" :foreground "black"))))
+
+    ;;   )
+    )
 
   (leaf company-quickhelp
     :straight t
