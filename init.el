@@ -109,7 +109,15 @@
   (set-locale-environment nil)
 
   ;; 機種依存文字
-  (require 'cp5022x)
+  (leaf cp5022x
+    :ensure t
+    :require t
+    :config
+    ;; charset と coding-system の優先度設定
+    (set-charset-priority 'ascii 'japanese-jisx0208 'latin-jisx0201
+                          'katakana-jisx0201 'iso-8859-1 'cp1252 'unicode)
+    (set-coding-system-priority 'utf-8 'euc-jp 'iso-2022-jp 'cp932))
+
   (define-coding-system-alias 'euc-jp 'cp51932)
 
   ;; decode-translation-table の設定
@@ -129,11 +137,6 @@
                      (get 'japanese-ucs-jis-to-cp932-map 'translation-table))
   (coding-system-put 'utf-8 :encode-translation-table
                      (get 'japanese-ucs-jis-to-cp932-map 'translation-table))
-
-  ;; charset と coding-system の優先度設定
-  (set-charset-priority 'ascii 'japanese-jisx0208 'latin-jisx0201
-                        'katakana-jisx0201 'iso-8859-1 'cp1252 'unicode)
-  (set-coding-system-priority 'utf-8 'euc-jp 'iso-2022-jp 'cp932)
 
   ;; East Asian Ambiguous
   (defun set-east-asian-ambiguous-width (width)
@@ -267,7 +270,7 @@
     ;; (when (eq system-type 'windows-nt)
     ;;   (emacs-font-setting "HackgenNerd" 10))
     (when (eq system-type 'windows-nt)
-      (emacs-font-setting "Ricty Diminished" 10)))
+      (emacs-font-setting "Ricty Diminished" 12)))
   (setup-font))
 
 (leaf *modifier
@@ -295,66 +298,102 @@
 
   (leaf vertico
     :straight t
+    :custom
+    (vertico-cycle . t)
+    :hook
+    (emacs-startup-hook . vertico-after-init-hook)
+    :commands vertico-previous vertico-next
+    :bind
+    (:vertico-map
+     ("C-r" . vertico-previous) ;; C-s/C-rで行を移動できるようにする
+     ("C-s" . vertico-next))
     :config
-    (load-library "vertico-directory"))
-
-  (leaf *vertico
-    :config
-    (defun after-init-hook ()
+    (load-library "vertico-directory")
+    (advice-add #'vertico--format-candidate :around
+                (lambda (orig cand prefix suffix index _start)
+                  (setq cand (funcall orig cand prefix suffix index _start))
+                  (concat
+                   (if (= vertico--index index)
+                       (propertize "» " 'face 'vertico-current)
+                     "  ")
+                   cand)))
+    (defun vertico-after-init-hook ()
       (vertico-mode)
       ;; 補完候補を最大20行まで表示する
       (setq vertico-count 20)
       (marginalia-mode)
       ;; savehist-modeを使ってVerticoの順番を永続化する
-      (savehist-mode))
-    (add-hook 'after-init-hook #'after-init-hook))
+      (savehist-mode)))
 
   (leaf vertico-directory
     :after vertico
     :commands vertico-directory-delete-char
-    :bind (:vertico-map
-           ("C-l" . vertico-directory-delete-char))
+    :bind
+    (:vertico-map
+     ("C-l" . vertico-directory-delete-char)
+     ("RET" . vertico-directory-enter)
+     ("DEL" . vertico-directory-delete-char)
+     ("M-DEL" . vertico-directory-delete-word))
     :hook
-    (rfn-eshadow-update-overlay . vertico-directory-tidy))
+    (rfn-eshadow-update-overlay . vertico-directory-tidy)
+    :custom
+    `((file-name-shadow-properties . '(invisible t intangible t)))
+    :config
+    (file-name-shadow-mode +1))
+
+  ;; (straight-use-package '( vertico :files (:defaults "extensions/*")
+  ;;                          :includes (vertico-buffer
+  ;;                                     vertico-directory
+  ;;                                     vertico-flat
+  ;;                                     vertico-indexed
+  ;;                                     vertico-mouse
+  ;;                                     vertico-quick
+  ;;                                     vertico-repeat
+  ;;                                     vertico-reverse)))
+
+  ;; (use-package vertico-directory
+  ;;              :load-path "straight/build/vertico/extensions" ; is beter than straight/repos/vertico/extensions
+  ;;              ;; ...
+  ;;              )
 
   (leaf consult
     :straight t
     :bind
-    ("C-x C-r" . consult-recent-file)
-    ("C-x l" . consult-goto-line)
-    ("C-x b" . consult-buffer))
+    (("C-s" . my:consult-line)
+     ("C-x C-r" . consult-recent-file)
+     ("C-x l" . consult-goto-line)
+     ("C-x b" . consult-buffer))
+    ;; :custom
+    ;; `((consult-preview-raw-size . 1024000)
+    ;;   (consult-preview-key . '(kbd "C-M-p"))
+    ;;   (consult-narrow-key . "<"))
+    :init
+    ;; C-uを付けるとカーソル位置の文字列を使うmy-consult-lineコマンドを定義する
+    (defun my:consult-line (&optional at-point)
+      "Consult-line uses things-at-point if set C-u prefix."
+      (interactive "P")
+      (if at-point
+          (consult-line (thing-at-point 'symbol))
+        (consult-line))))
 
   (leaf embark
     :straight t
-    :after embark consult
+    :after consult
     :config
     (leaf embark-consult
       :straight t)
-    ;; Embarkを起動する
-    (global-set-key (kbd "C-S-a") 'embark-act))
+    :bind (("C-S-a" . embark-act)))
 
   (leaf orderless
     :straight t
-    :config
+    :custom
     ;; 補完スタイルにorderlessを利用する
-    (setq completion-styles '(orderless)))
-
-  ;; C-uを付けるとカーソル位置の文字列を使うmy-consult-lineコマンドを定義する
-  (defun my-consult-line (&optional at-point)
-    "Consult-line uses things-at-point if set C-u prefix."
-    (interactive "P")
-    (if at-point
-        (consult-line (thing-at-point 'symbol))
-      (consult-line)))
-
-  ;; C-s（isearch-forward）をmy-consult-lineコマンドに割り当てる
-  (global-set-key (kbd "C-s") 'my-consult-line)
-
-  ;; C-s/C-rで行を移動できるようにする
-  (with-eval-after-load 'vertico
-    (define-key vertico-map (kbd "C-r") 'vertico-previous)
-    (define-key vertico-map (kbd "C-s") 'vertico-next))
-  )
+    `((completion-styles . '(orderless))
+      (orderless-matching-styles . '(orderless-prefixes
+                                     orderless-flex
+                                     orderless-regexp
+                                     orderless-initialism
+                                     orderless-literal)))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;;
@@ -462,19 +501,16 @@
   ;; (require 'avy-migemo-e.g.swiper)
   )
 
-(leaf *modelines
-  :config
-
-  (leaf doom-modeline
+(leaf doom-modeline
     :straight t
     :if window-system
     :commands (doom-modeline-def-modeline)
     :custom
-    (doom-modeline-buffer-file-name-style . 'truncate-with-project)
-    (doom-modeline-icon . (display-graphic-p))
-    (doom-modeline-major-mode-icon . nil)
-    (doom-modeline-minor-modes . t)
-    (doom-modeline-buffer-encoding . t)
+    `((doom-modeline-buffer-file-name-style . 'truncate-with-project)
+      (doom-modeline-icon . ,(display-graphic-p))
+      (doom-modeline-major-mode-icon . nil)
+      (doom-modeline-minor-modes . t)
+      (doom-modeline-buffer-encoding . t))
     :custom-face
     (mode-line                       . '((t (:background "medium blue" :foreground "snow" :box nil)))) ;; firebrick3
     (doom-modeline-buffer-minor-mode . '((t (:inherit mode-line :slant normal))))
@@ -517,39 +553,39 @@
      ;; '(workspace-number bar window-number evil-state ryo-modal xah-fly-keys matches buffer-info remote-host buffer-position parrot selection-info)
      '(bar my:buffer-encoding matches buffer-info buffer-position selection-info)
      '(misc-info debug minor-modes "-" input-method major-mode process vcs checker)))
-  )
 
 (leaf *utility-package
   :config
 
-  (leaf all-the-icons-ivy
-    :straight t)
+  ;; (leaf all-the-icons-ivy
+  ;;   :straight t)
 
   (leaf all-the-icons
     :straight t
-    :after all-the-icons-ivy ivy
+    ;; :after all-the-icons-ivy ivy
     :custom
     (all-the-icons-scale-factor . 1.0)
-    :config
-    (when window-system
-      (defun my-ivy-format-function-arrow (cands)
-        "Transform CANDS into a string for minibuffer."
-        (ivy--format-function-generic
-         (lambda (str)
-           (concat (all-the-icons-faicon
-                    "hand-o-right"
-                    :v-adjust -0.2 :face 'my-ivy-arrow-visible)
-                   " " (ivy--add-face str 'ivy-current-match)))
-         (lambda (str)
-           (concat (all-the-icons-faicon
-                    "hand-o-right" :face 'my-ivy-arrow-invisible) " " str))
-         cands
-         "\n"))
-      (setq ivy-format-functions-alist '((t . my-ivy-format-function-arrow)))
-      (add-to-list 'all-the-icons-ivy-buffer-commands 'counsel-projectile-switch-project)
-      (add-to-list 'all-the-icons-ivy-buffer-commands 'counsel-ibuffer)
-      (all-the-icons-ivy-setup)
-      (setq ivy-format-functions-alist '((t . ivy-format-function-arrow)))))
+    ;; :config
+    ;; (when window-system
+    ;;   (defun my-ivy-format-function-arrow (cands)
+    ;;     "Transform CANDS into a string for minibuffer."
+    ;;     (ivy--format-function-generic
+    ;;      (lambda (str)
+    ;;        (concat (all-the-icons-faicon
+    ;;                 "hand-o-right"
+    ;;                 :v-adjust -0.2 :face 'my-ivy-arrow-visible)
+    ;;                " " (ivy--add-face str 'ivy-current-match)))
+    ;;      (lambda (str)
+    ;;        (concat (all-the-icons-faicon
+    ;;                 "hand-o-right" :face 'my-ivy-arrow-invisible) " " str))
+    ;;      cands
+    ;;      "\n"))
+    ;;   (setq ivy-format-functions-alist '((t . my-ivy-format-function-arrow)))
+    ;;   (add-to-list 'all-the-icons-ivy-buffer-commands 'counsel-projectile-switch-project)
+    ;;   (add-to-list 'all-the-icons-ivy-buffer-commands 'counsel-ibuffer)
+    ;;   (all-the-icons-ivy-setup)
+    ;;   (setq ivy-format-functions-alist '((t . ivy-format-function-arrow))))
+    )
 
   (leaf s
     :straight t
@@ -1378,24 +1414,24 @@ set pagesize 1000
     :mode ("\\.\\(mayu\\)\\'" . mayu-mode))
 
   (leaf *calendar
-    :config
-    (leaf japanese-holidays
-      :straight t
-      :hook (calendar-mode-hook . init-japanese-holidays)
-      :config
-      (defun init-japanese-holidays()
-        (setq calendar-holidays ; 他の国の祝日も表示させたい場合は適当に調整
-              (append japanese-holidays holiday-local-holidays holiday-other-holidays))
-        (setq mark-holidays-in-calendar t) ; 祝日をカレンダーに表示
-        ;; 土曜日・日曜日を祝日として表示する場合、以下の設定を追加します。
-        ;; 変数はデフォルトで設定済み
-        (setq japanese-holiday-weekend '(0 6)     ; 土日を祝日として表示
-              japanese-holiday-weekend-marker     ; 土曜日を水色で表示
-              '(holiday nil nil nil nil nil japanese-holiday-saturday))
-        (add-hook 'calendar-today-visible-hook 'japanese-holiday-mark-weekend)
-        (add-hook 'calendar-today-invisible-hook 'japanese-holiday-mark-weekend)
-        ;; “きょう”をマークするには以下の設定を追加します。
-        (add-hook 'calendar-today-visible-hook 'calendar-mark-today))))
+    :custom
+    (mark-holidays-in-calendar . t) ; 祝日をカレンダーに表示
+    (calendar-month-name-array . ["01" "02" "03" "04" "05" "06"
+                                 "07" "08" "09" "10" "11" "12" ])
+    (calendar-day-name-array   . ["日" "月" "火" "水" "木" "金" "土"])
+    (calendar-day-header-array . ["日" "月" "火" "水" "木" "金" "土"])
+    (calendar-week-start-day   . 0)) ;; 日曜開始
+
+  ;; (leaf japanese-holidays
+  ;;   :straight t
+  ;;   :custom
+  ;;   `((japanese-holiday-weekend . '(0 6)) ; 土日を祝日として表示
+  ;;     (japanese-holiday-weekend-marker . '(holiday nil nil nil nil nil japanese-holiday-saturday)) ; 土曜日を水色で表示
+  ;;     (calendar-holidays . ,(append japanese-holidays holiday-local-holidays holiday-other-holidays))) ; 他の国の祝日も表示させたい場合は適当に調整
+  ;;   :hook
+  ;;   (calendar-today-visible-hook . japanese-holiday-mark-weekend)
+  ;;   (calendar-today-invisible-hook . japanese-holiday-mark-weekend)
+  ;;   (calendar-today-visible-hook . calendar-mark-today))
 
   (leaf diff-mode
     :hook
@@ -1521,20 +1557,21 @@ set pagesize 1000
     ;; whitespace ( http://qiita.com/catatsuy/items/55d50d13ebc965e5f31e )
     ;;
     :straight t
+    :custom
+    `((whitespace-style-with-tab . '(face tabs tab-mark spaces space-mark trailing space-before-tab space-after-tab::space))
+      (whitespace-style-without-tab . '(face spaces space-mark trailing space-before-tab space-after-tab::space))
+      ;; default setting
+      (whitespace-style . whitespace-style-with-tab)
+      (whitespace-space-regexp . "\\(\x3000+\\)")
+      (whitespace-display-mappings . '((space-mark ?\x3000 [?\□])
+                                       (tab-mark   ?\t   [?\xBB ?\t]))))
     :config
-    (defvar whitespace-style-with-tab '(face tabs tab-mark spaces space-mark trailing space-before-tab space-after-tab::space))
-    (defvar whitespace-style-without-tab '(face spaces space-mark trailing space-before-tab space-after-tab::space))
-    ;; default setting
-    (setq whitespace-style whitespace-style-without-tab)
     ;;
     (defun toggle-tab-mark ()
       (interactive)
       (if (equal whitespace-style whitespace-style-with-tab)
           (setq whitespace-style whitespace-style-without-tab)
         (setq whitespace-style whitespace-style-with-tab)))
-    (setq whitespace-space-regexp "\\(\x3000+\\)")
-    (setq whitespace-display-mappings '((space-mark ?\x3000 [?\□])
-                                        (tab-mark   ?\t   [?\xBB ?\t])))
     (global-whitespace-mode t)
     (set-face-attribute 'whitespace-trailing nil :foreground "DeepPink" :underline t)
     (set-face-attribute 'whitespace-tab nil :foreground "LightSkyBlue" :underline t)
@@ -1579,20 +1616,19 @@ set pagesize 1000
                       ("r" git-gutter:revert-hunk "revert")
                       ("SPC" git-gutter:toggle-popup-hunk "toggle diffinfo")))
 
-  ;; (leaf highlight-indent-guides
-  ;;   :straight t
-  ;;   :hook
-  ;;   (prog-mode-hook . highlight-indent-guides-mode)
-  ;;   (yaml-mode-hook . highlight-indent-guides-mode)
-  ;;   :custom
-  ;;   (highlight-indent-guides-auto-enabled . t)
-  ;;   (highlight-indent-guides-responsive   . t)
-  ;;   (highlight-indent-guides-method       . 'character)
-  ;;   (highlight-indent-guides-character    . ?|)
-  ;;   :custom-face
-  ;;   (highlight-indent-guides-odd-face       . '((t (:background "darkgray"))))
-  ;;   (highlight-indent-guides-even-face      . '((t (:background "dimgray"))))
-  ;;   (highlight-indent-guides-character-face . '((t (:background "dimgray")))))
+  (leaf highlight-indent-guides
+    :straight t
+    :hook
+    (yaml-mode-hook . highlight-indent-guides-mode)
+    :custom
+    (highlight-indent-guides-auto-enabled . t)
+    (highlight-indent-guides-responsive   . t)
+    (highlight-indent-guides-method       . 'character)
+    (highlight-indent-guides-character    . ?|)
+    :custom-face
+    (highlight-indent-guides-odd-face       . '((t (:background "darkgray"))))
+    (highlight-indent-guides-even-face      . '((t (:background "dimgray"))))
+    (highlight-indent-guides-character-face . '((t (:background "dimgray")))))
 
   (leaf cua-mode
     :custom
@@ -1742,7 +1778,7 @@ set pagesize 1000
   :custom
   (projectile-enable-idle-timer . nil)
   (projectile-enable-caching . t)
-  (projectile-completion-system . 'ivy)
+  ;; (projectile-completion-system . 'ivy)
   :preface
   (require 'ripgrep)
   (defun my:projectile-search-dwim (search-term)
@@ -1915,7 +1951,6 @@ set pagesize 1000
   (setq truncate-partial-width-windows t)
   ;; 同一バッファ名にディレクトリ付与
   (require 'uniquify)
-  (setq uniquify-buffer-name-style 'forward)
   (setq uniquify-buffer-name-style 'post-forward-angle-brackets)
   (setq uniquify-ignore-buffers-re "*[^*]+*")
   ;; バッファの先頭までスクロールアップ
