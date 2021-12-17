@@ -322,9 +322,22 @@
       (setq vertico-count 20)
       (marginalia-mode)
       ;; savehist-modeを使ってVerticoの順番を永続化する
-      (savehist-mode)))
+      (savehist-mode))
+    ;; add extension
+    (straight-use-package '(vertico :files (:defaults "extensions/*")
+                                    :includes (vertico-buffer
+                                               vertico-directory
+                                               vertico-flat
+                                               vertico-indexed
+                                               vertico-mouse
+                                               vertico-quick
+                                               vertico-repeat
+                                               vertico-reverse)))
+    ;; dirty hack...
+    (define-key vertico-map (kbd "C-l") 'vertico-directory-delete-char))
 
   (leaf vertico-directory
+    :straight t
     :after vertico
     :commands
     vertico-directory-delete-char
@@ -342,16 +355,7 @@
     :custom
     `((file-name-shadow-properties . '(invisible t intangible t)))
     :config
-    (file-name-shadow-mode +1)
-    (straight-use-package '(vertico :files (:defaults "extensions/*")
-                                    :includes (vertico-buffer
-                                               vertico-directory
-                                               vertico-flat
-                                               vertico-indexed
-                                               vertico-mouse
-                                               vertico-quick
-                                               vertico-repeat
-                                               vertico-reverse))))
+    (file-name-shadow-mode +1))
 
   (leaf consult
     :straight t
