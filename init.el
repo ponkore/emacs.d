@@ -284,7 +284,7 @@
 (leaf autorevert
   :doc "revert buffers when files on disk change"
   :tag "builtin"
-  :custom ((auto-revert-interval . 1))
+  :custom (auto-revert-interval . 1)
   :global-minor-mode global-auto-revert-mode)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -299,7 +299,10 @@
   (leaf vertico
     :straight t
     :custom
+    (vertico-mode . t)
     (vertico-cycle . t)
+    ;; 補完候補を最大20行まで表示する
+    (vertico-count . 20)
     :hook
     (emacs-startup-hook . vertico-after-init-hook)
     :commands vertico-previous vertico-next
@@ -307,22 +310,18 @@
     (:vertico-map
      ("C-r" . vertico-previous) ;; C-s/C-rで行を移動できるようにする
      ("C-s" . vertico-next))
-    :config
-    (advice-add #'vertico--format-candidate :around
-                (lambda (orig cand prefix suffix index _start)
+    :advice
+    (:around vertico--format-candidate
+             (lambda (orig cand prefix suffix index _start)
                   (setq cand (funcall orig cand prefix suffix index _start))
                   (concat
                    (if (= vertico--index index)
                        (propertize "» " 'face 'vertico-current)
                      "  ")
                    cand)))
+    :config
     (defun vertico-after-init-hook ()
-      (vertico-mode)
-      ;; 補完候補を最大20行まで表示する
-      (setq vertico-count 20)
-      (marginalia-mode)
-      ;; savehist-modeを使ってVerticoの順番を永続化する
-      (savehist-mode))
+      (marginalia-mode))
     ;; add extension
     (straight-use-package '(vertico :files (:defaults "extensions/*")
                                     :includes (vertico-buffer
@@ -353,7 +352,7 @@
     :hook
     (rfn-eshadow-update-overlay . vertico-directory-tidy)
     :custom
-    `((file-name-shadow-properties . '(invisible t intangible t)))
+    `(file-name-shadow-properties . '(invisible t intangible t))
     :config
     (file-name-shadow-mode +1))
 
@@ -364,10 +363,10 @@
      ("C-x C-r" . consult-recent-file)
      ("C-x l" . consult-goto-line)
      ("C-x b" . consult-buffer))
-    ;; :custom
-    ;; `((consult-preview-raw-size . 1024000)
-    ;;   (consult-preview-key . '(kbd "C-M-p"))
-    ;;   (consult-narrow-key . "<"))
+    :custom
+    `((consult-preview-raw-size . 1024000)
+      (consult-preview-key . ,(kbd "C-M-p"))
+      (consult-narrow-key . "<"))
     :init
     ;; C-uを付けるとカーソル位置の文字列を使うmy-consult-lineコマンドを定義する
     (defun my:consult-line (&optional at-point)
@@ -522,57 +521,57 @@
   )
 
 (leaf doom-modeline
-    :straight t
-    :if window-system
-    :commands (doom-modeline-def-modeline)
-    :custom
-    `((doom-modeline-buffer-file-name-style . 'truncate-with-project)
-      (doom-modeline-icon . ,(display-graphic-p))
-      (doom-modeline-major-mode-icon . nil)
-      (doom-modeline-minor-modes . t)
-      (doom-modeline-buffer-encoding . t))
-    :custom-face
-    (mode-line                       . '((t (:background "medium blue" :foreground "snow" :box nil)))) ;; firebrick3
-    (doom-modeline-buffer-minor-mode . '((t (:inherit mode-line :slant normal))))
-    :hook (emacs-startup-hook . doom-modeline-mode)
-    :config
-    (line-number-mode 0)
-    (column-number-mode 0)
-    (which-function-mode 0)
-    ;;
-    (doom-modeline-def-segment my:buffer-encoding
-      "Displays the encoding and eol style of the buffer."
-      (when doom-modeline-buffer-encoding
-        (propertize
-         (concat
-          (let ((sys (coding-system-plist buffer-file-coding-system)))
-            (cond ((memq (plist-get sys :category)
-                         '(coding-category-undecided coding-category-utf-8))
-                   " U")
-                  ((memq (plist-get sys :name)
-                         '(coding-category-undecided japanese-iso-8bit))
-                   " E")
-                  ((memq (plist-get sys :name)
-                         '(coding-category-undecided iso-2022-jp))
-                   " J")
-                  ((memq (plist-get sys :name)
-                         '(coding-category-undecided japanese-shift-jis japanese-cp932))
-                   " S")
-                  (t " =")))
-          (pcase (coding-system-eol-type buffer-file-coding-system)
-            (0 "")
-            (1 ".CRLF")
-            (2 ".CR")))
-         'face (if (doom-modeline--active) 'mode-line 'mode-line-inactive)
-         'help-echo 'mode-line-mule-info-help-echo
-         'mouse-face '(:box 0)
-         'local-map mode-line-coding-system-map)))
-    ;;
-    (doom-modeline-def-modeline
-     'main
-     ;; '(workspace-number bar window-number evil-state ryo-modal xah-fly-keys matches buffer-info remote-host buffer-position parrot selection-info)
-     '(bar my:buffer-encoding matches buffer-info buffer-position selection-info)
-     '(misc-info debug minor-modes "-" input-method major-mode process vcs checker)))
+  :straight t
+  :if window-system
+  :commands (doom-modeline-def-modeline)
+  :custom
+  (doom-modeline-buffer-file-name-style . 'truncate-with-project)
+  (doom-modeline-major-mode-icon . nil)
+  (doom-modeline-minor-modes . t)
+  (doom-modeline-buffer-encoding . t)
+  `(doom-modeline-icon . ,(display-graphic-p))
+  :custom-face
+  (mode-line                       . '((t (:background "medium blue" :foreground "snow" :box nil)))) ;; firebrick3
+  (doom-modeline-buffer-minor-mode . '((t (:inherit mode-line :slant normal))))
+  :hook (emacs-startup-hook . doom-modeline-mode)
+  :config
+  (line-number-mode 0)
+  (column-number-mode 0)
+  (which-function-mode 0)
+  ;;
+  (doom-modeline-def-segment my:buffer-encoding
+    "Displays the encoding and eol style of the buffer."
+    (when doom-modeline-buffer-encoding
+      (propertize
+       (concat
+        (let ((sys (coding-system-plist buffer-file-coding-system)))
+          (cond ((memq (plist-get sys :category)
+                       '(coding-category-undecided coding-category-utf-8))
+                 " U")
+                ((memq (plist-get sys :name)
+                       '(coding-category-undecided japanese-iso-8bit))
+                 " E")
+                ((memq (plist-get sys :name)
+                       '(coding-category-undecided iso-2022-jp))
+                 " J")
+                ((memq (plist-get sys :name)
+                       '(coding-category-undecided japanese-shift-jis japanese-cp932))
+                 " S")
+                (t " =")))
+        (pcase (coding-system-eol-type buffer-file-coding-system)
+          (0 "")
+          (1 ".CRLF")
+          (2 ".CR")))
+       'face (if (doom-modeline--active) 'mode-line 'mode-line-inactive)
+       'help-echo 'mode-line-mule-info-help-echo
+       'mouse-face '(:box 0)
+       'local-map mode-line-coding-system-map)))
+  ;;
+  (doom-modeline-def-modeline
+    'main
+    ;; '(workspace-number bar window-number evil-state ryo-modal xah-fly-keys matches buffer-info remote-host buffer-position parrot selection-info)
+    '(bar my:buffer-encoding matches buffer-info buffer-position selection-info)
+    '(misc-info debug minor-modes "-" input-method major-mode process vcs checker)))
 
 (leaf *utility-package
   :config
@@ -836,6 +835,7 @@ same directory as the org-buffer and insert a link to this file."
     :straight t
     :hook (magit-mode-hook . my:magit-setup-diff)
     :commands magit-status-internal git-commit-mode git-commit-mode-hook
+    :advice (:filter-args magit-expand-git-file-name magit-expand-git-file-name--msys)
     :config
     (defun magit-expand-git-file-name--msys (args)
       "Handle Msys directory names such as /c/* by changing them to C:/*"
@@ -844,7 +844,6 @@ same directory as the org-buffer and insert a link to this file."
           (setq filename (concat (match-string 1 filename) ":/"
                                  (match-string 2 filename))))
         (list filename)))
-    (advice-add 'magit-expand-git-file-name :filter-args #'magit-expand-git-file-name--msys)
     ;; diff関連の設定
     (defun my:magit-setup-diff ()
       ;; diffを表示しているときに文字単位での変更箇所も強調表示する
@@ -953,18 +952,16 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
   ;;       (set-face-background face-name nil)
   ;;       (setq i (1+ i)))))
 
-  (leaf *emacs-lisp
-    :config
-    (leaf elisp-mode
-      :require t
-      :preface
-      (defun my:emacs-lisp-hooks ()
-        (setq-local company-idle-delay 0.2)
-        (setq-local company-backends '(company-semantic company-files company-elisp))
-        (setq-local show-paren-style 'expression))
-      ;; (set-newline-and-indent)
-      :hook
-      (emacs-lisp-mode-hook . my:emacs-lisp-hooks)))
+  (leaf elisp-mode
+    :require t
+    :preface
+    (defun my:emacs-lisp-hooks ()
+      (setq-local company-idle-delay 0.2)
+      (setq-local company-backends '(company-semantic company-files company-elisp))
+      (setq-local show-paren-style 'expression))
+    ;; (set-newline-and-indent)
+    :hook
+    (emacs-lisp-mode-hook . my:emacs-lisp-hooks))
 
   (leaf *lisp
     :config
@@ -1134,7 +1131,6 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
        ;; ("C-)" . cedit-slurp)
        ("M-." . ac-php-find-symbol-at-point)
        ("M-," . ac-php-location-stack-back)
-       ("C-c C-c" . psysh-eval-region)
        ("C-c C--" . php-current-class)
        ("C-c C-=" . php-current-namespace))))
 
@@ -1244,8 +1240,8 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
       :straight t
       :after racer
       :custom
-      (racer-cmd . `(expand-file-name "~/.cargo/bin/racer"))
-      (racer-rust-src-path . `(expand-file-name "~/.multirust/toolchains/stable-x86_64-apple-darwin/lib/rustlib/src/rust/src/"))
+      `(racer-cmd . ,(expand-file-name "~/.cargo/bin/racer"))
+      `(racer-rust-src-path . ,(expand-file-name "~/.multirust/toolchains/stable-x86_64-apple-darwin/lib/rustlib/src/rust/src/"))
       (rust-format-on-save . t)
       :hook
       (rust-mode-hook . (lambda () (racer-mode) (flycheck-mode)))
@@ -1265,18 +1261,14 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
       (defun my:cc-mode-setup ()
         ;; BSDスタイルをベースにする
         (c-set-style "bsd")
-
         ;; スペースでインデントをする
         (setq indent-tabs-mode nil)
-
         ;; インデント幅を2にする
         (setq c-basic-offset 2)
-
         ;; 自動改行（auto-new-line）と
         ;; 連続する空白の一括削除（hungry-delete）を
         ;; 有効にする
         (c-toggle-auto-hungry-state 1)
-
         ;; CamelCaseの語でも単語単位に分解して編集する
         ;; GtkWindow         => Gtk Window
         ;; EmacsFrameClass   => Emacs Frame Class
@@ -1433,7 +1425,8 @@ set pagesize 1000
     ;; in site-lisp
     :mode ("\\.\\(mayu\\)\\'" . mayu-mode))
 
-  (leaf *calendar
+  (leaf calendar
+    :ensure t
     :custom
     (mark-holidays-in-calendar . t) ; 祝日をカレンダーに表示
     (calendar-month-name-array . ["01" "02" "03" "04" "05" "06"
@@ -1442,16 +1435,16 @@ set pagesize 1000
     (calendar-day-header-array . ["日" "月" "火" "水" "木" "金" "土"])
     (calendar-week-start-day   . 0)) ;; 日曜開始
 
-  ;; (leaf japanese-holidays
-  ;;   :straight t
-  ;;   :custom
-  ;;   `((japanese-holiday-weekend . '(0 6)) ; 土日を祝日として表示
-  ;;     (japanese-holiday-weekend-marker . '(holiday nil nil nil nil nil japanese-holiday-saturday)) ; 土曜日を水色で表示
-  ;;     (calendar-holidays . ,(append japanese-holidays holiday-local-holidays holiday-other-holidays))) ; 他の国の祝日も表示させたい場合は適当に調整
-  ;;   :hook
-  ;;   (calendar-today-visible-hook . japanese-holiday-mark-weekend)
-  ;;   (calendar-today-invisible-hook . japanese-holiday-mark-weekend)
-  ;;   (calendar-today-visible-hook . calendar-mark-today))
+;;   (leaf japanese-holidays
+;;     :straight t
+;;     :custom
+;;     (japanese-holiday-weekend . '(0 6)) ; 土日を祝日として表示
+;;     (japanese-holiday-weekend-marker . '(holiday nil nil nil nil nil japanese-holiday-saturday)) ; 土曜日を水色で表示
+;; ;;    `((calendar-holidays . ,(append japanese-holidays holiday-local-holidays holiday-other-holidays))) ; 他の国の祝日も表示させたい場合は適当に調整
+;;     :hook
+;;     (calendar-today-visible-hook . japanese-holiday-mark-weekend)
+;;     (calendar-today-invisible-hook . japanese-holiday-mark-weekend)
+;;     (calendar-today-visible-hook . calendar-mark-today))
 
   (leaf diff-mode
     :hook
@@ -1652,9 +1645,8 @@ set pagesize 1000
 
   (leaf cua-mode
     :custom
-    (cua-enable-cua-keys . nil)
-    :config
-    (cua-mode t))
+    (cua-mode . t)
+    (cua-enable-cua-keys . nil))
 
   (leaf recentf-ext
     :straight t
@@ -1711,27 +1703,24 @@ set pagesize 1000
      ("C-M-i" . company-complete)) ;; 各種メジャーモードでも C-M-iで company-modeの補完を使う
     :hook
     (emacs-startup-hook . global-company-mode)
-    ;; :custom
-    ;; `((company-idle-delay . 0)
-    ;;   (company-echo-delay . 0)
-    ;;   (company-minimum-prefix-length . 1) ;; 1文字入力で補完されるように
-    ;;   (company-selection-wrap-around . t) ;; 候補の一番上でselect-previousしたら一番下に、一番下でselect-nextしたら一番上に行くように
-    ;;   (company-tooltip-limit . 20)
-    ;;   (company-tooltip-align-annotations . t)
-    ;;   (company-begin-commands . '(self-insert-command))
-
-    ;;   (company-box-background . '((t (:inherit company-tooltip :background "midnight blue"))))
-    ;;   (company-preview . '((t (:foreground "darkgray" :underline t))))
-    ;;   (company-preview-common . '((t (:inherit company-preview))))
-    ;;   (company-scrollbar-bg . '((t (:background "gray40"))))
-    ;;   (company-scrollbar-fg . '((t (:background "orange"))))
-    ;;   (company-tooltip . '((t (:background "lightgray" :foreground "black"))))
-    ;;   (company-tooltip-common . '((((type x)) (:inherit company-tooltip :weight bold)) (t (:inherit company-tooltip))))
-    ;;   (company-tooltip-common-selection . '((((type x)) (:inherit company-tooltip-selection :weight bold)) (t (:inherit company-tooltip-selection))))
-    ;;   (company-tooltip-selection . '((t (:background "steelblue" :foreground "black"))))
-
-    ;;   )
-    )
+    :custom
+    `((company-idle-delay . 0)
+      (company-echo-delay . 0)
+      (company-minimum-prefix-length . 1) ;; 1文字入力で補完されるように
+      (company-selection-wrap-around . t) ;; 候補の一番上でselect-previousしたら一番下に、一番下でselect-nextしたら一番上に行くように
+      (company-tooltip-limit . 20)
+      (company-tooltip-align-annotations . t)
+      (company-begin-commands . '(self-insert-command))
+      ;; (company-box-background . '((t (:inherit company-tooltip :background "midnight blue"))))
+      ;; (company-preview . '((t (:foreground "darkgray" :underline t))))
+      ;; (company-preview-common . '((t (:inherit company-preview))))
+      ;; (company-scrollbar-bg . '((t (:background "gray40"))))
+      ;; (company-scrollbar-fg . '((t (:background "orange"))))
+      ;; (company-tooltip . '((t (:background "lightgray" :foreground "black"))))
+      ;; (company-tooltip-common . '((((type x)) (:inherit company-tooltip :weight bold)) (t (:inherit company-tooltip))))
+      ;; (company-tooltip-common-selection . '((((type x)) (:inherit company-tooltip-selection :weight bold)) (t (:inherit company-tooltip-selection))))
+      ;; (company-tooltip-selection . '((t (:background "steelblue" :foreground "black"))))
+      ))
 
   (leaf company-quickhelp
     :straight t
@@ -1896,6 +1885,7 @@ set pagesize 1000
              ;; (ns-appearance . dark) ;; 26.1 {light, dark}
              (internal-border-width . 0))))
     (setq default-frame-alist initial-frame-alist))
+
   (leaf frame-setting-windows
     :if (eq system-type 'windows-nt)
     :config
@@ -1914,78 +1904,53 @@ set pagesize 1000
 
   (leaf frame-setting-common
     :config
-    (leaf theme
-      :config
-      (leaf color-theme-sanityinc-tomorrow
-        :straight t
-        :config
-        (color-theme-sanityinc-tomorrow-blue))
-      ;; (load-theme 'pastels-on-dark t)
-      ;; (enable-theme 'pastels-on-dark)
-      )
     ;; フレームタイトルの設定
     (setq frame-title-format "%b")
     ;; 背景の透明度
     (set-frame-parameter nil 'alpha 95)
-    ;; カーソル点滅表示
-    (blink-cursor-mode 0)
-    ;; メニューバーを消す
-    (menu-bar-mode -1)
-    ;; ツールバーを消す
-    (tool-bar-mode -1)
     ;; scroll bar を表示しない
     (when (fboundp 'scroll-bar-mode) (scroll-bar-mode 0))
-    ;; スクロール時のカーソル位置の維持
-    (setq scroll-preserve-screen-position t)
-    ;; スクロール行数（一行ごとのスクロール）
-    (setq vertical-centering-font-regexp ".*")
-    (setq scroll-conservatively 35)
-    (setq scroll-margin 0)
-    (setq scroll-step 1)
-    ;; 画面スクロール時の重複行数
-    (setq next-screen-context-lines 1)
-    ;; バッファ中の行番号表示
-    (global-linum-mode t)
-    ;; 下線を引く
-    (global-hl-line-mode t)
-    ;; 行番号のフォーマット
+    ;; 行番号のface
     ;; (set-face-attribute 'linum nil :foreground "red" :height 0.8)
-    (set-face-attribute 'linum nil :height 0.8)
-    (setq linum-format "%5d")))
+    (set-face-attribute 'linum nil :height 0.8))
 
-(leaf migemo-family
-  :if (executable-find "cmigemo")
-  :config
-  (leaf migemo
+  ;; theme
+  (leaf color-theme-sanityinc-tomorrow
     :straight t
-    :commands migemo-init
-    :custom
-    (migemo-command . "cmigemo")
-    (migemo-options . '("-q" "--emacs"))
-    ;; (migemo-options . '("-q" "--emacs" "-i" "\g"))
-    ;; (migemo-options . '("-q" "--emacs" "-i" "\a"))
-    (migemo-dictionary . `(expand-file-name "~/.emacs.d/migemo/utf-8/migemo-dict"))
-    ;; (migemo-dictionary . "C~/.emacs.d/migemo-dict/utf-8")
-    (migemo-user-dictionary . nil)
-    (migemo-regex-dictionary . nil)
-    (migemo-coding-system 'utf-8-unix)
-    ;; 遅いのを防ぐためにキャッシュする。
-    (migemo-use-pattern-alist . t)
-    (migemo-use-frequent-pattern-alist . t)
-    (migemo-pattern-alist-length . 1024)
     :config
-    (migemo-init)))
+    ;; (load-theme 'pastels-on-dark t)
+    ;; (enable-theme 'pastels-on-dark)
+    (color-theme-sanityinc-tomorrow-blue)))
+
+(leaf migemo
+  :straight t
+  :if (executable-find "cmigemo")
+  :commands migemo-init
+  :custom
+  (migemo-command . "cmigemo")
+  (migemo-options . '("-q" "--emacs"))
+  ;; (migemo-options . '("-q" "--emacs" "-i" "\g"))
+  ;; (migemo-options . '("-q" "--emacs" "-i" "\a"))
+  (migemo-dictionary . `(expand-file-name "~/.emacs.d/migemo/utf-8/migemo-dict"))
+  ;; (migemo-dictionary . "C~/.emacs.d/migemo-dict/utf-8")
+  (migemo-user-dictionary . nil)
+  (migemo-regex-dictionary . nil)
+  (migemo-coding-system 'utf-8-unix)
+  ;; 遅いのを防ぐためにキャッシュする。
+  (migemo-use-pattern-alist . t)
+  (migemo-use-frequent-pattern-alist . t)
+  (migemo-pattern-alist-length . 1024)
+  :config
+  (migemo-init))
 
 (leaf buffer
   :config
-  ;; バッファ画面外文字の切り詰め表示
-  (setq truncate-lines nil)
-  ;; ウィンドウ縦分割時のバッファ画面外文字の切り詰め表示
-  (setq truncate-partial-width-windows t)
   ;; 同一バッファ名にディレクトリ付与
-  (require 'uniquify)
-  (setq uniquify-buffer-name-style 'post-forward-angle-brackets)
-  (setq uniquify-ignore-buffers-re "*[^*]+*")
+  (leaf uniquify
+    :straight t
+    :custom
+    (uniquify-buffer-name-style . 'post-forward-angle-brackets)
+    (uniquify-ignore-buffers-re . "*[^*]+*"))
   ;; バッファの先頭までスクロールアップ
   (defadvice scroll-up (around scroll-up-around)
     (interactive)
@@ -2000,7 +1965,6 @@ set pagesize 1000
               (goto-char (point-max))
             ad-do-it)) )) )
   (ad-activate 'scroll-up)
-
   ;; バッファの最後までスクロールダウン
   (defadvice scroll-down (around scroll-down-around)
     (interactive)
@@ -2010,40 +1974,14 @@ set pagesize 1000
         ad-do-it) ))
   (ad-activate 'scroll-down))
 
-(leaf startup
-  :config
-  ;; 起動メッセージの非表示
-  (setq inhibit-startup-message t)
-  ;; スタートアップ時のエコー領域メッセージの非表示
-  (setq inhibit-startup-echo-area-message -1))
-
 (leaf backup
   :config
   ;; バックアップファイルを作らない
-  (setq backup-inhibited t)
-  (setq auto-save-default nil)
-  ;; 変更ファイルのバックアップ
-  (setq make-backup-files nil)
-  ;; 変更ファイルの番号つきバックアップ
-  (setq version-control nil)
+  (setq bavckup-inhibited t)
   ;; 編集中ファイルのバックアップ
   (setq auto-save-list-file-name nil)
-  (setq auto-save-list-file-prefix nil)
-  ;; 編集中ファイルのバックアップ先
-  (setq auto-save-file-name-transforms `((".*" ,temporary-file-directory t)))
-  ;; 編集中ファイルのバックアップ間隔（秒）
-  (setq auto-save-timeout 30)
-  ;; 編集中ファイルのバックアップ間隔（打鍵）
-  (setq auto-save-interval 500)
-  ;; 終了時にオートセーブファイルを消す
-  (setq delete-auto-save-files t)
-  ;; バックアップ世代数
-  (setq kept-old-versions 1)
-  (setq kept-new-versions 2)
-  ;; 上書き時の警告表示
-  ;; (setq trim-versions-without-asking nil)
-  ;; 古いバックアップファイルの削除
-  (setq delete-old-versions t))
+
+  )
 
 (leaf w32-symlinks
   :if (eq system-type 'windoows-nt)
@@ -2090,6 +2028,7 @@ set pagesize 1000
   ("%" . my:match-paren)
   ("C-x C-;" . my:insert-datetime)
   ("C-x C-M-r" . revert-buffer)
+  ([M-kanji] . ignore)  ;; M-kanji is undefined に対する対策
   :init
   (defun my:match-paren (arg)
     "Go to the matching parenthesis if on parenthesis otherwise insert %."
@@ -2103,45 +2042,110 @@ set pagesize 1000
     (insert (format-time-string "%Y/%m/%d %T"))))
 
 (leaf global-configuration
-  :config
+  :custom
+  ;; 起動メッセージの非表示
+  (inhibit-startup-message . t)
+  ;; スタートアップ時のエコー領域メッセージの非表示
+  (inhibit-startup-echo-area-message . -1)
+  ;; バッファ画面外文字の切り詰め表示
+  (truncate-lines . nil)
+  ;; ウィンドウ縦分割時のバッファ画面外文字の切り詰め表示
+  (truncate-partial-width-windows . t)
+  ;; カーソル点滅表示
+  (blink-cursor-mode . 0)
+  ;; メニューバーを消す
+  (menu-bar-mode . nil)
+  ;; ツールバーを消す
+  (tool-bar-mode . nil)
+  ;; スクロール時のカーソル位置の維持
+  (scroll-preserve-screen-position . t)
+  ;; スクロール行数（一行ごとのスクロール）
+  (vertical-centering-font-regexp . ".*")
+  (scroll-conservatively . 35)
+  (scroll-margin . 0)
+  (scroll-step . 1)
+  ;; 画面スクロール時の重複行数
+  (next-screen-context-lines . 1)
+  ;; バッファ中の行番号表示
+  (global-linum-mode . t)
+  ;; 下線を引く
+  (global-hl-line-mode . t)
+  ;; 行番号のフォーマット
+  (linum-format . "%5d")
   ;; 画像ファイルを表示
-  (auto-image-file-mode t)
+  (auto-image-file-mode . t)
   ;; evalした結果を全部表示
-  (setq eval-expression-print-length nil)
-  ;; 括弧
+  (eval-expression-print-length . nil)
   ;; 対応する括弧を光らせる。
-  (show-paren-mode 1)
+  (show-paren-mode . t)
   ;; ウィンドウ内に収まらないときだけ括弧内も光らせる。
-  (setq show-paren-style 'mixed)
+  (show-paren-style . 'mixed)
   ;; startup message を表示しない
-  (setq inhibit-startup-message t)
+  (inhibit-startup-message . t)
   ;; 行の先頭でC-kを一回押すだけで行全体を消去する
-  (setq kill-whole-line t)
+  (kill-whole-line . t)
   ;; 最終行に必ず一行挿入する
-  ;; (setq require-final-newline t)
+  ;; (require-final-newline . t)
   ;; バッファの最後でnewlineで新規行を追加するのを禁止する
-  (setq next-line-add-newlines nil)
+  (next-line-add-newlines . nil)
   ;; 補完時に大文字小文字を区別しない
-  (setq completion-ignore-case t)
-  (setq read-file-name-completion-ignore-case t)
+  (completion-ignore-case . t)
+  (read-file-name-completion-ignore-case . t)
   ;; 履歴数を大きくする
-  (setq history-length 500)
+  (history-length . 500)
   ;; ミニバッファの履歴を保存する
-  (savehist-mode 1)
+  (savehist-mode . t)
   ;; 圧縮
   ;; gzファイルも編集できるようにする
-  (auto-compression-mode t)
+  (auto-compression-mode . t)
   ;; diff
   ;; ediffを1ウィンドウで実行
-  (setq ediff-window-setup-function 'ediff-setup-windows-plain)
+  (ediff-window-setup-function . 'ediff-setup-windows-plain)
   ;; diffのオプション
-  (setq diff-switches '("-u" "-p" "-N"))
+  (diff-switches . '("-u" "-p" "-N"))
+  ;; lock file を作らない
+  (create-lockfiles . nil)
+  ;; ファイル終端の改行文字を自動入力しない
+  ;; https://windymelt.hatenablog.com/entry/2014/09/01/145343
+  (require-final-newline . nil)
+  (mode-require-final-newline . nil)
+  ;;
+  (indent-tabs-mode . nil)
+  ;; backup 関連
+  (auto-save-default . nil)
+  ;; 変更ファイルのバックアップ
+  (make-backup-files . nil)
+  ;; 変更ファイルの番号つきバックアップ
+  (version-control . nil)
+  (auto-save-list-file-prefix . nil)
+  ;; 編集中ファイルのバックアップ先(TODO)
+  ;; (auto-save-file-name-transforms . ((".*" ,temporary-file-directory t)))
+  ;; 編集中ファイルのバックアップ間隔（秒）
+  (auto-save-timeout . 30)
+  ;; 編集中ファイルのバックアップ間隔（打鍵）
+  (auto-save-interval . 500)
+  ;; 終了時にオートセーブファイルを消す
+  (delete-auto-save-files . t)
+  ;; バックアップ世代数
+  (kept-old-versions . 1)
+  (kept-new-versions . 2)
+  ;; 上書き時の警告表示
+  ;; (trim-versions-without-asking . nil)
+  ;; 古いバックアップファイルの削除
+  (delete-old-versions . t)
+  ;;
+  :hook
+  ;; shebangがあるファイルを保存すると実行権をつける。
+  (after-save-hook . executable-make-buffer-file-executable-if-script-p)
+  ;;
+  (message-mode-hook . (lambda () (yas-minor-mode)))
+  ;; いちいち消すのも面倒なので、内容が 0 ならファイルごと削除する
+  (after-save-hook . delete-file-if-no-contents)
+  :config
   ;; バッファ名
   ;; ファイル名が重複していたらディレクトリ名を追加する。
   (require 'uniquify)
   (setq uniquify-buffer-name-style 'post-forward-angle-brackets)
-  ;; shebangがあるファイルを保存すると実行権をつける。
-  (add-hook 'after-save-hook 'executable-make-buffer-file-executable-if-script-p)
   ;; リージョンの大文字小文字変換を有効にする。
   ;; C-x C-u -> upcase
   ;; C-x C-l -> downcase
@@ -2155,37 +2159,27 @@ set pagesize 1000
   (setq x-select-enable-primary t)
   (when (eq window-system 'x)
     (setq x-select-enable-clipboard nil))
-  ;; M-kanji is undefined に対する対策
-  (global-set-key [M-kanji] 'ignore)
-  (add-hook 'message-mode-hook (lambda () (yas-minor-mode)))
-  ;; lock file を作らない
-  (setq create-lockfiles nil)
-  ;; ファイル終端の改行文字を自動入力しない
-  ;; https://windymelt.hatenablog.com/entry/2014/09/01/145343
-  (setq-default require-final-newline nil)
-  (setq mode-require-final-newline nil)
   ;;
-  (setq indent-tabs-mode nil)
   ;; いちいち消すのも面倒なので、内容が 0 ならファイルごと削除する
   (defun delete-file-if-no-contents ()
     (let ((file (buffer-file-name (current-buffer))))
       (when (= (point-min) (point-max))
         (delete-file file)
-        (message (concat "File: " file " deleted.")))))
-  (add-hook 'after-save-hook 'delete-file-if-no-contents))
+        (message (concat "File: " file " deleted."))))))
+
+(leaf dashboard
+  :when (version<= "25.1" emacs-version)
+  :ensure t
+  :custom ((dashboard-items . '((recents . 15)
+                                (projects . 5)
+                                (bookmarks . 5)
+                                ;; (agenda . 5)
+                                )))
+  :config
+  (dashboard-setup-startup-hook))
 
 (leaf *etc
   :config
-  (leaf dashboard
-    :when (version<= "25.1" emacs-version)
-    :ensure t
-    :custom ((dashboard-items . '((recents . 15)
-                                  (projects . 5)
-                                  (bookmarks . 5)
-                                  ;; (agenda . 5)
-                                  )))
-    :config
-    (dashboard-setup-startup-hook))
   (leaf **misc-utility
     :config
     (defun read-file-and-list-each-lines (filename)
