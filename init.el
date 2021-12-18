@@ -93,9 +93,6 @@
 (leaf diminish :straight t)
 (leaf hydra :straight t)
 
-;;
-;; ~/.emacs.d/init.el
-;;
 (when (eq system-type 'windows-nt)
   (setq w32-get-true-file-attributes nil)
   (setenv "HOME" (getenv "USERPROFILE")))
@@ -1912,14 +1909,25 @@ set pagesize 1000
     ;; 行番号のface
     ;; (set-face-attribute 'linum nil :foreground "red" :height 0.8)
     (set-face-attribute 'linum nil :height 0.8))
+  )
 
-  ;; theme
-  (leaf color-theme-sanityinc-tomorrow
-    :straight t
-    :config
-    ;; (load-theme 'pastels-on-dark t)
-    ;; (enable-theme 'pastels-on-dark)
-    (color-theme-sanityinc-tomorrow-blue)))
+;; theme
+;; https://zenn.dev/lambdagonbei/articles/1b2bce27673078
+(leaf modus-themes
+  :straight t
+  :config
+  (setq modus-themes-italic-constructs t
+        modus-themes-bold-constructs nil
+        modus-themes-region '(bg-only no-extend))
+  (modus-themes-load-themes)
+  (modus-themes-load-vivendi))
+
+;; (leaf color-theme-sanityinc-tomorrow
+;;   :straight t
+;;   :config
+;;   ;; (load-theme 'pastels-on-dark t)
+;;   ;; (enable-theme 'pastels-on-dark)
+;;   (color-theme-sanityinc-tomorrow-blue))
 
 (leaf migemo
   :straight t
@@ -2040,6 +2048,13 @@ set pagesize 1000
     (interactive)
     (insert (format-time-string "%Y/%m/%d %T"))))
 
+;; いちいち消すのも面倒なので、内容が 0 ならファイルごと削除する
+(defun delete-file-if-no-contents ()
+  (let ((file (buffer-file-name (current-buffer))))
+    (when (= (point-min) (point-max))
+      (delete-file file)
+      (message (concat "File: " file " deleted.")))))
+
 (leaf global-configuration
   :custom
   ;; 起動メッセージの非表示
@@ -2157,14 +2172,7 @@ set pagesize 1000
   ;;   * yankするときはprimary selectionのものを使う
   (setq x-select-enable-primary t)
   (when (eq window-system 'x)
-    (setq x-select-enable-clipboard nil))
-  ;;
-  ;; いちいち消すのも面倒なので、内容が 0 ならファイルごと削除する
-  (defun delete-file-if-no-contents ()
-    (let ((file (buffer-file-name (current-buffer))))
-      (when (= (point-min) (point-max))
-        (delete-file file)
-        (message (concat "File: " file " deleted."))))))
+    (setq x-select-enable-clipboard nil)))
 
 (leaf dashboard
   :when (version<= "25.1" emacs-version)
