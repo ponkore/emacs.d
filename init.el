@@ -1232,16 +1232,15 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
     ;;                    ac-source-dictionary))
     (yas-minor-mode))
 
-  (leaf *rust
-    :config
-    (leaf racer
-      :straight t)
-    (leaf rust-mode
+  (leaf racer
+    :straight t)
+
+  (leaf rust-mode
       :straight t
       :after racer
       :custom
-      `(racer-cmd . ,(expand-file-name "~/.cargo/bin/racer"))
-      `(racer-rust-src-path . ,(expand-file-name "~/.multirust/toolchains/stable-x86_64-apple-darwin/lib/rustlib/src/rust/src/"))
+      `((racer-cmd . ,(expand-file-name "~/.cargo/bin/racer"))
+        (racer-rust-src-path . ,(expand-file-name "~/.multirust/toolchains/stable-x86_64-apple-darwin/lib/rustlib/src/rust/src/")))
       (rust-format-on-save . t)
       :hook
       (rust-mode-hook . (lambda () (racer-mode) (flycheck-mode)))
@@ -1250,7 +1249,7 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
       :bind
       (:rust-mode-map
        ("TAB" . company-indent-or-complete-common)
-       ("C-c d" . racer-describe))))
+       ("C-c d" . racer-describe)))
 
   (leaf c/c++
     :config
@@ -1931,7 +1930,7 @@ set pagesize 1000
   (migemo-options . '("-q" "--emacs"))
   ;; (migemo-options . '("-q" "--emacs" "-i" "\g"))
   ;; (migemo-options . '("-q" "--emacs" "-i" "\a"))
-  (migemo-dictionary . `(expand-file-name "~/.emacs.d/migemo/utf-8/migemo-dict"))
+  `((migemo-dictionary . ,(expand-file-name "~/.emacs.d/migemo/utf-8/migemo-dict")))
   ;; (migemo-dictionary . "C~/.emacs.d/migemo-dict/utf-8")
   (migemo-user-dictionary . nil)
   (migemo-regex-dictionary . nil)
@@ -2119,7 +2118,7 @@ set pagesize 1000
   (version-control . nil)
   (auto-save-list-file-prefix . nil)
   ;; 編集中ファイルのバックアップ先(TODO)
-  ;; (auto-save-file-name-transforms . ((".*" ,temporary-file-directory t)))
+  ;; `((auto-save-file-name-transforms . ((".*" ,temporary-file-directory t))))
   ;; 編集中ファイルのバックアップ間隔（秒）
   (auto-save-timeout . 30)
   ;; 編集中ファイルのバックアップ間隔（打鍵）
