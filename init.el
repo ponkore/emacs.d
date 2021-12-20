@@ -306,7 +306,9 @@
     :bind
     (:vertico-map
      ("C-r" . vertico-previous) ;; C-s/C-rで行を移動できるようにする
-     ("C-s" . vertico-next))
+     ("C-s" . vertico-next)
+     ("C-z" . vertico-scroll-down)
+     ("C-v" . vertico-scroll-up))
     :advice
     (:around vertico--format-candidate
              (lambda (orig cand prefix suffix index _start)
@@ -362,7 +364,6 @@
      ("C-x b" . consult-buffer))
     :custom
     `((consult-preview-raw-size . 1024000)
-      (consult-preview-key . ,(kbd "C-M-p"))
       (consult-narrow-key . "<"))
     :init
     ;; C-uを付けるとカーソル位置の文字列を使うmy-consult-lineコマンドを定義する
@@ -1632,7 +1633,7 @@ set pagesize 1000
     :custom
     (highlight-indent-guides-auto-enabled . t)
     (highlight-indent-guides-responsive   . t)
-    (highlight-indent-guides-method       . 'character)
+    (highlight-indent-guides-method       . 'fill)
     (highlight-indent-guides-character    . ?|)
     :custom-face
     (highlight-indent-guides-odd-face       . '((t (:background "darkgray"))))
@@ -1737,9 +1738,8 @@ set pagesize 1000
     (company-box-doc-enable . t)
     (company-box-show-single-candidate . t)
     (company-box-max-candidates . 50)
-    (company-box-icons-alist . 'company-box-icons-all-the-icons)
     (company-box-background . '((t (:inherit company-tooltip :background "midnight blue"))))
-
+    (company-box-icons-alist . 'company-box-icons-all-the-icons)
     (company-box-backends-colors . '((company-yasnippet . (:candidate "yellow" :annotation some-face))
                                      (company-elisp . (:icon "yellow" :selected
                                                              (:background "orange" :foreground "black")))
@@ -2396,12 +2396,16 @@ thumbnail = \"/img/%Y-%m/%d/{{shortname}}.png\"
     ;;     ad-do-it))
     (defadvice grep (around grep-coding-system-setup compile)
       ""
-      (let ((old-default-process-coding-system default-process-coding-system))
+      (let ((old-default-process-coding-system default-process-coding-system)
+            (old-null-device null-device))
         (setq default-process-coding-system '(utf-8 . cp932))
+        (setq null-device "/dev/null")
         ad-do-it
+        (setq null-device default-null-device)
         (setq default-process-coding-system old-default-process-coding-system)))
     ;; (ad-activate-regexp "grep-coding-system-setup")
     ;; (ad-deactivate-regexp "grep-coding-system-setup")
+    (ad-activate 'grep)
     )
 
   (leaf ripgrep*
