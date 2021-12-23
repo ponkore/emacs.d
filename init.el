@@ -105,6 +105,11 @@
   ;; Localeに合わせた環境の設定
   (set-locale-environment nil)
 
+  ;; eaw
+  (leaf eaw
+    :require t
+    (eaw-fullwidth))
+
   ;; 機種依存文字
   (leaf cp5022x
     :ensure t
@@ -134,58 +139,6 @@
                      (get 'japanese-ucs-jis-to-cp932-map 'translation-table))
   (coding-system-put 'utf-8 :encode-translation-table
                      (get 'japanese-ucs-jis-to-cp932-map 'translation-table))
-
-  ;; East Asian Ambiguous
-  (defun set-east-asian-ambiguous-width (width)
-    (while (char-table-parent char-width-table)
-      (setq char-width-table (char-table-parent char-width-table)))
-    (let ((table (make-char-table nil)))
-      (dolist (range
-               '(#x00A1 #x00A4 (#x00A7 . #x00A8) #x00AA (#x00AD . #x00AE)
-                        (#x00B0 . #x00B4) (#x00B6 . #x00BA) (#x00BC . #x00BF)
-                        #x00C6 #x00D0 (#x00D7 . #x00D8) (#x00DE . #x00E1) #x00E6
-                        (#x00E8 . #x00EA) (#x00EC . #x00ED) #x00F0
-                        (#x00F2 . #x00F3) (#x00F7 . #x00FA) #x00FC #x00FE
-                        #x0101 #x0111 #x0113 #x011B (#x0126 . #x0127) #x012B
-                        (#x0131 . #x0133) #x0138 (#x013F . #x0142) #x0144
-                        (#x0148 . #x014B) #x014D (#x0152 . #x0153)
-                        (#x0166 . #x0167) #x016B #x01CE #x01D0 #x01D2 #x01D4
-                        #x01D6 #x01D8 #x01DA #x01DC #x0251 #x0261 #x02C4 #x02C7
-                        (#x02C9 . #x02CB) #x02CD #x02D0 (#x02D8 . #x02DB) #x02DD
-                        #x02DF (#x0300 . #x036F) (#x0391 . #x03A9)
-                        (#x03B1 . #x03C1) (#x03C3 . #x03C9) #x0401
-                        (#x0410 . #x044F) #x0451 #x2010 (#x2013 . #x2016)
-                        (#x2018 . #x2019) (#x201C . #x201D) (#x2020 . #x2022)
-                        (#x2024 . #x2027) #x2030 (#x2032 . #x2033) #x2035 #x203B
-                        #x203E #x2074 #x207F (#x2081 . #x2084) #x20AC #x2103
-                        #x2105 #x2109 #x2113 #x2116 (#x2121 . #x2122) #x2126
-                        #x212B (#x2153 . #x2154) (#x215B . #x215E)
-                        (#x2160 . #x216B) (#x2170 . #x2179) (#x2190 . #x2199)
-                        (#x21B8 . #x21B9) #x21D2 #x21D4 #x21E7 #x2200
-                        (#x2202 . #x2203) (#x2207 . #x2208) #x220B #x220F #x2211
-                        #x2215 #x221A (#x221D . #x2220) #x2223 #x2225
-                        (#x2227 . #x222C) #x222E (#x2234 . #x2237)
-                        (#x223C . #x223D) #x2248 #x224C #x2252 (#x2260 . #x2261)
-                        (#x2264 . #x2267) (#x226A . #x226B) (#x226E . #x226F)
-                        (#x2282 . #x2283) (#x2286 . #x2287) #x2295 #x2299 #x22A5
-                        #x22BF #x2312 (#x2460 . #x24E9) (#x24EB . #x254B)
-                        (#x2550 . #x2573) (#x2580 . #x258F) (#x2592 . #x2595)
-                        (#x25A0 . #x25A1) (#x25A3 . #x25A9) (#x25B2 . #x25B3)
-                        (#x25B6 . #x25B7) (#x25BC . #x25BD) (#x25C0 . #x25C1)
-                        (#x25C6 . #x25C8) #x25CB (#x25CE . #x25D1)
-                        (#x25E2 . #x25E5) #x25EF (#x2605 . #x2606) #x2609
-                        (#x260E . #x260F) (#x2614 . #x2615) #x261C #x261E #x2640
-                        #x2642 (#x2660 . #x2661) (#x2663 . #x2665)
-                        (#x2667 . #x266A) (#x266C . #x266D) #x266F #x273D
-                        (#x2776 . #x277F) (#xE000 . #xF8FF) (#xFE00 . #xFE0F)
-                        #xFFFD
-                        ))
-        (set-char-table-range table range width))
-      (optimize-char-table table)
-      (set-char-table-parent table char-width-table)
-      (setq char-width-table table)))
-
-  (set-east-asian-ambiguous-width 2)
 
   ;; 全角チルダ/波ダッシュをWindowsスタイルにする
   (let ((table (make-translation-table-from-alist '((#x301c . #xff5e))) ))
@@ -238,6 +191,13 @@
     ;; [△] Meiryoke_Console 統一だと文字幅問題はないが、行高さが詰まりすぎ、O0liの区別がつきにくい
     ;;あいうえお あいうえお あいうえお あいうえお あいうえお あいうえお ◎●○①㈱
     ;;abcdefghij klmnopqrst uvwxyzABCD EFGHIJKLMN OPQRSTUVWX YZilO0     1234567890
+    ;;
+    ;; JIS第２水準：Ricty / HackGenNerd は〇、Ricty Diminished は×
+    ;; Italic: Ricty Diminished / PlemolJP は〇、Ricty / HackGenNerd は×
+    ;;    ただし、Ricty Diminished で×は半角になってしまう
+    ;; HackGenNerd の Nerd フォントは、一部漢字コードに割当たっている
+    ;; 思想としては「Ricty かつ Italic あり」だが、どうやってフォント生成したらよいのか
+    ;;   (Ricty の生成スクリプトでは Ricty-Oblique.ttf はできるが Windows 上で斜体として認識されない)
     (let* ((asciifont font-name)
            (jpfont font-name)
            (h (round (* size 10)))
@@ -264,11 +224,15 @@
     (interactive)
     (when (eq system-type 'darwin)
       (emacs-font-setting "Ricty Diminished" 16))
-    ;; (when (eq system-type 'windows-nt)
-    ;;   (emacs-font-setting "HackgenNerd" 10))
     (when (eq system-type 'windows-nt)
-      (emacs-font-setting "Ricty Diminished" 12)))
+      (emacs-font-setting "Ricty Diminished" 12))
+    ;; (when (eq system-type 'windows-nt)
+    ;;   (emacs-font-setting "HackGenNerd" 11))
+    )
   (setup-font))
+
+(leaf nerd-fonts
+  :require t)
 
 (leaf *modifier
   :config
@@ -315,8 +279,8 @@
                   (setq cand (funcall orig cand prefix suffix index _start))
                   (concat
                    (if (= vertico--index index)
-                       (propertize "» " 'face 'vertico-current)
-                     "  ")
+                       (propertize " " 'face 'vertico-current) ;; "🡆 " "» "
+                     "   ")
                    cand)))
     :config
     (defun vertico-after-init-hook ()
@@ -388,7 +352,6 @@
     ;; 補完スタイルにorderlessを利用する
     `((completion-styles . '(orderless))
       (orderless-matching-styles . '(orderless-prefixes
-                                     orderless-flex
                                      orderless-regexp
                                      orderless-initialism
                                      orderless-literal))))
@@ -409,7 +372,6 @@
   ;;   :init
   ;;   (corfu-global-mode))
   )
-
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -819,11 +781,6 @@ same directory as the org-buffer and insert a link to this file."
       :if window-system
       :custom (org-bullets-bullet-list . '("" "" "" "" "" "" ""))
       :hook (org-mode-hook . org-bullets-mode))
-    (leaf org-beautify-theme
-      :straight t
-      :disabled t
-      :config
-      (load-theme 'org-beautify t))
     (leaf org-download
       :ensure t
       :custom
@@ -864,7 +821,16 @@ same directory as the org-buffer and insert a link to this file."
     (markdown-mode-hook . my:setup-markdown-mode)
     (gfm-mode-hook      . my:setup-markdown-mode)
     :config
-    (setq markdown-command (concat "pandoc -F pandoc-crossref --template=default.html --self-contained -s --from gfm+footnotes --to html --metadata " (expand-file-name "~/AppData/Roaming/pandoc/metadata.yml")))
+    (setq markdown-command
+          (let ((pandoc-options '("-F pandoc-crossref"
+                                  "--template=default.html"
+                                  "--self-contained"
+                                  "-s"
+                                  "--from=gfm+footnotes"
+                                  "--to=html"
+                                  "--metadata"
+                                  (expand-file-name "~/AppData/Roaming/pandoc/metadata.yml"))))
+            (concat "pandoc " (s-join " " pandoc-options))))
     :custom
     (markdown-open-command . "c:/Program Files/Typora/Typora.exe")
     (markdown-use-pandoc-style-yaml-metadata . t)
@@ -905,7 +871,7 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
       ("d" markdown-demote)
       ("j" markdown-move-down)
       ("k" markdown-move-up)
-      ;; Pandoc
+      ;; Pandoc (TODO)
       ("H" md2html :exit t)
       ("P" md2pdf :exit t)
       ("D" md2docx :exit t)
@@ -1139,6 +1105,7 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
       :commands add-node-modules-path)
     (leaf prettier-js
       :straight t
+      :diminish prettier-js-mode
       :commands prettier-js-mode)
     (leaf tide
       :straight t
@@ -1493,6 +1460,7 @@ set pagesize 1000
 
   (leaf symbol-overlay
     :straight t
+    :diminish t
     :bind
     ("M-i" . symbol-overlay-put)
     (:symbol-overlay-map
@@ -1505,6 +1473,7 @@ set pagesize 1000
 
   (leaf smartparens
     :straight t
+    :diminish t
     :commands smartparens-global-mode sp-local-pairs
     :hook (emacs-startup-hook . smartparens-global-mode)
     :config
@@ -1567,6 +1536,7 @@ set pagesize 1000
     ;; whitespace ( http://qiita.com/catatsuy/items/55d50d13ebc965e5f31e )
     ;;
     :straight t
+    :diminish t
     :custom
     `((whitespace-style-with-tab . '(face tabs tab-mark spaces space-mark trailing space-before-tab space-after-tab::space))
       (whitespace-style-without-tab . '(face spaces space-mark trailing space-before-tab space-after-tab::space))
@@ -1717,7 +1687,26 @@ set pagesize 1000
       ;; (company-tooltip-common . '((((type x)) (:inherit company-tooltip :weight bold)) (t (:inherit company-tooltip))))
       ;; (company-tooltip-common-selection . '((((type x)) (:inherit company-tooltip-selection :weight bold)) (t (:inherit company-tooltip-selection))))
       ;; (company-tooltip-selection . '((t (:background "steelblue" :foreground "black"))))
-      ))
+      )
+    :config
+    ;; http://misohena.jp/blog/2021-08-08-emacs-company-mode-settings.html
+    ;; 無選択状態の時にTABやRETが入力されたら、そのバッファのモード本来のTABやRETを実行する。
+    (defun my-company-complete-respecting-user-input (&rest args)
+      "ユーザー入力を尊重した補完を行う。"
+      (interactive)
+      (if (null company-selection)
+          ;; モード本来の割り当てを実行する。
+          (progn
+            (company-abort)
+            (company--unread-this-command-keys))
+        ;; companyの(リマップ元の)コマンドを実行する。
+        (apply this-original-command args)))
+    (define-key company-active-map [remap company-complete-selection]
+      ;;RETに割り当てられているコマンドをリマップ
+      'my-company-complete-respecting-user-input)
+    (define-key company-active-map [remap company-complete-common]
+      ;;TABに割り当てられているコマンドをリマップ
+      'my-company-complete-respecting-user-input))
 
   (leaf company-quickhelp
     :straight t
@@ -1730,6 +1719,7 @@ set pagesize 1000
 
   (leaf company-box
     :straight t
+    :diminish t
     :after all-the-icons
     :hook
     (company-mode-hook . company-box-mode)
@@ -1796,6 +1786,7 @@ set pagesize 1000
   :custom
   (projectile-enable-idle-timer . nil)
   (projectile-enable-caching . t)
+  (projectile-mode-line-prefix . " P")
   ;; (projectile-completion-system . 'ivy)
   :preface
   (require 'ripgrep)
@@ -1812,6 +1803,7 @@ set pagesize 1000
 
 (leaf anzu
   :straight t
+  :diminish t
   :config
   (global-anzu-mode 1))
 
@@ -2066,7 +2058,7 @@ set pagesize 1000
   ;; ウィンドウ縦分割時のバッファ画面外文字の切り詰め表示
   (truncate-partial-width-windows . t)
   ;; カーソル点滅表示
-  (blink-cursor-mode . 0)
+  (blink-cursor-mode . nil)
   ;; メニューバーを消す
   (menu-bar-mode . nil)
   ;; ツールバーを消す
