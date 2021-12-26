@@ -182,8 +182,6 @@
     "Set emacs japanese fonts."
     ;; Note:
     ;; https://qiita.com/melito/items/238bdf72237290bc6e42
-    ;; [NG] ricty だと、[] の下が欠ける
-    ;; (set-frame-font "ricty-12")
     ;; [NG] noto mono だと全角文字が半角の２倍幅になっていない
     ;; (set-frame-font "noto mono-10")
     ;; [△] Consolas & Meiryoke_Console だと丸付き数字(①等)が半角幅になってしまっている
@@ -196,40 +194,52 @@
     ;; Italic: Ricty Diminished / PlemolJP は〇、Ricty / HackGenNerd は×
     ;;    ただし、Ricty Diminished で×は半角になってしまう
     ;; HackGenNerd の Nerd フォントは、一部漢字コードに割当たっている
-    ;; 思想としては「Ricty かつ Italic あり」だが、どうやってフォント生成したらよいのか
-    ;;   (Ricty の生成スクリプトでは Ricty-Oblique.ttf はできるが Windows 上で斜体として認識されない)
     (let* ((asciifont font-name)
            (jpfont font-name)
            (h (round (* size 10)))
-           (fontspec (font-spec :family asciifont))
+           (ascii-fontspec (font-spec :family asciifont))
            (jp-fontspec (font-spec :family jpfont)))
       (set-face-attribute 'default nil :family asciifont :height h)
+      ;; Japanese
       (set-fontset-font nil 'japanese-jisx0208 jp-fontspec)
       (set-fontset-font nil 'japanese-jisx0212 jp-fontspec)
       (set-fontset-font nil 'japanese-jisx0213-1 jp-fontspec)
       (set-fontset-font nil 'japanese-jisx0213-2 jp-fontspec)
       (set-fontset-font nil 'japanese-jisx0213.2004-1 jp-fontspec)
       (set-fontset-font nil 'katakana-jisx0201 jp-fontspec)
-      (set-fontset-font nil '(#x0080 . #x024F) fontspec)
-      (set-fontset-font nil '(#x0370 . #x03FF) fontspec)
-      ;; all-the-icons-font
-      (set-fontset-font nil 'unicode (font-spec :family (all-the-icons-alltheicon-family)) nil 'append)
-      (set-fontset-font nil 'unicode (font-spec :family (all-the-icons-material-family)) nil 'append)
-      (set-fontset-font nil 'unicode (font-spec :family (all-the-icons-fileicon-family)) nil 'append)
-      (set-fontset-font nil 'unicode (font-spec :family (all-the-icons-faicon-family)) nil 'append)
-      (set-fontset-font nil 'unicode (font-spec :family (all-the-icons-octicon-family)) nil 'append)
-      (set-fontset-font nil 'unicode (font-spec :family (all-the-icons-wicon-family)) nil 'append)
+      ;; Latin with pronounciation annotations
+      (set-fontset-font nil '(#x0080 . #x024F) ascii-fontspec)
+      ;; Math symbols
+      (set-fontset-font nil '(#x2200 . #x22FF) ascii-fontspec)
+      ;; Greek
+      (set-fontset-font nil '(#x0370 . #x03FF) ascii-fontspec)
+      ;; Some Icons
+      (set-fontset-font nil '(#xE0A0 . #xEEE0) ascii-fontspec)
+      ;; all-the-icons-font (下記設定を入れると、いろんなアイコンがおかしくなってしまう)
+      ;; (setq range '(#xe000 . #xf8ff))
+      ;; (set-fontset-font nil range (font-spec :family (all-the-icons-alltheicon-family)) nil 'append)
+      ;; (set-fontset-font nil range (font-spec :family (all-the-icons-material-family)) nil 'append)
+      ;; (set-fontset-font nil range (font-spec :family (all-the-icons-fileicon-family)) nil 'append)
+      ;; (set-fontset-font nil range (font-spec :family (all-the-icons-faicon-family)) nil 'append)
+      ;; (set-fontset-font nil range (font-spec :family (all-the-icons-octicon-family)) nil 'append)
+      ;; (set-fontset-font nil range (font-spec :family (all-the-icons-wicon-family)) nil 'append)
       (setq face-font-rescale-alist '((font-name . 1.0)))))
   (defun setup-font ()
     (interactive)
     (when (eq system-type 'darwin)
       (emacs-font-setting "Ricty Diminished" 16))
     (when (eq system-type 'windows-nt)
-      (emacs-font-setting "Ricty Diminished" 12))
-    ;; (when (eq system-type 'windows-nt)
-    ;;   (emacs-font-setting "HackGenNerd" 11))
-    )
+      (emacs-font-setting "Ricty" 12))) ;; previous: ("HackGenNerd" 11)
   (setup-font))
+
+(leaf text-scale
+  :hydra (hydra-zoom ()
+                     "Zoom"
+                     ("g" text-scale-increase "in")
+                     ("l" text-scale-decrease "out")
+                     ("r" (text-scale-set 0) "reset")
+                     ("0" (text-scale-set 0) :bind nil :exit t))
+  :bind ("<f2>" . hydra-zoom/body))
 
 (leaf nerd-fonts
   :require t)
@@ -279,7 +289,7 @@
                   (setq cand (funcall orig cand prefix suffix index _start))
                   (concat
                    (if (= vertico--index index)
-                       (propertize " " 'face 'vertico-current) ;; "🡆 " "» "
+                       (propertize "🡆 " 'face 'vertico-current) ;; "» "
                      "   ")
                    cand)))
     :config
@@ -486,7 +496,8 @@
   :commands (doom-modeline-def-modeline)
   :custom
   (doom-modeline-buffer-file-name-style . 'truncate-with-project)
-  (doom-modeline-major-mode-icon . nil)
+  (doom-modeline-icon . t)
+  (doom-modeline-major-mode-icon . t)
   (doom-modeline-minor-modes . t)
   (doom-modeline-buffer-encoding . t)
   `(doom-modeline-icon . ,(display-graphic-p))
@@ -530,8 +541,8 @@
   (doom-modeline-def-modeline
     'main
     ;; '(workspace-number bar window-number evil-state ryo-modal xah-fly-keys matches buffer-info remote-host buffer-position parrot selection-info)
-    '(bar my:buffer-encoding matches buffer-info buffer-position selection-info)
-    '(misc-info debug minor-modes "-" input-method major-mode process vcs checker)))
+    '(bar my:buffer-encoding matches buffer-info buffer-position selection-info major-mode vcs)
+    '(misc-info debug minor-modes "-" input-method process checker)))
 
 (leaf *utility-package
   :config
@@ -564,7 +575,40 @@
     ;;   (add-to-list 'all-the-icons-ivy-buffer-commands 'counsel-ibuffer)
     ;;   (all-the-icons-ivy-setup)
     ;;   (setq ivy-format-functions-alist '((t . ivy-format-function-arrow))))
-    )
+
+    ;; override for .tsx
+    (defun all-the-icons--web-mode (&optional family arg-overrides)
+      "Return icon or FAMILY for `web-mode' based on `web-mode-content-type'.
+Providing ARG-OVERRIDES will modify the creation of the icon."
+      (let ((non-nil-args (cl-reduce (lambda (acc it) (if it (append acc (list it)) acc)) arg-overrides :initial-value '())))
+        (cond
+         ((equal web-mode-content-type "tsx")
+          (if family (all-the-icons-fileicon-family) (apply 'all-the-icons-fileicon (append '("typescript") non-nil-args))))
+         ((equal web-mode-content-type "jsx")
+          (if family (all-the-icons-fileicon-family) (apply 'all-the-icons-fileicon (append '("jsx-2") non-nil-args))))
+         ((equal web-mode-content-type "javascript")
+          (if family (all-the-icons-alltheicon-family) (apply 'all-the-icons-alltheicon (append '("javascript") non-nil-args))))
+         ((equal web-mode-content-type "json")
+          (if family (all-the-icons-alltheicon-family) (apply 'all-the-icons-alltheicon (append '("less") non-nil-args))))
+         ((equal web-mode-content-type "xml")
+          (if family (all-the-icons-faicon-family) (apply 'all-the-icons-faicon (append '("file-code-o") non-nil-args))))
+         ((equal web-mode-content-type "css")
+          (if family (all-the-icons-alltheicon-family) (apply 'all-the-icons-alltheicon (append '("css3") non-nil-args))))
+         (t
+          (if family (all-the-icons-alltheicon-family) (apply 'all-the-icons-alltheicon (append '("html5") non-nil-args))))))))
+
+  (leaf all-the-icons-dired
+    :straight t
+    :after all-the-icons
+    :custom (all-the-icons-dired-monochrome . nil)
+    :hook (dired-mode-hook . all-the-icons-dired-mode)
+    :config
+    (add-to-list 'all-the-icons-extension-icon-alist
+                 '("tsx" all-the-icons-fileicon "typescript" :height 1.0 :v-adjust -0.1 :face all-the-icons-blue-alt))
+    (add-to-list 'all-the-icons-extension-icon-alist
+                 '("inc" all-the-icons-fileicon "php" :face all-the-icons-lsilver))
+    (add-to-list 'all-the-icons-extension-icon-alist
+                 '("phpm" all-the-icons-fileicon "php" :face all-the-icons-lsilver)))
 
   (leaf s
     :straight t
@@ -739,7 +783,16 @@ _R_ename    ch_M_od        _t_oggle       _e_dit    _[_ hide detail     _._toggg
       (org-refile-use-outline-path . 'file)
       (org-outline-path-complete-in-steps . nil)
       (org-log-done . t)
-      (org-todo-keywords . '((sequence "TODO(t)" "WAITING(w)" "|" "DONE(d)" "CANCELED(c)")))
+      ;; (org-todo-keywords . '((sequence "TODO(t)" "WAITING(w)" "|" "DONE(d)" "CANCELED(c)")))
+      (org-todo-keywords . '((sequence "TODO(t)" "IN PROGRESS(i)" "|" "DONE(d)")
+                             (sequence "WAITING(w@/!)" "HOLD(h@/!)" "|" "CANCELLED(c@/!)" "MEETING")))
+      (org-todo-keyword-faces . '(("TODO" :foreground "red" :weight bold)
+                                  ("STARTED" :foreground "cornflower blue" :weight bold)
+                                  ("DONE" :foreground "green" :weight bold)
+                                  ("WAITING" :foreground "orange" :weight bold)
+                                  ("HOLD" :foreground "magenta" :weight bold)
+                                  ("CANCELLED" :foreground "green" :weight bold)
+                                  ("MEETING" :foreground "gren" :weight bold)))
       (org-indent-indentation-per-level . 0)
       (org-adapt-indentation . nil)
       (org-clock-clocked-in-display . 'none)
@@ -926,6 +979,11 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
     ;; (set-newline-and-indent)
     :hook
     (emacs-lisp-mode-hook . my:emacs-lisp-hooks))
+
+  (leaf eldoc-mode
+    :require t
+    :config
+    (diminish 'eldoc-mode))
 
   (leaf *lisp
     :config
@@ -1447,6 +1505,7 @@ set pagesize 1000
 
   (leaf yasnippet
     :straight t
+    :after diminish
     :bind (:yas-minor-mode-map
            ("TAB" . nil)
            ("<tab>" . nil)
@@ -1456,7 +1515,9 @@ set pagesize 1000
            ("C-x i v" . yas-visit-snippet-file)
            ("C-x i l" . yas-describe-tables))
     :commands yas-expand yas-global-mode yas-insert-snippet yas-visit-snippet-file
-    :hook (emacs-startup-hook . yas-global-mode))
+    :hook (emacs-startup-hook . yas-global-mode)
+    :config
+    (diminish 'yas-minor-mode))
 
   (leaf symbol-overlay
     :straight t
