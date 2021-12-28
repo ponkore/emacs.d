@@ -223,7 +223,8 @@
       ;; (set-fontset-font nil range (font-spec :family (all-the-icons-faicon-family)) nil 'append)
       ;; (set-fontset-font nil range (font-spec :family (all-the-icons-octicon-family)) nil 'append)
       ;; (set-fontset-font nil range (font-spec :family (all-the-icons-wicon-family)) nil 'append)
-      (setq face-font-rescale-alist '((font-name . 1.0)))))
+      (setq face-font-rescale-alist `((,font-name . 1.0)))))
+
   (defun setup-font ()
     (interactive)
     (when (eq system-type 'darwin)
@@ -828,11 +829,39 @@ same directory as the org-buffer and insert a link to this file."
               (call-process "import" nil nil nil filename))
           ;; insert into file if correctly taken
           (if (file-exists-p filename)
-              (insert (concat "[[file:" filename "]]"))))))
+              (insert (concat "[[file:" filename "]]"))))
+        ;; update todo summary
+        (defun my:org-buffer-calc-summary ()
+          (save-excursion
+            (goto-char (point-min))
+            (let ((results nil))
+              (while (re-search-forward "\\[\\([0-9]*\\)/\\([0-9]*\\)\\]" nil t)
+                (setq results (append results
+                                      (list (cons
+                                             (string-to-number
+                                              (buffer-substring-no-properties (match-beginning 1) (match-end 1)))
+                                             (string-to-number
+                                              (buffer-substring-no-properties (match-beginning 2) (match-end 2)))))))
+                (goto-char (point)))
+              (cl-reduce (lambda (a b)
+                           (let ((tmp-a (+ (car a) (car b)))
+                                 (tmp-b (+ (cdr a) (cdr b))))
+                             (cons tmp-a tmp-b))) results))))
+        (defun my:org-buffer-calc-summary--update-summary ()
+          (interactive)
+          (let ((result (my:org-buffer-calc-summary))
+                (saved-point (point)))
+            (goto-char (point-min))
+            (when (re-search-forward "<[^/]*/[^>]*>")
+              (delete-region (match-beginning 0) (match-end 0))
+              (insert "<" (number-to-string (car result)) "/" (number-to-string (cdr result)) ">"))
+            (goto-char saved-point))
+          nil)))
     (leaf org-bullets
       :straight t
       :if window-system
-      :custom (org-bullets-bullet-list . '("" "" "" "" "" "" ""))
+      ;; :custom (org-bullets-bullet-list . '("" "" "" "" "" "" ""))
+      :custom (org-bullets-bullet-list . '("*" "*" "*" "*" "*"))
       :hook (org-mode-hook . org-bullets-mode))
     (leaf org-download
       :ensure t
