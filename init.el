@@ -223,6 +223,10 @@
       ;; (set-fontset-font nil range (font-spec :family (all-the-icons-faicon-family)) nil 'append)
       ;; (set-fontset-font nil range (font-spec :family (all-the-icons-octicon-family)) nil 'append)
       ;; (set-fontset-font nil range (font-spec :family (all-the-icons-wicon-family)) nil 'append)
+      (when (eq window-system 'w32)
+        (set-fontset-font t '(#x1f300 . #x1f9ff) "Segoe UI Emoji" nil 'append)
+        (set-fontset-font t '(#x1fa70 . #x1fbff) "Segoe UI Emoji" nil 'append)
+        (set-fontset-font t '(#x1f900 . #x1f9e0) "Segoe UI Emoji" nil 'append))
       (setq face-font-rescale-alist `((,font-name . 1.0)))))
 
   (defun setup-font ()
@@ -854,7 +858,10 @@ same directory as the org-buffer and insert a link to this file."
             (goto-char (point-min))
             (when (re-search-forward "<[^/]*/[^>]*>")
               (delete-region (match-beginning 0) (match-end 0))
-              (insert "<" (number-to-string (car result)) "/" (number-to-string (cdr result)) ">"))
+              (let* ((a (car result))
+                     (b (cdr result))
+                     (percent (/ (* 100 a) b)))
+                (insert "<" (number-to-string a) "/" (number-to-string b) "=" (number-to-string percent) "%>")))
             (goto-char saved-point))
           nil)))
     (leaf org-bullets
