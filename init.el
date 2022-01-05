@@ -223,6 +223,9 @@
       ;; (set-fontset-font nil range (font-spec :family (all-the-icons-faicon-family)) nil 'append)
       ;; (set-fontset-font nil range (font-spec :family (all-the-icons-octicon-family)) nil 'append)
       ;; (set-fontset-font nil range (font-spec :family (all-the-icons-wicon-family)) nil 'append)
+      ;; org-bullets で使うフォントだけ all-the-icons- の font を割り当てる
+      (set-fontset-font nil '(#xf219 . #xf219) (font-spec :family (all-the-icons-faicon-family)) nil 'append)
+      (set-fontset-font nil '(#xe3d0 . #xe3d6) (font-spec :family (all-the-icons-material-family)) nil 'append)
       (when (eq window-system 'w32)
         (set-fontset-font t '(#x1f300 . #x1f9ff) "Segoe UI Emoji" nil 'append)
         (set-fontset-font t '(#x1fa70 . #x1fbff) "Segoe UI Emoji" nil 'append)
@@ -232,7 +235,7 @@
   (defun setup-font ()
     (interactive)
     (when (eq system-type 'darwin)
-      (emacs-font-setting "Ricty Diminished" 16))
+      (emacs-font-setting "Ricty" 16))
     (when (eq system-type 'windows-nt)
       (emacs-font-setting "Ricty" 12))) ;; previous: ("HackGenNerd" 11)
   (setup-font))
@@ -867,8 +870,7 @@ same directory as the org-buffer and insert a link to this file."
     (leaf org-bullets
       :straight t
       :if window-system
-      ;; :custom (org-bullets-bullet-list . '("" "" "" "" "" "" ""))
-      :custom (org-bullets-bullet-list . '("*" "*" "*" "*" "*"))
+      :custom (org-bullets-bullet-list . '("" "" "" "" "" "" ""))
       :hook (org-mode-hook . org-bullets-mode))
     (leaf org-download
       :ensure t
@@ -1768,8 +1770,8 @@ set pagesize 1000
     :hook
     (emacs-startup-hook . global-company-mode)
     :custom
-    `((company-idle-delay . 0)
-      (company-echo-delay . 0)
+    `((company-idle-delay . 0.3)
+      (company-echo-delay . 0.3)
       (company-minimum-prefix-length . 1) ;; 1文字入力で補完されるように
       (company-selection-wrap-around . t) ;; 候補の一番上でselect-previousしたら一番下に、一番下でselect-nextしたら一番上に行くように
       (company-tooltip-limit . 20)
