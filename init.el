@@ -618,6 +618,13 @@ Providing ARG-OVERRIDES will modify the creation of the icon."
     (add-to-list 'all-the-icons-extension-icon-alist
                  '("phpm" all-the-icons-fileicon "php" :face all-the-icons-lsilver)))
 
+  (leaf all-the-icons-ibuffer
+    :straight t
+    :after all-the-icons
+    :init
+    (all-the-icons-ibuffer-mode 1)
+    :bind (("C-x C-b" . ibuffer)))
+
   (leaf s
     :straight t
     :commands s-join s-split)
