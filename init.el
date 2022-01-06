@@ -817,6 +817,9 @@ _R_ename    ch_M_od        _t_oggle       _e_dit    _[_ hide detail     _._toggg
       (run-at-time "00:59" 3600 #'org-save-all-org-buffers)
       (leaf *org-local-functions
         :config
+        ;; force load ox-pandoc
+        (org-pandoc-startup-check)
+        ;;
         (defun my:org-add-ymd-to-archive (name)
           "replace anchor to YYYY-MM string"
           (let* ((ymd (format-time-string "%Y-%m")))
@@ -874,6 +877,23 @@ same directory as the org-buffer and insert a link to this file."
                 (insert "<" (number-to-string a) "/" (number-to-string b) "=" (number-to-string percent) "%>")))
             (goto-char saved-point))
           nil)))
+
+    (leaf ox-pandoc
+      ;; https://taipapamotohus.com/post/org-mode_paper_4/
+      :straight t
+      :commands org-pandoc-startup-check
+      :custom
+      `(;; default options for all output formats
+        (org-pandoc-options . '((standalone . t)))
+        ;; cancel above settings only for 'docx' format
+        (org-pandoc-options-for-docx . '((standalone . nil)
+                                         (reference-doc . ,(expand-file-name "~/AppData/Roaming/pandoc/custom-reference.docx"))))
+        ;; special settings for beamer-pdf and latex-pdf exporters
+        (org-pandoc-options-for-beamer-pdf . '((pdf-engine . "xelatex")))
+        (org-pandoc-options-for-latex-pdf . '((pdf-engine . "xelatex")))))
+    (leaf ob-mermaid
+      :straight t
+      :commands org-babel-execute:mermaid)
     (leaf org-bullets
       :straight t
       :if window-system
@@ -918,18 +938,16 @@ same directory as the org-buffer and insert a link to this file."
     :hook
     (markdown-mode-hook . my:setup-markdown-mode)
     (gfm-mode-hook      . my:setup-markdown-mode)
-    :config
-    (setq markdown-command
-          (let ((pandoc-options '("-F pandoc-crossref"
-                                  "--template=default.html"
-                                  "--self-contained"
-                                  "-s"
-                                  "--from=gfm+footnotes"
-                                  "--to=html"
-                                  "--metadata"
-                                  (expand-file-name "~/AppData/Roaming/pandoc/metadata.yml"))))
-            (concat "pandoc " (s-join " " pandoc-options))))
     :custom
+    `(markdown-command . ,(let ((pandoc-options `("-F pandoc-crossref"
+                                                  "--template=default.html"
+                                                  "--self-contained"
+                                                  "-s"
+                                                  "--from=gfm+footnotes"
+                                                  "--to=html"
+                                                  "--metadata"
+                                                  ,(expand-file-name "~/AppData/Roaming/pandoc/metadata.yml"))))
+                            (concat "pandoc " (s-join " " pandoc-options))))
     (markdown-open-command . "c:/Program Files/Typora/Typora.exe")
     (markdown-use-pandoc-style-yaml-metadata . t)
     (markdown-header-scaling . nil)
@@ -1496,22 +1514,21 @@ set pagesize 1000
     :ensure t
     :custom
     (mark-holidays-in-calendar . t) ; 祝日をカレンダーに表示
-    (calendar-month-name-array . ["01" "02" "03" "04" "05" "06"
-                                 "07" "08" "09" "10" "11" "12" ])
+    (calendar-month-name-array . ["01" "02" "03" "04" "05" "06" "07" "08" "09" "10" "11" "12" ])
     (calendar-day-name-array   . ["日" "月" "火" "水" "木" "金" "土"])
     (calendar-day-header-array . ["日" "月" "火" "水" "木" "金" "土"])
     (calendar-week-start-day   . 0)) ;; 日曜開始
 
-;;   (leaf japanese-holidays
-;;     :straight t
-;;     :custom
-;;     (japanese-holiday-weekend . '(0 6)) ; 土日を祝日として表示
-;;     (japanese-holiday-weekend-marker . '(holiday nil nil nil nil nil japanese-holiday-saturday)) ; 土曜日を水色で表示
-;; ;;    `((calendar-holidays . ,(append japanese-holidays holiday-local-holidays holiday-other-holidays))) ; 他の国の祝日も表示させたい場合は適当に調整
-;;     :hook
-;;     (calendar-today-visible-hook . japanese-holiday-mark-weekend)
-;;     (calendar-today-invisible-hook . japanese-holiday-mark-weekend)
-;;     (calendar-today-visible-hook . calendar-mark-today))
+  (leaf japanese-holidays
+    :straight t
+    :custom
+    (japanese-holiday-weekend . '(0 6)) ; 土日を祝日として表示
+    (japanese-holiday-weekend-marker . '(holiday nil nil nil nil nil japanese-holiday-saturday)) ; 土曜日を水色で表示
+;;    `((calendar-holidays . ,(append japanese-holidays holiday-local-holidays holiday-other-holidays))) ; 他の国の祝日も表示させたい場合は適当に調整
+    :hook
+    (calendar-today-visible-hook . japanese-holiday-mark-weekend)
+    (calendar-today-invisible-hook . japanese-holiday-mark-weekend)
+    (calendar-today-visible-hook . calendar-mark-today))
 
   (leaf diff-mode
     :hook
@@ -1928,6 +1945,7 @@ set pagesize 1000
 
   (prefer-coding-system 'utf-8-unix)
   (set-file-name-coding-system 'cp932)
+  (setq default-file-name-coding-system 'cp932)
 
   ;; tr-ime setup
   (tr-ime-advanced-install)
