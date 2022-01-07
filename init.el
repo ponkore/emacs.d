@@ -890,7 +890,15 @@ same directory as the org-buffer and insert a link to this file."
                                          (reference-doc . ,(expand-file-name "~/AppData/Roaming/pandoc/custom-reference.docx"))))
         ;; special settings for beamer-pdf and latex-pdf exporters
         (org-pandoc-options-for-beamer-pdf . '((pdf-engine . "xelatex")))
-        (org-pandoc-options-for-latex-pdf . '((pdf-engine . "xelatex")))))
+        (org-pandoc-options-for-latex-pdf . '((pdf-engine . "xelatex"))))
+      :config
+      (defadvice org-pandoc-run (around ad-org-pandoc-run compile)
+        (let ((old-default-process-coding-system default-process-coding-system))
+          (setq default-process-coding-system '(utf-8 . cp932))
+          ad-do-it
+          (setq default-process-coding-system old-default-process-coding-system)))
+      (ad-activate 'org-pandoc-run))
+
     (leaf ob-mermaid
       :straight t
       :commands org-babel-execute:mermaid)
