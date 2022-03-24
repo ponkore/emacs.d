@@ -1186,34 +1186,37 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
     (leaf php-mode
       :mode ("\\.\\(cgi\\|phpm\\|inc\\)\\'" . php-mode)
       :straight t
+      :after lsp-mode
       :custom
       (ac-php-php-executable . "c:/Apps/php-7.4.22-Win32-vc15-x64/php.exe")
       (flycheck-php-phpcs-executable . "phpcs")
       (ac-php-debug-flag . nil)
+      (php-manual-url . 'ja)
+      (php-mode-coding-style . 'psr2)
       :hook
       (php-mode-hook . (lambda ()
+                         (c-set-style "bsd")
                          (company-mode t)
                          (subword-mode 1)
                          (setq tab-width 4)
                          (setq indent-tabs-mode nil)
                          (setq c-basic-offset 4)
                          (setq-local page-delimiter "\\_<\\(class\\|function\\|namespace\\)\\_>.+$")
-                         (ac-php-core-eldoc-setup)
-                         (add-to-list 'company-backends 'company-ac-php-backend)
-                         (make-local-variable 'company-backends)
+                         ;; (ac-php-core-eldoc-setup)
+                         ;; (add-to-list 'company-backends 'company-ac-php-backend)
+                         ;; (make-local-variable 'company-backends)
                          ;; (require 'flycheck-phpstan)
                          (add-to-list 'flycheck-disabled-checkers 'php-phpmd)
                          ;; (add-to-list 'flycheck-disabled-checkers 'php-phpcs)
                          (setq flycheck-phpcs-standard "PSR2")
                          (flycheck-mode t)))
+      (php-mode-hook . lsp-deferred)
       :config
-      (leaf company-php
-        :straight t)
+      ;; (leaf company-php
+      ;;   :straight t)
+      (setq lsp-intelephense-files-associations ["*.php" "*.phpm" "*.inc"])
       (leaf flycheck-phpstan
         :straight t)
-      :custom
-      (php-manual-url . 'ja)
-      (php-mode-coding-style . 'psr2)
       :bind
       (:php-mode-map
        (";" . self-insert-command)
@@ -1222,8 +1225,8 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
        ;; ("]" . #'(smartchr "array " "]" "]]"))
        ;; ("C-}" . cedit-barf)
        ;; ("C-)" . cedit-slurp)
-       ("M-." . ac-php-find-symbol-at-point)
-       ("M-," . ac-php-location-stack-back)
+       ;; ("M-." . ac-php-find-symbol-at-point)
+       ;; ("M-," . ac-php-location-stack-back)
        ("C-c C--" . php-current-class)
        ("C-c C-=" . php-current-namespace))))
 
@@ -1250,7 +1253,7 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
       ;; aligns annotation to the right hand side
       (company-tooltip-align-annotations . t)
       :hook
-      (typescript-mode . tide-setup)
+      (typescript-mode . setup-tide-mode)
       (typescript-mode . tide-hl-identifier-mode)
       ;; formats the buffer before saving
       (before-save-hook . tide-format-before-save)
@@ -1326,24 +1329,25 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
     ;;                    ac-source-dictionary))
     (yas-minor-mode))
 
-  (leaf racer
+  ;; (leaf racer
+  ;;   :straight t)
+
+  (leaf cargo
+    :straight t)
+
+  (leaf flycheck-rust
     :straight t)
 
   (leaf rust-mode
-      :straight t
-      :after racer
-      :custom
-      `((racer-cmd . ,(expand-file-name "~/.cargo/bin/racer"))
-        (racer-rust-src-path . ,(expand-file-name "~/.multirust/toolchains/stable-x86_64-apple-darwin/lib/rustlib/src/rust/src/")))
-      (rust-format-on-save . t)
-      :hook
-      (rust-mode-hook . (lambda () (racer-mode) (flycheck-mode)))
-      (flycheck-mode-hook . flycheck-rust-setup)
-      (racer-mode-hook . (lambda () (company-mode) (eldoc-mode)))
-      :bind
-      (:rust-mode-map
-       ("TAB" . company-indent-or-complete-common)
-       ("C-c d" . racer-describe)))
+    :straight t
+    :custom
+    (rust-format-on-save . t)
+    :hook
+    (rust-mode-hook . flycheck-rust-setup)
+    (rust-mode-hook . lsp)
+    (rust-mode-hook . flycheck-mode)
+    (rust-mode-hook . cargo-minor-mode)
+    (rust-mode-hook . yas-minor-mode))
 
   (leaf c/c++
     :config
@@ -1802,8 +1806,8 @@ set pagesize 1000
     :hook
     (emacs-startup-hook . global-company-mode)
     :custom
-    `((company-idle-delay . 0.3)
-      (company-echo-delay . 0.3)
+    `((company-idle-delay . 0.5)
+      (company-echo-delay . 0.5)
       (company-minimum-prefix-length . 1) ;; 1文字入力で補完されるように
       (company-selection-wrap-around . t) ;; 候補の一番上でselect-previousしたら一番下に、一番下でselect-nextしたら一番上に行くように
       (company-tooltip-limit . 20)
@@ -1900,6 +1904,37 @@ set pagesize 1000
             (Operator      . ,(all-the-icons-fileicon "typedoc"                  :height 0.65 :v-adjust 0.05))
             (TypeParameter . ,(all-the-icons-faicon   "hashtag"                  :height 0.65 :v-adjust 0.07  :face 'font-lock-const-face))
             (Template      . ,(all-the-icons-faicon   "code"                     :height 0.7  :v-adjust 0.02  :face 'font-lock-variable-name-face))))))
+
+(leaf lsp
+  :config
+  (leaf lsp-mode
+    :straight t
+    :init
+    (setq lsp-keymap-prefix "C-c l")
+    :hook
+    (php-mode-hook . lsp-deferred)
+    (sh-mode-hook . lsp)
+    (shell-script-mode-hook . lsp)
+    (lsp-mode-hook . lsp-enable-which-key-integration)
+    :commands lsp sp-defered lsp-enable-which-key-integration)
+
+  (leaf lsp-ui
+    :straight t
+    :commands lsp-ui-mode))
+
+(leaf which-key
+  :straight t
+  :config
+  (which-key-mode))
+
+(leaf vimrc-mode
+  :straight t)
+
+(leaf neotree
+  :straight t
+  :bind ("C-x f12" . neotree-toggle))
+
+(setq neo-theme (if (display-graphic-p) 'icons 'arrow))
 
 (leaf projectile-ripgrep
   :straight t)
@@ -2027,7 +2062,7 @@ set pagesize 1000
     ;; フレームタイトルの設定
     (setq frame-title-format "%b")
     ;; 背景の透明度
-    (set-frame-parameter nil 'alpha 95)
+    (set-frame-parameter nil 'alpha 85)
     ;; scroll bar を表示しない
     (when (fboundp 'scroll-bar-mode) (scroll-bar-mode 0))
     ;; 行番号のface
