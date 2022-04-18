@@ -1977,7 +1977,7 @@ set pagesize 1000
   :straight t
   :bind ("C-x j" . open-junk-file)
   :custom
-  (open-junk-file-format . "~/Downloads/junk/%Y-%m-%d-%H%M%S."))
+  (open-junk-file-format . "~/Dropbox (個人用)/junk/%Y-%m-%d-%H%M%S."))
 
 (leaf windows-ime
   :if (eq window-system 'w32)
