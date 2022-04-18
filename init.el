@@ -297,7 +297,7 @@
                   (setq cand (funcall orig cand prefix suffix index _start))
                   (concat
                    (if (= vertico--index index)
-                       (propertize "🡆 " 'face 'vertico-current) ;; "» "
+                       (propertize " " 'face 'vertico-current) ;; "» "
                      "   ")
                    cand)))
     :config
