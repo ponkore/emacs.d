@@ -358,6 +358,7 @@
 
   (leaf embark
     :straight t
+    :disabled t
     :after consult
     :config
     (leaf embark-consult
@@ -678,7 +679,7 @@ Providing ARG-OVERRIDES will modify the creation of the icon."
     ;; バージョン管理システム
     ;; diredから適切なバージョン管理システムの*-statusを起動
     (defun find-path-in-parents (directory base-names)
-      (or (find-if 'file-exists-p
+      (or (cl-find-if 'file-exists-p
                    (mapcar (lambda (base-name) (concat directory base-name)) base-names))
           (if (string= directory "/")
               nil
@@ -1094,6 +1095,7 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
       (clojure-mode-hook . yas-minor-mode)
       (clojure-mode-hook . smartparens-strict-mode)
       (clojure-mode-hook . flycheck-mode)
+      (clojure-mode-hook . cljstyle-format-on-save-mode)
       :config
       (define-clojure-indent
         (defroutes 'defun)
@@ -1117,8 +1119,14 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
         (fact 'defun)
         (do-transaction 'defun))
       (eldoc-mode +1)
-      (leaf flycheck-clj-kondo
-        :straight t))
+      ;; (cljstyle-format-on-save-mode t)
+      )
+
+    (leaf flycheck-clj-kondo
+      :straight t)
+
+    (leaf cljstyle-format
+      :ensure t)
 
     (leaf cider
       :straight t
@@ -1130,8 +1138,10 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
       (cider-show-error-buffer . t)
       (cider-auto-select-error-buffer . t)
       (cider-repl-result-prefix . ";; => ")
-      (nrepl-sync-request-timeout . 40)
-      (nrepl-hide-special-buffers . t))
+      ;; (nrepl-sync-request-timeout . 40)
+      (nrepl-hide-special-buffers . t)
+      :config
+      (add-to-list 'completion-category-defaults '(cider (styles basic))))
 
     (leaf cider-lein-command-on-windows
       :if (eq system-type 'windows-nt)
@@ -1371,6 +1381,15 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
         ;; EmacsFrameClass   => Emacs Frame Class
         ;; NSGraphicsContext => NS Graphics Context
         (subword-mode 1))))
+
+  (leaf swift-mode
+    :straight t
+    :hook (swift-mode-hook . (lambda () (lsp))))
+
+  (leaf lsp-source-kit
+    :straight t
+    :config
+    (setq lsp-sourcekit-executable "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/sourcekit-lsp"))
 
   (leaf csharp-mode
     :straight t
