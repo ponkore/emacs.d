@@ -294,8 +294,8 @@
    ("C-v" . vertico-scroll-up))
   :advice
   (:around vertico--format-candidate
-           (lambda (orig cand prefix suffix index _start)
-             (setq cand (funcall orig cand prefix suffix index _start))
+           (lambda (orig cand prefix suffix index start)
+             (setq cand (funcall orig cand prefix suffix index start))
              (concat
               (if (= vertico--index index)
                   (propertize " " 'face 'vertico-current) ;; "» "
@@ -730,7 +730,7 @@ _R_ename    ch_M_od        _t_oggle       _e_dit    _[_ hide detail     _._toggg
   :if (eq system-type 'windows-nt)
   :hook
   ;; svn log の出力は cp932
-  (vc-svn-log-view-mode-hook . (lambda () (set-buffer-process-coding-system 'cp932 'cp932)))
+  (vc-svn-log-view-mode-hook . (lambda () (set-process-coding-system 'cp932 'cp932)))
   :config
   ;; Windows 上の SVN で日本語ファイル名がうまく扱えない問題への対応
   ;; (一時的に default-process-coding-system を '(utf-8 . cp932) に変更する)
@@ -748,7 +748,7 @@ _R_ename    ch_M_od        _t_oggle       _e_dit    _[_ hide detail     _._toggg
                        ;; シェルモードの入出力文字コード(cp932 -> utf-8)
                        ;; (set-buffer-process-coding-system 'utf-8-dos 'utf-8-unix)
                        ;; (set-buffer-file-coding-system    'utf-8-unix)
-                       (set-buffer-process-coding-system 'cp932 'cp932)
+                       (set-process-coding-system 'cp932 'cp932)
                        (set-buffer-file-coding-system    'cp932)))
   :config
   (require 'shell)
@@ -1144,8 +1144,12 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
 (leaf pyvenv
   :straight t
   :config
-  ;; (pyvenv-activate my:virtualenv-path)
-  nil)
+  (pyvenv-activate (expand-file-name "~/.emacs.d/elpy/rpc-venv")))
+
+(leaf py-isort
+  :straight t
+  :hook
+  (before-save-hook . py-isort-before-save))
 
 (leaf python
   :mode ("\\.py$" . python-mode)
@@ -1153,35 +1157,22 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
   (python-mode-hook . my:python-mode-hook-0)
   :preface
   (defun my:python-mode-hook-0 ()
-    (setq-local indent-tabs-mode nil)
-    (flycheck-mode +1)))
-
-;;     (leaf company-jedi
-;; ;; http://nobunaga.hatenablog.jp/entry/2017/09/24/221004
-;; ;; https://qiita.com/ignorant/items/50f8eb2852d0f0214659
-;; ;;
-;; ;; M-x jedi:install-server
-;;       :straight t
-;;       :after company
-;;       :custom
-;;       (jedi:complete-on-dot . t)
-;;       :hook (python-mode-hook . (lambda () (add-to-list 'company-backends 'company-jedi))))
-
-(leaf jedi
-  :straight t)
+    (setq-local indent-tabs-mode nil)))
 
 (leaf elpy
   ;; https://elpy.readthedocs.io/en/latest/index.html
   :straight t
-  :after python-mode
-  :config
+  :init
   (elpy-enable)
-  (setenv "WORKON_HOME" "~/.pyenv/pyenv-win/versions/") ;; windows
-  (setq elpy-rpc-virtualenv-path 'default)
-  (setq elpy-rpc-backend "jedi")
-  (pyvenv-workon (expand-file-name "~/.emacs.d/elpy/rpc-venv"))
-  ;; (setq python-shell-interpreter "~/.pyenv/shims/python3")
-  )
+  :bind (elpy-mode-map
+         ("C-c C-r f" . elpy-format-code))
+  :config
+  (remove-hook 'elpy-modules 'elpy-module-highlight-indentation) ;; インデントハイライトの無効化
+  (remove-hook 'elpy-modules 'elpy-module-flymake) ;; flymakeの無効化
+  :custom
+  (elpy-rpc-python-command . "python3")
+  (flycheck-python-flake8-executable . "flake8")
+  :hook (elpy-mode-hook . flycheck-mode))
 
 (leaf php-mode
   :mode ("\\.\\(cgi\\|phpm\\|inc\\)\\'" . php-mode)
@@ -1326,12 +1317,6 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
     (interactive)
     (insert ";")
     (newline-and-indent))
-  ;; (setq ac-sources '(ac-source-css-property
-  ;;                    ac-source-css-property-names
-  ;;                    ac-source-yasnippet
-  ;;                    ;; ac-source-words-in-same-mode-buffers
-  ;;                    ac-source-words-in-all-buffer
-  ;;                    ac-source-dictionary))
   (yas-minor-mode))
 
 ;; (leaf racer
@@ -1592,7 +1577,9 @@ set pagesize 1000
 ;;
 (leaf yasnippet
   :straight t
-  :after diminish
+  :diminish t
+  :custom ((yas-indent-line . 'fixed)
+           (yas-global-mode . t))
   :bind (:yas-minor-mode-map
          ("TAB" . nil)
          ("<tab>" . nil)
@@ -1600,11 +1587,24 @@ set pagesize 1000
          ("C-x i i" . yas-insert-snippet)
          ("C-x i n" . yas-new-snippet)
          ("C-x i v" . yas-visit-snippet-file)
-         ("C-x i l" . yas-describe-tables))
-  :commands yas-expand yas-global-mode yas-insert-snippet yas-visit-snippet-file
-  :hook (emacs-startup-hook . yas-global-mode)
+         ("C-x i l" . yas-describe-tables)
+         ("C-x i g" . yas-reload-all))
   :config
-  (diminish 'yas-minor-mode))
+  (leaf yasnippet-snippets
+    :straight t)
+  (leaf yatemplate
+    :straight t
+    :config (yatemplatefill-alist))
+  (defvar company-mode/enable-yas t
+    "Enable yasnippet for all backends.")
+  (defun company-mode/backend-with-yas (backend)
+    (if (or (not company-mode/enable-yas) (and (listp backend) (member 'company-yasnippet backend)))
+        backend
+      (append (if (consp backend) backend (list backend))
+              '(:with company-yasnippet))))
+  (defun set-yas-as-company-backend ()
+    (setq company-backends (mapcar #'company-mode/backend-with-yas company-backends)))
+  :hook (company-mode-hook . set-yas-as-company-backend))
 
 (leaf symbol-overlay
   :straight t
@@ -1622,17 +1622,8 @@ set pagesize 1000
 (leaf smartparens
   :straight t
   :diminish t
-  :commands smartparens-global-mode sp-local-pairs
-  :hook (emacs-startup-hook . smartparens-global-mode)
-  :config
-  (sp-local-pair 'emacs-lisp-mode "'" nil :actions nil)
-  (sp-local-pair 'emacs-lisp-mode "`" nil :actions nil)
-  (sp-local-pair 'lisp-mode "'" nil :actions nil)
-  (sp-local-pair 'lisp-mode "`" nil :actions nil)
-  (sp-local-pair 'clojure-mode "'" nil :actions nil)
-  (sp-local-pair 'clojure-mode "`" nil :actions nil)
-  (sp-local-pair 'cider-repl-mode "'" nil :actions nil)
-  (sp-local-pair 'cider-repl-mode "`" nil :actions nil))
+  :require smartparens-config
+  :hook (emacs-startup-hook . smartparens-global-strict-mode))
 
 (leaf expand-region
   :straight t
@@ -1641,16 +1632,7 @@ set pagesize 1000
 
 (leaf rainbow-delimiters
   :straight t
-  :hook (prog-mode-hook . rainbow-delimiters-mode)
-  :config
-  (require 'cl-lib)
-
-  (require 'color)
-  ;;(global-rainbow-delimiters-mode)
-  (cl-loop for index from 1 to rainbow-delimiters-max-face-count
-           do
-           (let ((face (intern (format "rainbow-delimiters-depth-%d-face" index))))
-             (cl-callf color-saturate-name (face-foreground face) 30))))
+  :hook (prog-mode-hook . rainbow-delimiters-mode))
 
 (leaf flycheck-pos-tip
   :straight t)
@@ -1658,10 +1640,14 @@ set pagesize 1000
 (leaf flycheck
   :straight t
   :commands flycheck-mode flycheck-add-mode
-  :hook (flycheck-mode-hook . flycheck-pos-tip-mode)
+  :hook ((flycheck-mode-hook . flycheck-pos-tip-mode)
+         (prog-mode-hook . flycheck-mode))
   :custom
   (flycheck-disabled-checkers . '(javascript-jshint javascript-jscs))
   (flycheck-display-errors-function . #'flycheck-pos-tip-error-messages)
+  :config (leaf flycheck-inline
+            :straight t
+            :hook (flycheck-mode-hook . flycheck-inline-mode))
   :hydra
   (hydra-flycheck nil
                   "
@@ -1692,7 +1678,9 @@ set pagesize 1000
     (whitespace-style . whitespace-style-with-tab)
     (whitespace-space-regexp . "\\(\x3000+\\)")
     (whitespace-display-mappings . '((space-mark ?\x3000 [?\□])
-                                     (tab-mark   ?\t   [?\xBB ?\t]))))
+                                     (tab-mark   ?\t   [?\xBB ?\t])))
+    (whitespace-global-modes . '(emacs-lisp-mode shell-script-mode sh-mode python-mode org-mode))
+    (global-whitespace-mode . t))
   :config
   ;;
   (defun toggle-tab-mark ()
@@ -1700,10 +1688,10 @@ set pagesize 1000
     (if (equal whitespace-style whitespace-style-with-tab)
         (setq whitespace-style whitespace-style-without-tab)
       (setq whitespace-style whitespace-style-with-tab)))
-  (global-whitespace-mode t)
   (set-face-attribute 'whitespace-trailing nil :foreground "DeepPink" :underline t)
   (set-face-attribute 'whitespace-tab nil :foreground "LightSkyBlue" :underline t)
-  (set-face-attribute 'whitespace-space nil :foreground "GreenYellow" :weight 'bold))
+  (set-face-attribute 'whitespace-space nil :foreground "GreenYellow" :weight 'bold)
+  (set-face-attribute 'whitespace-empty nil :background "Black"))
 
 (leaf fill-column-indicator
   :straight t
@@ -1747,7 +1735,7 @@ set pagesize 1000
 (leaf highlight-indent-guides
   :straight t
   :hook
-  (yaml-mode-hook . highlight-indent-guides-mode)
+  ((prog-mode-hook yaml-mode-hook) . highlight-indent-guides-mode)
   :custom
   (highlight-indent-guides-auto-enabled . t)
   (highlight-indent-guides-responsive   . t)
@@ -1813,8 +1801,6 @@ set pagesize 1000
    ("C-p" . company-select-previous))
   (:emacs-lisp-mode-map
    ("C-M-i" . company-complete)) ;; 各種メジャーモードでも C-M-iで company-modeの補完を使う
-  :hook
-  (emacs-startup-hook . global-company-mode)
   :custom
   `((company-idle-delay . 0.5)
     (company-echo-delay . 0.5)
@@ -1822,7 +1808,9 @@ set pagesize 1000
     (company-selection-wrap-around . t) ;; 候補の一番上でselect-previousしたら一番下に、一番下でselect-nextしたら一番上に行くように
     (company-tooltip-limit . 20)
     (company-tooltip-align-annotations . t)
+    (company-transformers . '(company-sort-by-occurrence))
     (company-begin-commands . '(self-insert-command))
+    (global-company-mode . t)
     ;; (company-box-background . '((t (:inherit company-tooltip :background "midnight blue"))))
     ;; (company-preview . '((t (:foreground "darkgray" :underline t))))
     ;; (company-preview-common . '((t (:inherit company-preview))))
@@ -2199,6 +2187,7 @@ set pagesize 1000
   ("C-x C-;" . my:insert-datetime)
   ("C-x C-M-r" . revert-buffer)
   ([M-kanji] . ignore)  ;; M-kanji is undefined に対する対策
+  ("M-`" . ignore)
   :init
   (defun my:match-paren (arg)
     "Go to the matching parenthesis if on parenthesis otherwise insert %."
