@@ -1174,6 +1174,12 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
   (flycheck-python-flake8-executable . "flake8")
   :hook (elpy-mode-hook . flycheck-mode))
 
+(leaf blacken
+  :straight t
+  :custom ((blacken-line-length . 100)
+           ;; (blacken-skip-string-normalization . t)
+           ))
+
 (leaf php-mode
   :mode ("\\.\\(cgi\\|phpm\\|inc\\)\\'" . php-mode)
   :straight t
