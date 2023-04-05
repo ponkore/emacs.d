@@ -2579,3 +2579,6 @@ thumbnail = \"/img/%Y-%m/%d/{{shortname}}.png\"
                           '("--")
                           (list (shell-quote-argument regexp) ".")) " ")
        'ripgrep-search-mode))))
+
+(provide 'init)
+;;; init.el ends here
