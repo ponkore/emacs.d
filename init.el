@@ -1170,7 +1170,7 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
   (remove-hook 'elpy-modules 'elpy-module-highlight-indentation) ;; インデントハイライトの無効化
   (remove-hook 'elpy-modules 'elpy-module-flymake) ;; flymakeの無効化
   :custom
-  (elpy-rpc-python-command . "python3")
+  (elpy-rpc-python-command . "python")
   (flycheck-python-flake8-executable . "flake8")
   :hook (elpy-mode-hook . flycheck-mode))
 
