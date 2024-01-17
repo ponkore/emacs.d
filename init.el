@@ -229,6 +229,10 @@
       ;; org-bullets で使うフォントだけ all-the-icons- の font を割り当てる
       (set-fontset-font nil '(#xf219 . #xf219) (font-spec :family (all-the-icons-faicon-family)) nil 'append)
       (set-fontset-font nil '(#xe3d0 . #xe3d6) (font-spec :family (all-the-icons-material-family)) nil 'append)
+      (when (eq window-system 'ns)
+        (set-fontset-font t '(#x1f300 . #x1f9ff) "Apple Color Emoji" nil 'append)
+        (set-fontset-font t '(#x1fa70 . #x1fbff) "Apple Color Emoji" nil 'append)
+        (set-fontset-font t '(#x1f900 . #x1f9e0) "Apple Color Emoji" nil 'append))
       (when (eq window-system 'w32)
         (set-fontset-font t '(#x1f300 . #x1f9ff) "Segoe UI Emoji" nil 'append)
         (set-fontset-font t '(#x1fa70 . #x1fbff) "Segoe UI Emoji" nil 'append)
@@ -237,9 +241,9 @@
 
   (defun setup-font ()
     (interactive)
-    (when (eq system-type 'darwin)
-      (emacs-font-setting "Ricty" 16))
-    (when (eq system-type 'windows-nt)
+    (when (eq window-system 'ns)
+      (emacs-font-setting "HackGen" 16)) ;; previous: "Ricty"
+    (when (eq window-system 'w32)
       (emacs-font-setting "Ricty" 12))) ;; previous: ("HackGenNerd" 11)
   (setup-font))
 
@@ -1185,8 +1189,6 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
   :straight t
   :after lsp-mode
   :custom
-  (ac-php-php-executable . "c:/Apps/php-7.4.22-Win32-vc15-x64/php.exe")
-  (flycheck-php-phpcs-executable . "phpcs")
   (ac-php-debug-flag . nil)
   (php-manual-url . 'ja)
   (php-mode-coding-style . 'psr2)
@@ -1195,8 +1197,8 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
                      (c-set-style "bsd")
                      (company-mode t)
                      (subword-mode 1)
+                     (setq indent-tabs-mode t)
                      (setq tab-width 4)
-                     (setq indent-tabs-mode nil)
                      (setq c-basic-offset 4)
                      (setq-local page-delimiter "\\_<\\(class\\|function\\|namespace\\)\\_>.+$")
                      ;; (ac-php-core-eldoc-setup)
@@ -1205,7 +1207,7 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
                      ;; (require 'flycheck-phpstan)
                      (add-to-list 'flycheck-disabled-checkers 'php-phpmd)
                      ;; (add-to-list 'flycheck-disabled-checkers 'php-phpcs)
-                     (setq flycheck-phpcs-standard "PSR2")
+                     ;; (setq flycheck-phpcs-standard "PSR2")
                      (flycheck-mode t)))
   (php-mode-hook . lsp-deferred)
   :config
@@ -1238,7 +1240,12 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
 (leaf prettier-js
   :straight t
   :diminish prettier-js-mode
-  :commands prettier-js-mode)
+  :commands prettier-js-mode
+  :custom
+  (prettier-js-args . ("--print-width" "120"
+                       "--single-quote" "true"
+                       "--trailing-comma" "none"
+                       "--tab-width" "2")))
 
 (leaf tide
   :straight t
@@ -1257,7 +1264,8 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
   (typescript-mode . setup-tide-mode)
   (typescript-mode . tide-hl-identifier-mode)
   ;; formats the buffer before saving
-  (before-save-hook . tide-format-before-save)
+  ;(before-save-hook . tide-format-before-save)
+  (before-save-hook . prettier-js)
   :config
   (defun setup-tide-mode ()
     (interactive)
@@ -1286,7 +1294,10 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
   :hook
   (web-mode-hook . (lambda ()
                      (when (string-equal "tsx" (file-name-extension buffer-file-name))
-                       (setup-tide-mode))))
+                       (setup-tide-mode))
+                     (setq tab-width 4)
+                     (indent-tabs-mode)
+                     (whitespace-mode)))
   :config
   ;; enable typescript-tslint checker
   (flycheck-add-mode 'typescript-tslint 'web-mode)
@@ -1296,7 +1307,13 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
   :straight t
   :mode
   ("\\.js"   . js2-mode)
-  ("\\.json" . javascript-mode))
+  ("\\.json" . javascript-mode)
+  ("\\.cjs"   . js2-mode)
+  :hook
+  (js2-mode-hook . (lambda ()
+                     (setq tab-width 4)
+                     (indent-tabs-mode)
+                     (whitespace-mode))))
 
 (leaf scss-mode
   :straight t
@@ -1685,7 +1702,7 @@ set pagesize 1000
     (whitespace-space-regexp . "\\(\x3000+\\)")
     (whitespace-display-mappings . '((space-mark ?\x3000 [?\□])
                                      (tab-mark   ?\t   [?\xBB ?\t])))
-    (whitespace-global-modes . '(emacs-lisp-mode shell-script-mode sh-mode python-mode org-mode))
+    (whitespace-global-modes . '(emacs-lisp-mode shell-script-mode sh-mode python-mode org-mode php-mode))
     (global-whitespace-mode . t))
   :config
   ;;
@@ -1694,8 +1711,8 @@ set pagesize 1000
     (if (equal whitespace-style whitespace-style-with-tab)
         (setq whitespace-style whitespace-style-without-tab)
       (setq whitespace-style whitespace-style-with-tab)))
-  (set-face-attribute 'whitespace-trailing nil :foreground "DeepPink" :underline t)
-  (set-face-attribute 'whitespace-tab nil :foreground "LightSkyBlue" :underline t)
+  (set-face-attribute 'whitespace-trailing nil :foreground "DeepPink" :underline nil)
+  (set-face-attribute 'whitespace-tab nil :foreground "LightSkyBlue" :underline nil)
   (set-face-attribute 'whitespace-space nil :foreground "GreenYellow" :weight 'bold)
   (set-face-attribute 'whitespace-empty nil :background "Black"))
 
@@ -1979,7 +1996,7 @@ set pagesize 1000
   :straight t
   :bind ("C-x j" . open-junk-file)
   :custom
-  (open-junk-file-format . "~/Dropbox (個人用)/junk/%Y-%m-%d-%H%M%S."))
+  (open-junk-file-format . "~/Library/CloudStorage/Dropbox-個人用/junk/%Y-%m-%d-%H%M%S."))
 
 (leaf windows-ime
   :if (eq window-system 'w32)
@@ -2239,7 +2256,8 @@ set pagesize 1000
   ;; 画面スクロール時の重複行数
   (next-screen-context-lines . 1)
   ;; バッファ中の行番号表示
-  (global-linum-mode . t)
+  ;; (global-linum-mode . t)
+  (global-display-line-numbers-mode . 1)
   ;; 下線を引く
   (global-hl-line-mode . t)
   ;; 行番号のフォーマット
