@@ -21,4 +21,7 @@
 /site-lisp/nerd-fonts.el
 /.lsp-session-*
 /projects
-kkcrc
+/kkcrc
+/org-persist
+/tramp
+/my-config/init.el
