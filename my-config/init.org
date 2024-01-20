@@ -833,6 +833,7 @@
     ("C-x C-v" . find-file-other-window)
     ("C-x n" . myblog-hugo/create-draft)
     ;; ("C-x l" . goto-line)
+    ("C-x =" . my:count-lines-buffer)
     ("C-x g" . grep)
     ("C-x t" . toggle-truncate-lines)
     ("ESC C-g" . keyboard-quit)
@@ -845,6 +846,9 @@
     ([M-kanji] . ignore)  ;; M-kanji is undefined に対する対策
     ("M-`" . ignore)
     :init
+    (defun my:count-lines-buffer ()
+      (interactive)
+      (message (format "lines: %d" (count-lines (point-min) (point-max)))))
     (defun my:match-paren (arg)
       "Go to the matching parenthesis if on parenthesis otherwise insert %."
       (interactive "p")
