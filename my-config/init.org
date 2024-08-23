@@ -2417,6 +2417,7 @@
 #+begin_src emacs-lisp
   (leaf exec-path-from-shell
     :straight t
+    :if (eq system-type 'darwin)
     :config
     (exec-path-from-shell-initialize))
 #+end_src
