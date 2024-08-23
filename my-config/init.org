@@ -309,7 +309,7 @@
       (when (eq window-system 'ns)
         (emacs-font-setting "HackGen" 16)) ;; previous: "Ricty"
       (when (eq window-system 'w32)
-        (emacs-font-setting "Ricty" 12))) ;; previous: ("HackGenNerd" 11)
+        (emacs-font-setting "HackGen" 12))) ;; previous: ("HackGenNerd" 11)
     (setup-font))
 #+end_src
 
