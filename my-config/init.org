@@ -2434,6 +2434,7 @@
                          (set-process-coding-system 'cp932 'cp932)
                          (set-buffer-file-coding-system    'cp932)))
     :config
+    (setq exec-path (append '("C:/Users/masao/scoop/shims") exec-path))
     (require 'shell)
     (setq explicit-shell-file-name "bash.exe")
     (setq shell-command-switch "-c")
