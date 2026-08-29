@@ -13,7 +13,9 @@
 (leaf magit
   :straight t
   :hook (magit-mode-hook . my:magit-setup-diff)
-  :commands magit-status-internal git-commit-mode git-commit-mode-hook
+  ;; magit-status-internal は magit 4.x で削除済み。
+  ;; git-commit-mode-hook はコマンドではなく変数なので :commands から外す。
+  :commands magit-status-setup-buffer git-commit-mode
   :advice (:filter-args magit-expand-git-file-name magit-expand-git-file-name--msys)
   :config
   (defun magit-expand-git-file-name--msys (args)

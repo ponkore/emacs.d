@@ -60,7 +60,9 @@
             ((string-match-p "\\.svn$" path)
              (svn-status (file-name-directory path)))
             ((string-match-p "\\.git$" path)
-             (magit-status-internal (file-name-directory path))))))
+             ;; magit-status-internal は magit 4.x で削除された。
+             ;; 現在の入口は magit-status-setup-buffer。
+             (magit-status-setup-buffer (file-name-directory path))))))
   ;;
   :hydra
   (hydra-dired (:hint nil :color pink)
