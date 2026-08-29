@@ -29,7 +29,7 @@
   (unless (file-exists-p bootstrap-file)
     (with-current-buffer
         (url-retrieve-synchronously
-         "https://raw.githubusercontent.com/raxod502/straight.el/develop/install.el"
+         "https://raw.githubusercontent.com/radian-software/straight.el/develop/install.el"
          'silent 'inhibit-cookies)
       (goto-char (point-max))
       (eval-print-last-sexp)))
@@ -45,30 +45,32 @@
 ;;; [3] leaf
 
 (eval-and-compile
+  ;; package.el のアーカイブ定義。
+  ;; marmalade は 2017 年に停止、orgmode.org/elpa も廃止済みで、
+  ;; 残しておくと package-refresh-contents が失敗/遅延するため削除した。
+  ;; パッケージ導入自体は straight に一本化しているが、elpa/ 配下に残っている
+  ;; 既存パッケージ (tr-ime / w32-ime など) は Emacs 27 以降の
+  ;; package-activate-all が init.el より前に有効化するので、その分は残す。
   (customize-set-variable
-   'package-archives '(("gnu"   . "https://elpa.gnu.org/packages/")
-                       ("melpa" . "https://melpa.org/packages/")
-                       ("marmalade" . "https://marmalade-repo.org/packages/")
-                       ("org"   . "https://orgmode.org/elpa/")))
-  (package-initialize)
-  (unless (package-installed-p 'leaf)
-    (package-refresh-contents))
+   'package-archives '(("gnu"    . "https://elpa.gnu.org/packages/")
+                       ("nongnu" . "https://elpa.nongnu.org/nongnu/")
+                       ("melpa"  . "https://melpa.org/packages/")))
+  ;; (package-initialize) は Emacs 27 以降 package-activate-all が
+  ;; init.el 読み込み前に実行するため不要。
+  ;; (package-refresh-contents) も leaf を straight で入れるので不要。
 
-  (straight-use-package 'leaf)
-
-  (leaf leaf-keywords
-    :ensure t
-    :init
-    ;; optional packages if you want to use :hydra, :el-get, :blackout,,,
-    (leaf hydra :ensure t)
-    (leaf el-get :ensure t)
-    (leaf blackout :ensure t)
-    (leaf leaf-tree :ensure t)
-    (leaf leaf-convert :ensure t)
-
-    :config
-    ;; initialize leaf-keywords.el
-    (leaf-keywords-init)))
+  ;; leaf 本体と、:straight 等のキーワードを提供する leaf-keywords を導入する。
+  ;; leaf-keywords-init を呼ぶまでは :straight キーワードが使えないため、
+  ;; ここは straight-use-package を直接呼ぶ。
+  ;; 以前は leaf 本体だけ straight、leaf-keywords と hydra 等は :ensure t
+  ;; (package.el) という混在で、elpa/ 側に 2020 年の leaf 4.2.7 と
+  ;; straight 側の leaf 4.5.5 が同居する版ズレ状態だった。
+  (dolist (pkg '(leaf leaf-keywords
+                 ;; :hydra :el-get :blackout などを使うためのオプション
+                 hydra el-get blackout leaf-tree leaf-convert))
+    (straight-use-package pkg))
+  (require 'leaf-keywords)
+  (leaf-keywords-init))
 
 ;;; [3] site-lisp 以下を読み込む
 
@@ -113,7 +115,7 @@
 
   ;; 機種依存文字
   (leaf cp5022x
-    :ensure t
+    ;; site-lisp/cp5022x.el を使う (elpa 版は使われていなかった)
     :require t
     :config
     ;; charset と coding-system の優先度設定
@@ -1038,7 +1040,6 @@ Providing ARG-OVERRIDES will modify the creation of the icon."
 
 ;; 同一バッファ名にディレクトリ付与
 (leaf uniquify
-  :straight t
   :custom
   (uniquify-buffer-name-style . 'post-forward-angle-brackets)
   (uniquify-ignore-buffers-re . "*[^*]+*"))
@@ -1504,7 +1505,7 @@ _R_ename    ch_M_od        _t_oggle       _e_dit    _[_ hide detail     _._toggg
   :hook (org-mode-hook . org-bullets-mode))
 
 (leaf org-download
-  :ensure t
+  :straight t
   :custom
   (org-download-image-dir . "./img"))
 
@@ -1581,7 +1582,6 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
 ;;; [3] ReST
 
 (leaf rst
-  :straight t
   :mode ("\\.\\(rst|rest\\)$" . rst-mode)
   :bind
   (:rst-mode-map
@@ -1676,7 +1676,7 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
   :straight t)
 
 (leaf cljstyle-format
-  :ensure t)
+  :straight t)
 
 (leaf cider
   :straight t
@@ -1978,7 +1978,6 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
 ;;; [3] C++
 
 (leaf cc-mode
-  :straight t
   :hook (c-mode-common-hook . my:cc-mode-setup)
   :config
   (defun my:cc-mode-setup ()
@@ -2001,7 +2000,8 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
 ;;; [3] C#
 
 (leaf csharp-mode
-  :straight t
+  ;; Emacs 29 以降 csharp-mode / csharp-ts-mode は組み込み。
+  ;; 外部パッケージ (v1.1.1) が組み込みを上書きしていたため :straight t を外す。
   :hook (csharp-mode-hook . my:csharp-mode-setup)
   :config
   (defun my:csharp-mode-setup ()
@@ -2019,7 +2019,10 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
     (c-set-offset 'arglist-intro '+)
     (c-set-offset 'arglist-close 0)
     ;; see http://qiita.com/masnagam/items/e3313dc9a66bd7fd76fa
-    (setq csharp-want-imenu nil)))
+    ;; csharp-want-imenu は旧・外部 csharp-mode (v1.1.1) の変数で
+    ;; 組み込みの csharp-mode には存在しないため無効化
+    ;; (setq csharp-want-imenu nil)
+    ))
 
 ;;; [3] SQL
 
@@ -2107,7 +2110,6 @@ set pagesize 1000
 
 (leaf bat-mode
   :if (eq system-type 'windows-nt)
-  :straight t
   :config
   (setq bat-font-lock-keywords
         (eval-when-compile
@@ -2441,7 +2443,7 @@ set pagesize 1000
 ;;; [3] Calendar
 
 (leaf calendar
-  :ensure t
+  ;; 組み込みライブラリなのでインストール指定は不要
   :custom
   (mark-holidays-in-calendar . t) ; 祝日をカレンダーに表示
   (calendar-month-name-array . ["01" "02" "03" "04" "05" "06" "07" "08" "09" "10" "11" "12" ])
@@ -2473,7 +2475,7 @@ set pagesize 1000
 (leaf dashboard
   ;; :when (version<= "25.1" emacs-version)
   :when nil
-  :ensure t
+  :straight t
   :custom ((dashboard-items . '((recents . 15)
                                 (projects . 5)
                                 (bookmarks . 5)

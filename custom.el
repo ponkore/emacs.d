@@ -78,7 +78,6 @@
  '(completion-styles '(orderless))
  '(css-indent-offset 2 t)
  '(cua-enable-cua-keys nil)
- '(custom-enabled-themes '(sanityinc-tomorrow-blue))
  '(custom-safe-themes
    '("82d2cac368ccdec2fcc7573f24c3f79654b78bf133096f9b40c20d97ec1d8016" "4639288d273cbd3dc880992e6032f9c817f17c4a91f00f3872009a099f5b3f84" default))
  '(dashboard-items '((recents . 15) (projects . 5) (bookmarks . 5)))
@@ -140,11 +139,6 @@
  '(org-startup-truncated t t)
  '(org-todo-keywords
    '((sequence "TODO(t)" "WAITING(w)" "|" "DONE(d)" "CANCELED(c)")) t)
- '(package-archives
-   '(("gnu" . "https://elpa.gnu.org/packages/")
-     ("melpa" . "https://melpa.org/packages/")
-     ("marmalade" . "https://marmalade-repo.org/packages/")
-     ("org" . "https://orgmode.org/elpa/")))
  '(package-selected-packages '(init-loader leaf leaf-keywords pastels-on-dark-theme))
  '(php-manual-url 'ja)
  '(php-mode-coding-style 'psr2)
