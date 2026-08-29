@@ -231,8 +231,12 @@
   ;; IME OFF時の初期カーソルカラー
   (set-cursor-color "white")
   ;; IME ON/OFF時のカーソルカラー
-  (add-hook 'input-method-activate-hook (lambda() (set-cursor-color "green")))
-  (add-hook 'input-method-inactivate-hook (lambda() (set-cursor-color "white")))
+  (add-hook 'input-method-activate-hook (lambda () (set-cursor-color "green")))
+  ;; input-method-inactivate-hook は Emacs 24.3 で input-method-deactivate-hook に
+  ;; 改名され、Emacs 31 では別名ごと削除されている。そのため add-hook が
+  ;; 誰も実行しない変数を作るだけになり、IME を OFF にしてもカーソルが
+  ;; 緑のまま白に戻らなかった。
+  (add-hook 'input-method-deactivate-hook (lambda () (set-cursor-color "white")))
 
   ;; バッファ切り替え時にIME状態を引き継ぐ
   (setq w32-ime-buffer-switch-p nil)
@@ -312,8 +316,16 @@
       (set-fontset-font nil '(#x2200 . #x22FF) ascii-fontspec)
       ;; Greek
       (set-fontset-font nil '(#x0370 . #x03FF) ascii-fontspec)
-      ;; Some Icons
-      (set-fontset-font nil '(#xE0A0 . #xEEE0) ascii-fontspec)
+      ;; Some Icons (Nerd Font / Powerline の私用領域)
+      ;; この範囲を ascii-fontspec (= HackGen) に割り当てていたが、
+      ;; HackGen には Nerd グリフが無いため豆腐になっていた。
+      ;; (以前は HackGenNerd を全体に使っていたので問題が出ていなかった)
+      ;; 本文は HackGen のまま、この範囲だけ Nerd グリフを持つフォントに回す。
+      (let ((nerd (seq-find (lambda (f) (member f (font-family-list)))
+                            '("HackGenNerd" "HackGen35Nerd"
+                              "HackGen Console NF" "Symbols Nerd Font Mono"))))
+        (set-fontset-font nil '(#xE0A0 . #xEEE0)
+                          (font-spec :family (or nerd asciifont))))
       ;; all-the-icons-font (下記設定を入れると、いろんなアイコンがおかしくなってしまう)
       ;; (setq range '(#xe000 . #xf8ff))
       ;; (set-fontset-font nil range (font-spec :family (all-the-icons-alltheicon-family)) nil 'append)
