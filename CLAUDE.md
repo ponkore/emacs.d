@@ -136,6 +136,33 @@ leaf は `:hook` / `:bind` / `:mode` などの遅延キーワードがあると 
 パッケージに対する `:after` は拾えない点に注意。実際に GUI 起動して
 `(featurep 'FOO)` を確認するのが確実。
 
+## フォントとアイコン
+
+本文フォントは `HackGen`（Windows 12pt / macOS 16pt）。アイコンは `nerd-icons`。
+
+`nerd-icons` は **Nerd Fonts v3** のコードポイント割り当てを前提にしている。
+とくに Material Design アイコンは第 15 面 `U+F0001`〜`U+F1AF0` にあり、
+v2 世代のパッチ済みフォントはこの面をまるごと持っていない。
+このマシンにインストール済みのフォントを実測した結果：
+
+| フォント | 世代 | mdicon (U+F0001) | seti 上位 (U+E6AD) | codicon (U+EA60) |
+|---|---|---|---|---|
+| `HackGenNerd` / `HackGen35Nerd`（Console 版含む） | v2 | ✗ | ✗ | ✗ |
+| `HackGen Console NF` | v3 系 | ○ | ✗ | ○ |
+| `Symbols Nerd Font Mono` (`fonts/NFM.ttf`) | v3 | ○ | ○ | ○ |
+
+dired のディレクトリアイコンが `U+E6AD` なので、HackGen 系だけでは豆腐になる。
+`fonts/NFM.ttf` を入れてあり、これを使う。Windows へのユーザー単位インストールは
+`%LOCALAPPDATA%\Microsoft\Windows\Fonts` へのコピーと
+`HKCU\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts` へのレジストリ登録。
+
+`my:nerd-font-family`（`user-lisp/my-appearance.el`）が `font-get-glyphs` で
+実際のグリフ有無を見て選ぶので、**フォント名を決め打ちしないこと**。
+名前で決め打ちすると、v2 のフォントを掴んでアイコンが全滅する。
+
+`fonts/` の all-the-icons 用 6 フォントは company-box がまだ使っている。
+corfu へ移行したら削除してよい。
+
 ## プラットフォーム固有の注意事項
 
 - メインは **Windows 11**、パッケージ管理に **Scoop**（`USERPROFILE/scoop/shims` を `exec-path` に追加）

@@ -8,6 +8,41 @@
 ;;; フォント設定
 ;;; --------------------------------------------------
 
+;;; [3] Nerd Font の選択
+
+;; nerd-icons は Nerd Fonts v3 のコードポイント割り当てを前提にしている。
+;; とくに Material Design アイコン (mdicon) は第 15 面 U+F0001〜U+F1AF0 にあり、
+;; v2 世代のパッチ済みフォント (HackGenNerd / HackGen35Nerd など) はここを
+;; 持っていないため、名前だけで選ぶと dired などのアイコンが軒並み豆腐になる。
+;; そこで実際にグリフを持っているかを見て選ぶ。
+
+(defvar my:nerd-font-family--cache 'unset
+  "Nerd Font のファミリ名。未判定なら 'unset、見つからなければ nil。")
+
+(defun my:nerd-font-family ()
+  "Nerd Fonts v3 のグリフを実際に持っているフォントファミリを返す。"
+  (when (eq my:nerd-font-family--cache 'unset)
+    (setq my:nerd-font-family--cache
+          (and (display-graphic-p)
+               (seq-find
+                (lambda (family)
+                  (condition-case nil
+                      (let* ((entity (find-font (font-spec :family family)))
+                             (font (and entity (open-font entity))))
+                        (and font
+                             ;; mdicon (第 15 面) と sucicon の v3 拡張分で
+                             ;; v2/v3 を判別する
+                             (seq-every-p
+                              (lambda (c)
+                                (let ((glyphs (font-get-glyphs font 0 1 (vector c))))
+                                  (and (vectorp glyphs) (aref glyphs 0))))
+                              '(#xf0001 #xe6ad))))
+                    (error nil)))
+                '("Symbols Nerd Font Mono" "Symbols Nerd Font"
+                  "HackGen Console NF" "HackGen35 Console NF"
+                  "HackGenNerd" "HackGen35Nerd")))))
+  my:nerd-font-family--cache)
+
 ;;; [3] フォント設定
 
 (leaf *font-setting
@@ -53,20 +88,18 @@
       (set-fontset-font nil '(#x2200 . #x22FF) ascii-fontspec)
       ;; Greek
       (set-fontset-font nil '(#x0370 . #x03FF) ascii-fontspec)
-      ;; アイコン類 (Nerd Font / Powerline の私用領域)
-      ;; 本文は HackGen のまま、記号の範囲だけ Nerd グリフを持つフォントに回す。
-      ;; 以前はここを ascii-fontspec (= HackGen) に割り当てていて豆腐になっていた。
-      ;; nerd-icons もこのレンジのグリフを使うので、まとめて割り当てる。
-      (let ((nerd (seq-find (lambda (f) (member f (font-family-list)))
-                            '("HackGenNerd" "HackGen35Nerd" "HackGen Console NF"
-                              "Symbols Nerd Font Mono" "Symbols Nerd Font"))))
-        (set-fontset-font nil '(#xE0A0 . #xEEE0)
-                          (font-spec :family (or nerd asciifont)))
+      ;; アイコン類 (Nerd Font の私用領域)
+      ;; 本文は HackGen のまま、アイコンの範囲だけ Nerd グリフを持つ
+      ;; フォントに回す。以前はここを ascii-fontspec (= HackGen) に
+      ;; 割り当てていて豆腐になっていた。
+      (let ((nerd (my:nerd-font-family)))
         (when nerd
-          ;; Powerline / Devicons / Font Awesome / Material など
-          ;; (以前は all-the-icons の各フォントを個別に割り当てていた)
-          (set-fontset-font nil '(#xe000 . #xe00a) (font-spec :family nerd) nil 'append)
-          (set-fontset-font nil '(#xf000 . #xf8ff) (font-spec :family nerd) nil 'append)))
+          (let ((spec (font-spec :family nerd)))
+            ;; BMP の私用領域。Powerline / Font Awesome / Devicons /
+            ;; Codicons / Octicons / Seti などはすべてこの中にある。
+            (set-fontset-font nil '(#xe000 . #xf8ff) spec)
+            ;; Material Design アイコンは第 15 面 (Nerd Fonts v3)
+            (set-fontset-font nil '(#xf0000 . #xfffff) spec))))
       (when (eq window-system 'ns)
         (set-fontset-font t '(#x1f300 . #x1f9ff) "Apple Color Emoji" nil 'append)
         (set-fontset-font t '(#x1fa70 . #x1fbff) "Apple Color Emoji" nil 'append)
@@ -116,18 +149,12 @@
   ;; ぶら下がっているため、ここで必ずロードしておく。
   ;; そうしないと feature が読まれず、それらが一切有効にならない。
   :require t
-  :custom
-  ;; インストール済みの Nerd Font を使う。
-  ;; nerd-icons-install-fonts を実行すると Symbols Nerd Font Mono が入るが、
-  ;; HackGenNerd で足りるのでそちらを既定にする。
-  (nerd-icons-font-family . "HackGenNerd")
   :config
-  ;; 指定したフォントが無ければ他の候補を探す
-  (unless (member nerd-icons-font-family (font-family-list))
-    (when-let* ((f (seq-find (lambda (x) (member x (font-family-list)))
-                             '("HackGenNerd" "HackGen35Nerd" "HackGen Console NF"
-                               "Symbols Nerd Font Mono" "Symbols Nerd Font"))))
-      (setq nerd-icons-font-family f))))
+  ;; 使うフォントは my:nerd-font-family がグリフの有無を見て決める。
+  ;; HackGenNerd は Nerd Fonts v2 世代で mdicon (第 15 面) を持たないため
+  ;; 名前で決め打ちすると dired などのアイコンが豆腐になる。
+  (when-let* ((family (my:nerd-font-family)))
+    (setq nerd-icons-font-family family)))
 
 ;;; [4] nerd-icons-dired
 
