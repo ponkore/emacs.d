@@ -12,7 +12,7 @@
 
 (leaf *font-setting
   :if window-system
-  :after all-the-icons
+  :after nerd-icons
   :config
   (defun emacs-font-setting (font-name size)
     "Set emacs japanese fonts."
@@ -49,27 +49,20 @@
       (set-fontset-font nil '(#x2200 . #x22FF) ascii-fontspec)
       ;; Greek
       (set-fontset-font nil '(#x0370 . #x03FF) ascii-fontspec)
-      ;; Some Icons (Nerd Font / Powerline の私用領域)
-      ;; この範囲を ascii-fontspec (= HackGen) に割り当てていたが、
-      ;; HackGen には Nerd グリフが無いため豆腐になっていた。
-      ;; (以前は HackGenNerd を全体に使っていたので問題が出ていなかった)
-      ;; 本文は HackGen のまま、この範囲だけ Nerd グリフを持つフォントに回す。
+      ;; アイコン類 (Nerd Font / Powerline の私用領域)
+      ;; 本文は HackGen のまま、記号の範囲だけ Nerd グリフを持つフォントに回す。
+      ;; 以前はここを ascii-fontspec (= HackGen) に割り当てていて豆腐になっていた。
+      ;; nerd-icons もこのレンジのグリフを使うので、まとめて割り当てる。
       (let ((nerd (seq-find (lambda (f) (member f (font-family-list)))
-                            '("HackGenNerd" "HackGen35Nerd"
-                              "HackGen Console NF" "Symbols Nerd Font Mono"))))
+                            '("HackGenNerd" "HackGen35Nerd" "HackGen Console NF"
+                              "Symbols Nerd Font Mono" "Symbols Nerd Font"))))
         (set-fontset-font nil '(#xE0A0 . #xEEE0)
-                          (font-spec :family (or nerd asciifont))))
-      ;; all-the-icons-font (下記設定を入れると、いろんなアイコンがおかしくなってしまう)
-      ;; (setq range '(#xe000 . #xf8ff))
-      ;; (set-fontset-font nil range (font-spec :family (all-the-icons-alltheicon-family)) nil 'append)
-      ;; (set-fontset-font nil range (font-spec :family (all-the-icons-material-family)) nil 'append)
-      ;; (set-fontset-font nil range (font-spec :family (all-the-icons-fileicon-family)) nil 'append)
-      ;; (set-fontset-font nil range (font-spec :family (all-the-icons-faicon-family)) nil 'append)
-      ;; (set-fontset-font nil range (font-spec :family (all-the-icons-octicon-family)) nil 'append)
-      ;; (set-fontset-font nil range (font-spec :family (all-the-icons-wicon-family)) nil 'append)
-      ;; org-bullets で使うフォントだけ all-the-icons- の font を割り当てる
-      (set-fontset-font nil '(#xf219 . #xf219) (font-spec :family (all-the-icons-faicon-family)) nil 'append)
-      (set-fontset-font nil '(#xe3d0 . #xe3d6) (font-spec :family (all-the-icons-material-family)) nil 'append)
+                          (font-spec :family (or nerd asciifont)))
+        (when nerd
+          ;; Powerline / Devicons / Font Awesome / Material など
+          ;; (以前は all-the-icons の各フォントを個別に割り当てていた)
+          (set-fontset-font nil '(#xe000 . #xe00a) (font-spec :family nerd) nil 'append)
+          (set-fontset-font nil '(#xf000 . #xf8ff) (font-spec :family nerd) nil 'append)))
       (when (eq window-system 'ns)
         (set-fontset-font t '(#x1f300 . #x1f9ff) "Apple Color Emoji" nil 'append)
         (set-fontset-font t '(#x1fa70 . #x1fbff) "Apple Color Emoji" nil 'append)
@@ -106,84 +99,52 @@
                      ("0" (text-scale-set 0) :bind nil :exit t))
   :bind ("<f2>" . hydra-zoom/body))
 
-;;; [3] all-the-icons
+;;; [3] nerd-icons
 
-;;; [4] all-the-icons
+;; 以前は all-the-icons を使っていたが、事実上メンテナンスが止まっており
+;; doom-modeline も 4.x で nerd-icons 前提になったため移行した。
+;; nerd-icons は Nerd Font 1 本 (HackGenNerd など) で全アイコンをまかなえるので、
+;; all-the-icons のように 6 種類のフォントを個別に入れる必要がない。
 
-(leaf all-the-icons
+(leaf nerd-icons
   :straight t
-  ;; :after all-the-icons-ivy ivy
   :custom
-  (all-the-icons-scale-factor . 1.0)
+  ;; インストール済みの Nerd Font を使う。
+  ;; nerd-icons-install-fonts を実行すると Symbols Nerd Font Mono が入るが、
+  ;; HackGenNerd で足りるのでそちらを既定にする。
+  (nerd-icons-font-family . "HackGenNerd")
   :config
-  ;; (when window-system
-  ;;   (defun my-ivy-format-function-arrow (cands)
-  ;;     "Transform CANDS into a string for minibuffer."
-  ;;     (ivy--format-function-generic
-  ;;      (lambda (str)
-  ;;        (concat (all-the-icons-faicon
-  ;;                 "hand-o-right"
-  ;;                 :v-adjust -0.2 :face 'my-ivy-arrow-visible)
-  ;;                " " (ivy--add-face str 'ivy-current-match)))
-  ;;      (lambda (str)
-  ;;        (concat (all-the-icons-faicon
-  ;;                 "hand-o-right" :face 'my-ivy-arrow-invisible) " " str))
-  ;;      cands
-  ;;      "\n"))
-  ;;   (setq ivy-format-functions-alist '((t . my-ivy-format-function-arrow)))
-  ;;   (add-to-list 'all-the-icons-ivy-buffer-commands 'counsel-projectile-switch-project)
-  ;;   (add-to-list 'all-the-icons-ivy-buffer-commands 'counsel-ibuffer)
-  ;;   (all-the-icons-ivy-setup)
-  ;;   (setq ivy-format-functions-alist '((t . ivy-format-function-arrow))))
+  ;; 指定したフォントが無ければ他の候補を探す
+  (unless (member nerd-icons-font-family (font-family-list))
+    (when-let* ((f (seq-find (lambda (x) (member x (font-family-list)))
+                             '("HackGenNerd" "HackGen35Nerd" "HackGen Console NF"
+                               "Symbols Nerd Font Mono" "Symbols Nerd Font"))))
+      (setq nerd-icons-font-family f))))
 
-  ;; override for .tsx
-  (defun all-the-icons--web-mode (&optional family arg-overrides)
-    "Return icon or FAMILY for `web-mode' based on `web-mode-content-type'.
-Providing ARG-OVERRIDES will modify the creation of the icon."
-    (let ((non-nil-args (cl-reduce (lambda (acc it) (if it (append acc (list it)) acc)) arg-overrides :initial-value '())))
-      (cond
-       ((equal web-mode-content-type "tsx")
-        (if family (all-the-icons-fileicon-family) (apply 'all-the-icons-fileicon (append '("typescript") non-nil-args))))
-       ((equal web-mode-content-type "jsx")
-        (if family (all-the-icons-fileicon-family) (apply 'all-the-icons-fileicon (append '("jsx-2") non-nil-args))))
-       ((equal web-mode-content-type "javascript")
-        (if family (all-the-icons-alltheicon-family) (apply 'all-the-icons-alltheicon (append '("javascript") non-nil-args))))
-       ((equal web-mode-content-type "json")
-        (if family (all-the-icons-alltheicon-family) (apply 'all-the-icons-alltheicon (append '("less") non-nil-args))))
-       ((equal web-mode-content-type "xml")
-        (if family (all-the-icons-faicon-family) (apply 'all-the-icons-faicon (append '("file-code-o") non-nil-args))))
-       ((equal web-mode-content-type "css")
-        (if family (all-the-icons-alltheicon-family) (apply 'all-the-icons-alltheicon (append '("css3") non-nil-args))))
-       (t
-        (if family (all-the-icons-alltheicon-family) (apply 'all-the-icons-alltheicon (append '("html5") non-nil-args))))))))
+;;; [4] nerd-icons-dired
 
-;;; [4] all-the-icons-dired
-
-(leaf all-the-icons-dired
+(leaf nerd-icons-dired
   :straight t
-  :after all-the-icons
-  :custom (all-the-icons-dired-monochrome . nil)
-  :hook (dired-mode-hook . all-the-icons-dired-mode)
-  :config
-  (add-to-list 'all-the-icons-extension-icon-alist
-               '("tsx" all-the-icons-fileicon "typescript" :height 1.0 :v-adjust -0.1 :face all-the-icons-blue-alt))
-  (add-to-list 'all-the-icons-extension-icon-alist
-               '("inc" all-the-icons-fileicon "php" :face all-the-icons-lsilver))
-  (add-to-list 'all-the-icons-extension-icon-alist
-               '("phpm" all-the-icons-fileicon "php" :face all-the-icons-lsilver)))
+  :after nerd-icons
+  :hook (dired-mode-hook . nerd-icons-dired-mode))
 
-;;; [4] all-the-icons-ibuffer
+;;; [4] nerd-icons-ibuffer
 
-(leaf all-the-icons-ibuffer
+(leaf nerd-icons-ibuffer
   :straight t
-  :after all-the-icons
-  :init
-  (all-the-icons-ibuffer-mode 1)
+  :after nerd-icons
+  :hook (ibuffer-mode-hook . nerd-icons-ibuffer-mode)
   :bind (("C-x C-b" . ibuffer)))
 
-;;; --------------------------------------------------
-;;; ウィンドウ表示設定
-;;; --------------------------------------------------
+;;; [4] nerd-icons-completion
+
+;; vertico / marginalia の候補にアイコンを出す
+(leaf nerd-icons-completion
+  :straight t
+  :after nerd-icons marginalia
+  :config
+  (nerd-icons-completion-mode)
+  (add-hook 'marginalia-mode-hook #'nerd-icons-completion-marginalia-setup))
 
 ;;; [3] Mac用
 
