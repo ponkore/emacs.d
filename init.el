@@ -42,6 +42,13 @@
 ;; 依存解決でビルドして load-path に載せてしまう。
 (straight-use-package '(org :type built-in))
 
+;; transient も Emacs 31.1 に同梱されている (0.13.3)。
+;; straight 側には 2021 年の 0.3.7 が残っており、magit の .elc が
+;; 組み込み transient のマクロで展開された状態でビルドされると
+;; 実行時に "Symbol's function definition is void: transient--set-layout"
+;; になっていた。組み込みに一本化する。
+(straight-use-package '(transient :type built-in))
+
 ;;; [3] leaf
 
 (eval-and-compile
@@ -1176,6 +1183,11 @@ Providing ARG-OVERRIDES will modify the creation of the icon."
 ;;; [3] editor global configraiton
 
 (leaf global-configuraions
+  ;; leaf は :hook / :bind / :mode などがあると :config を
+  ;; (eval-after-load '<leaf名>) で包んで遅延させる。この leaf 名は
+  ;; 実在する feature ではないため、:config が永久に実行されなかった。
+  ;; :leaf-defer nil で遅延を無効化する。
+  :leaf-defer nil
   :custom
   ;; 起動メッセージの非表示
   (inhibit-startup-message . t)
@@ -2128,7 +2140,13 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
 
 ;;; [3] SQL
 
-(leaf sql-mode
+(leaf sql
+  ;; leaf 名は "sql-mode" だったが、それは feature 名ではない
+  ;; (ライブラリは sql.el)。leaf は :bind / :config を
+  ;; (eval-after-load '<leaf名>) で遅延させるため、存在しない feature を
+  ;; 待ち続けて :config も :bind も永久に適用されていなかった。
+  ;; その結果 oracle-settings 等が未定義で、C-c " / C-c , も未バインドだった。
+  ;; 実在する feature 名 sql に直すことで正しく遅延適用される。
   :mode ("\\.ddl$" . sql-mode)
   :custom
   (sql-product . 'postgres)
@@ -2485,6 +2503,11 @@ set pagesize 1000
 ;;; [3] Windows 環境でのSVN support
 
 (leaf vc-windows
+  ;; leaf は :hook / :bind / :mode などがあると :config を
+  ;; (eval-after-load '<leaf名>) で包んで遅延させる。この leaf 名は
+  ;; 実在する feature ではないため、:config が永久に実行されなかった。
+  ;; :leaf-defer nil で遅延を無効化する。
+  :leaf-defer nil
   :if (eq system-type 'windows-nt)
   :hook
   ;; svn log の出力は cp932
@@ -2514,6 +2537,11 @@ set pagesize 1000
 ;;; [3] Windows環境用 Shell
 
 (leaf shell-windows
+  ;; leaf は :hook / :bind / :mode などがあると :config を
+  ;; (eval-after-load '<leaf名>) で包んで遅延させる。この leaf 名は
+  ;; 実在する feature ではないため、:config が永久に実行されなかった。
+  ;; :leaf-defer nil で遅延を無効化する。
+  :leaf-defer nil
   :if (eq system-type 'windows-nt)
   :hook
   (shell-mode-hook . (lambda ()
@@ -2528,9 +2556,14 @@ set pagesize 1000
     (when (file-directory-p shims)
       (add-to-list 'exec-path shims)))
   (require 'shell)
-  (setq explicit-shell-file-name "bash.exe")
-  (setq shell-command-switch "-c")
-  (setq shell-file-name "bash.exe")
+  ;; ここは上記の理由で今まで一度も実行されていなかった。有効になると
+  ;; shell-file-name が bash になり M-! / M-x compile / M-x grep の
+  ;; 実行シェルが変わるため、bash.exe が実在するときだけ設定する。
+  ;; (見つからない場合は Emacs 既定の cmdproxy のままにする)
+  (when-let* ((bash (executable-find "bash.exe")))
+    (setq explicit-shell-file-name bash)
+    (setq shell-command-switch "-c")
+    (setq shell-file-name bash))
   ;; (M-! and M-| and compile.el)
   (modify-coding-system-alist 'process ".*sh\\.exe" 'utf-8)
   ;; エスケープシーケンス処理の設定
@@ -2671,9 +2704,12 @@ set pagesize 1000
   ;; ミニバッファのカーソル位置指定は Emacs 30 以降の `grep-command-position'
   ;; を使う。prefix 引数でカーソル位置の語を埋める挙動は組み込みの
   ;; `grep-default-command' が元々備えているので、再定義は不要。
+  ;; executable-find が返すパスには空白が含まれることがある
+  ;; (例: Windows の "c:/Program Files/Git/usr/bin/grep.exe")。
+  ;; 引用符で括らないとシェルが "c:/Program" をコマンド名として解釈して失敗する。
   (when-let* ((cmd (or (executable-find "yagrep")
                        (executable-find "grep")))
-              (prefix (concat cmd " -nH -r -e ")))
+              (prefix (concat (shell-quote-argument cmd) " -nH -r -e ")))
     (setq grep-command (concat prefix " ."))
     (setq grep-command-position (1+ (length prefix))))
 
@@ -2695,7 +2731,14 @@ set pagesize 1000
   ;; let 束縛にしたので両方とも確実に元へ戻る。
   (defun my:grep-with-cp932 (orig &rest args)
     (let ((default-process-coding-system '(utf-8 . cp932))
-          (null-device "/dev/null"))
+          ;; grep をどのシェル経由で動かすかで null デバイス名が変わる。
+          ;; bash/sh 経由なら /dev/null、cmd (cmdproxy) なら NUL。
+          ;; 以前は無条件で "/dev/null" にしていたため、cmd 側で動くと
+          ;; コマンド末尾に /dev/null が付いて失敗していた。
+          (null-device (if (string-match-p "\\(?:ba\\)?sh\\(?:\\.exe\\)?\\'"
+                                           (or shell-file-name ""))
+                           "/dev/null"
+                         null-device)))
       (apply orig args)))
   (advice-add 'grep :around #'my:grep-with-cp932))
 
