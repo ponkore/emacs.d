@@ -31,4 +31,4 @@
 *~
 /tmp/*
 !/tmp/*.md
-/user-lisp/.user-lisp-autoloads.el
+/user-lisp-autoloads.el
