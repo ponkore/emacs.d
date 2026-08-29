@@ -1,3 +1,4 @@
+;;; custom.el --- customize が生成する設定 -*- lexical-binding: t -*-
 ;;
 ;;
 ;;
