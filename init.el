@@ -181,6 +181,20 @@
 
 ;;; [3] 日本語入力サポート(Windows)
 
+;; tr-ime / w32-ime はこれまでどの leaf ブロックでも宣言されておらず、
+;; elpa/ に残っていた 2020〜2021 年版が package-activate-all によって
+;; 暗黙に有効化されるのに依存していた。straight で明示的に導入する。
+;; 導入手順 (tr-ime-advanced-install -> default-input-method -> w32-ime-initialize)
+;; は現行版でも変わっていない。
+(leaf w32-ime
+  :if (eq system-type 'windows-nt)
+  :straight t)
+
+(leaf tr-ime
+  :if (eq system-type 'windows-nt)
+  :straight t
+  :after w32-ime)
+
 (leaf windows-ime
   :if (eq window-system 'w32)
   ;; :after *encoding
