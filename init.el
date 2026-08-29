@@ -36,6 +36,12 @@
   (load bootstrap-file nil 'nomessage))
 ;; (straight-pull-recipe-repositories)
 
+;; org は Emacs 31.1 同梱のもの (9.8.7) を使う。
+;; ox-pandoc / org-bullets / org-download などが org に依存しているため、
+;; ここで built-in と宣言しておかないと straight が古い org (9.5.1) を
+;; 依存解決でビルドして load-path に載せてしまう。
+(straight-use-package '(org :type built-in))
+
 ;;; [3] leaf
 
 (eval-and-compile
@@ -1359,10 +1365,11 @@ _R_ename    ch_M_od        _t_oggle       _e_dit    _[_ hide detail     _._toggg
 ;;; [3] org-mode
 
 (leaf org
-  :straight t
-  :mode ("\\.org$" . org-mode)
+  ;; Emacs 31.1 同梱の org (9.8.7) を使う。
+  ;; 以前は :straight t で org 9.5.1 (2021年) を入れていたが、
+  ;; init.org のタングルで組み込み org が先にロードされるため版が混在していた。
+  ;; :mode 指定も組み込みの auto-mode-alist で足りるので外した。
   :hook (org-mode-hook . turn-on-font-lock)
-  :after ox-pandoc
   :custom
   ;; org-mode内部のソースを色付けする
   (org-src-fontify-natively . t)
@@ -1382,7 +1389,7 @@ _R_ename    ch_M_od        _t_oggle       _e_dit    _[_ hide detail     _._toggg
                               ("WAITING" :foreground "orange" :weight bold)
                               ("HOLD" :foreground "magenta" :weight bold)
                               ("CANCELLED" :foreground "green" :weight bold)
-                              ("MEETING" :foreground "gren" :weight bold)))
+                              ("MEETING" :foreground "green" :weight bold)))
   (org-indent-indentation-per-level . 0)
   (org-adapt-indentation . nil)
   (org-clock-clocked-in-display . 'none)
@@ -1391,13 +1398,15 @@ _R_ename    ch_M_od        _t_oggle       _e_dit    _[_ hide detail     _._toggg
   ;; 一時間に一回、org-modeの全てのバッファを保存する。
   (run-at-time "00:59" 3600 #'org-save-all-org-buffers)
   ;; local functions
-  ;; force load ox-pandoc
-  (org-pandoc-startup-check)
   (defun my:org-add-ymd-to-archive (name)
     "replace anchor to YYYY-MM string"
     (let* ((ymd (format-time-string "%Y-%m")))
       (replace-regexp-in-string "#YM" ymd name)))
-  (advice-add 'org-extract-archive-file :filter-return #'my:org-add-ymd-to-archive)
+  ;; TODO: org 9.8 で `org-extract-archive-file' が削除された。
+  ;; 後継は `org-archive--compute-location' だが、戻り値が文字列ではなく
+  ;; (FILE . HEADING) の cons なので上の :filter-return advice はそのまま使えない。
+  ;; またプライベート関数 (--) を advise するのは脆いため、一旦無効化して先送りする。
+  ;; (advice-add 'org-extract-archive-file :filter-return #'my:org-add-ymd-to-archive)
   ;; screenshot: https://ladicle.com/post/config/
   (defun my:org-screenshot ()
     "Take a screenshot into a time stamped unique-named file in the
@@ -1454,6 +1463,11 @@ _R_ename    ch_M_od        _t_oggle       _e_dit    _[_ hide detail     _._toggg
 (leaf ox-pandoc
   ;; https://taipapamotohus.com/post/org-mode_paper_4/
   :straight t
+  ;; 以前は org 側が :after ox-pandoc かつ :config で (org-pandoc-startup-check) を
+  ;; 呼んで ox-pandoc を強制ロードしていたが、依存の向きが逆だった。
+  ;; org のロード後に ox-pandoc を読む形に直す。
+  :after org
+  :require t
   :commands org-pandoc-startup-check
   :custom
   `(;; default options for all output formats
