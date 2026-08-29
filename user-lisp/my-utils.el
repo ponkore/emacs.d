@@ -125,12 +125,17 @@
   ;; ミニバッファのカーソル位置指定は Emacs 30 以降の `grep-command-position'
   ;; を使う。prefix 引数でカーソル位置の語を埋める挙動は組み込みの
   ;; `grep-default-command' が元々備えているので、再定義は不要。
-  ;; executable-find が返すパスには空白が含まれることがある
-  ;; (例: Windows の "c:/Program Files/Git/usr/bin/grep.exe")。
-  ;; 引用符で括らないとシェルが "c:/Program" をコマンド名として解釈して失敗する。
-  (when-let* ((cmd (or (executable-find "yagrep")
-                       (executable-find "grep")))
-              (prefix (concat (shell-quote-argument cmd) " -nH -r -e ")))
+  ;;
+  ;; コマンド名は絶対パスではなく基底名だけを埋める。
+  ;; executable-find が返す Windows の絶対パス
+  ;; ("c:/Program Files/Git/usr/bin/grep.exe") には空白とドライブレターが
+  ;; 含まれ、shell-quote-argument で括っても実行するシェル (MSYS の bash か
+  ;; cmdproxy か) によって解釈が変わって失敗していた。
+  ;; コマンドはシェルが PATH から解決すればよいので絶対パスは不要。
+  ;; executable-find は yagrep と grep のどちらを使うかの判定にだけ使う。
+  (when-let* ((cmd (cond ((executable-find "yagrep") "yagrep")
+                         ((executable-find "grep")   "grep")))
+              (prefix (concat cmd " -nH -r -e ")))
     (setq grep-command (concat prefix " ."))
     (setq grep-command-position (1+ (length prefix))))
 

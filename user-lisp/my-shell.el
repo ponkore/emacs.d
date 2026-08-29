@@ -4,6 +4,26 @@
 ;; lexical-binding は分割前と同じ意味論を保つため nil のまま。
 ;;; Code:
 
+(defun my:windows-bash ()
+  "Windows で使う bash.exe のパスを返す。見つからなければ nil。
+C:/Windows/System32/bash.exe は WSL の bash なので除外する
+(Linux 側のファイルシステムで動くため Windows のパスを扱えない)。"
+  (seq-find
+   (lambda (path)
+     (and path
+          (file-executable-p path)
+          (not (string-match-p "[/\\]system32[/\\]" (downcase path)))))
+   (list
+    ;; Git for Windows (git.exe の位置から辿る)
+    (when-let* ((git (executable-find "git")))
+      (expand-file-name "../usr/bin/bash.exe" (file-name-directory git)))
+    "C:/Program Files/Git/usr/bin/bash.exe"
+    "C:/Program Files (x86)/Git/usr/bin/bash.exe"
+    ;; scoop
+    (expand-file-name "scoop/shims/bash.exe" (or (getenv "USERPROFILE") "~"))
+    ;; 最後に PATH から (System32 のものは上の述語で弾かれる)
+    (executable-find "bash.exe"))))
+
 ;;; --------------------------------------------------
 ;;; Shell
 ;;; --------------------------------------------------
@@ -42,9 +62,15 @@
   (require 'shell)
   ;; ここは上記の理由で今まで一度も実行されていなかった。有効になると
   ;; shell-file-name が bash になり M-! / M-x compile / M-x grep の
-  ;; 実行シェルが変わるため、bash.exe が実在するときだけ設定する。
+  ;; 実行シェルが変わるため、実在するときだけ設定する。
   ;; (見つからない場合は Emacs 既定の cmdproxy のままにする)
-  (when-let* ((bash (executable-find "bash.exe")))
+  ;;
+  ;; 注意: (executable-find "bash.exe") をそのまま使うと
+  ;; C:/Windows/System32/bash.exe すなわち WSL の bash を拾ってしまう。
+  ;; WSL の bash は Linux 側のファイルシステムで動くため、Windows の
+  ;; 絶対パスを渡すコマンド (M-x grep など) が
+  ;; "No such file or directory" で失敗する。System32 のものは除外する。
+  (when-let* ((bash (my:windows-bash)))
     (setq explicit-shell-file-name bash)
     (setq shell-command-switch "-c")
     (setq shell-file-name bash))
