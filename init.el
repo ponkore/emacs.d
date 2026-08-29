@@ -86,7 +86,9 @@
 ;;; [3] custom.el
 
 ;; Avoid to write `package-selected-packages` in init.el
-(load (setq custom-file (expand-file-name "custom.el" user-emacs-directory)))
+;; custom.el が無い環境でもエラーにしない (NOERROR を渡す)
+(setq custom-file (expand-file-name "custom.el" user-emacs-directory))
+(load custom-file t t)
 
 ;;; --------------------------------------------------
 ;;; 日本語環境設定
@@ -560,8 +562,18 @@ Providing ARG-OVERRIDES will modify the creation of the icon."
 ;;; [3] vertico
 
 (leaf vertico
-  ;; :straight t
-  :ensure t
+  ;; 以前は :ensure t (package.el) で入れた上に :config でも
+  ;; straight-use-package を呼んでおり、同じパッケージを二重に導入していた。
+  ;; extensions 込みのレシピを :straight で最初から宣言する形に統一する。
+  :straight (vertico :files (:defaults "extensions/*")
+                     :includes (vertico-buffer
+                                vertico-directory
+                                vertico-flat
+                                vertico-indexed
+                                vertico-mouse
+                                vertico-quick
+                                vertico-repeat
+                                vertico-reverse))
   :custom
   (vertico-mode . t)
   (vertico-cycle . t)
@@ -588,16 +600,6 @@ Providing ARG-OVERRIDES will modify the creation of the icon."
   :config
   (defun vertico-after-init-hook ()
     (marginalia-mode))
-  ;; add extension
-  (straight-use-package '(vertico :files (:defaults "extensions/*")
-                                  :includes (vertico-buffer
-                                             vertico-directory
-                                             vertico-flat
-                                             vertico-indexed
-                                             vertico-mouse
-                                             vertico-quick
-                                             vertico-repeat
-                                             vertico-reverse)))
   ;; dirty hack...
   (define-key vertico-map (kbd "C-l") 'vertico-directory-delete-char))
 
@@ -1012,7 +1014,7 @@ Providing ARG-OVERRIDES will modify the creation of the icon."
     :straight t)
   (leaf yatemplate
     :straight t
-    :config (yatemplatefill-alist))
+    :config (yatemplate-fill-alist))
   (defvar company-mode/enable-yas t
     "Enable yasnippet for all backends.")
   (defun company-mode/backend-with-yas (backend)
@@ -1072,8 +1074,8 @@ Providing ARG-OVERRIDES will modify the creation of the icon."
 
 (leaf backup
   :config
-  ;; バックアップファイルを作らない
-  (setq bavckup-inhibited t)
+  ;; バックアップファイルを作らない (bavckup-inhibited のタイポで無効だった)
+  (setq backup-inhibited t)
   ;; 編集中ファイルのバックアップ
   (setq auto-save-list-file-name nil))
 
@@ -1154,6 +1156,10 @@ Providing ARG-OVERRIDES will modify the creation of the icon."
   ;; 圧縮
   ;; gzファイルも編集できるようにする
   (auto-compression-mode . t)
+  ;; 水平方向への（賢い）分割をやめる
+  ;; (もともと :hook セクションに書かれており、leaf が
+  ;;  (add-hook 'split-width-threshold ...) と解釈して値を壊していた)
+  (split-width-threshold . nil)
   ;; diff
   ;; ediffを1ウィンドウで実行
   (ediff-window-setup-function . 'ediff-setup-windows-plain)
@@ -1196,8 +1202,6 @@ Providing ARG-OVERRIDES will modify the creation of the icon."
   (message-mode-hook . (lambda () (yas-minor-mode)))
   ;; いちいち消すのも面倒なので、内容が 0 ならファイルごと削除する
   (after-save-hook . delete-file-if-no-contents)
-  ;; 水平方向への（賢い）分割をやめる
-  (split-width-threshold . nil)
   :config
   ;; リージョンの大文字小文字変換を有効にする。
   ;; C-x C-u -- upcase
@@ -1556,7 +1560,7 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
                   ("5" markdown-insert-header-atx-5)
                   ("6" markdown-insert-header-atx-6)
                   ("." markdown-insert-list-item)
-                  ("i" markdown-insert-imaget)
+                  ("i" markdown-insert-image)
                   ("l" markdown-insert-link)
                   ("u" markdown-insert-uri)
                   ("f" markdown-insert-footnote)
@@ -1704,7 +1708,14 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
   :straight t
   :commands slime-setup
   :custom
-  `(inferior-lisp-program . ,(concat (executable-find "ros") " run"))
+  ;; roswell が無い環境では (concat nil " run") がエラーにならず " run" という
+  ;; 壊れた値になっていた (nil は空シーケンスとして concat に受理される)。
+  ;; ros が見つかったときだけ "ros run" を使い、無ければ処理系を直接探す。
+  `(inferior-lisp-program . ,(let ((ros (executable-find "ros")))
+                               (cond (ros (concat ros " run"))
+                                     ((executable-find "sbcl") "sbcl")
+                                     ((executable-find "ccl") "ccl")
+                                     (t "sbcl"))))
   :bind
   (:company-active-map
    ("C-d" . company-show-doc-buffer)
@@ -1733,7 +1744,11 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
 (leaf pyvenv
   :straight t
   :config
-  (pyvenv-activate (expand-file-name "~/.emacs.d/elpy/rpc-venv")))
+  ;; 存在しない環境で pyvenv-activate を呼ぶとエラーになるため存在確認する。
+  ;; パスも user-emacs-directory 基準にする。
+  (let ((venv (expand-file-name "elpy/rpc-venv" user-emacs-directory)))
+    (when (file-directory-p venv)
+      (pyvenv-activate venv))))
 
 (leaf py-isort
   :straight t
@@ -2157,9 +2172,8 @@ set pagesize 1000
   :hook
   (php-mode-hook . lsp-deferred)
   (sh-mode-hook . lsp)
-  (shell-script-mode-hook . lsp)
   (lsp-mode-hook . lsp-enable-which-key-integration)
-  :commands lsp sp-defered lsp-enable-which-key-integration)
+  :commands lsp lsp-deferred lsp-enable-which-key-integration)
 
 (leaf lsp-ui
   :straight t
@@ -2196,7 +2210,7 @@ set pagesize 1000
                   ("j" flycheck-next-error)
                   ("k" flycheck-previous-error)
                   ("f" flycheck-first-error)
-                  ("l" (progn (goto-char (point-max)) (fiycheck-previous-error)))
+                  ("l" (progn (goto-char (point-max)) (flycheck-previous-error)))
                   ("c" flycheck-clear)
                   ("q" nil)))
 
@@ -2525,24 +2539,19 @@ set pagesize 1000
   ;; 再帰的にgrep
   (require 'grep)
 
-  (when-let (cmd (or (executable-find "yagrep")
-                     (executable-find "grep")))
-    (setq grep-command-before-query (concat cmd " -nH -r -e ")))
-
-  (defun grep-default-command ()
-    (if current-prefix-arg
-        (let ((grep-command-before-target
-               (concat grep-command-before-query
-                       (shell-quote-argument (grep-tag-default)))))
-          (cons (if buffer-file-name
-                    (concat grep-command-before-target
-                            " *."
-                            (file-name-extension buffer-file-name))
-                  (concat grep-command-before-target " ."))
-                (+ (length grep-command-before-target) 1)))
-      (car grep-command)))
-  (setq grep-command (cons (concat grep-command-before-query " .")
-                           (+ (length grep-command-before-query) 1)))
+  ;; `grep-command' は文字列でなければならない。
+  ;; 以前はここに (COMMAND . POSITION) の cons を代入し、あわせて組み込みの
+  ;; `grep-default-command' を (car grep-command) を返すように再定義していたが、
+  ;; Emacs 31 の grep.el は `grep-command' を `string-match' に直接渡すため
+  ;; `M-x grep' が壊れていた。
+  ;; ミニバッファのカーソル位置指定は Emacs 30 以降の `grep-command-position'
+  ;; を使う。prefix 引数でカーソル位置の語を埋める挙動は組み込みの
+  ;; `grep-default-command' が元々備えているので、再定義は不要。
+  (when-let* ((cmd (or (executable-find "yagrep")
+                       (executable-find "grep")))
+              (prefix (concat cmd " -nH -r -e ")))
+    (setq grep-command (concat prefix " ."))
+    (setq grep-command-position (1+ (length prefix))))
 
   ;; (defadvice grep (around grep-coding-system-setup compile)
   ;;   "When a prefix argument given, specify coding-system-for-read."
@@ -2697,7 +2706,15 @@ thumbnail = \"/img/%Y-%m/%d/{{shortname}}.png\"
 ;;; [3] w32-symlinks
 
 (leaf w32-symlinks
-  :if (eq system-type 'windoows-nt)
+  ;; TODO: :if が 'windoows-nt というタイポだったため、このブロックは
+  ;; 一度も実行されたことがない。タイポは直したが、中身が
+  ;; insert-file-contents-literally と minibuffer-complete への
+  ;; グローバル advice であり、無検証で有効化するのは危険なので
+  ;; 明示的に無効化しておく。必要になったら :disabled t を外して検証すること。
+  ;; あわせて custom-set-variables (custom.el を汚す) は setopt へ、
+  ;; defadvice は advice-add へ書き換えが必要。
+  :disabled t
+  :if (eq system-type 'windows-nt)
   :config
   (custom-set-variables '(w32-symlinks-handle-shortcuts t))
   (require 'w32-symlinks)
