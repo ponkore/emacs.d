@@ -13,15 +13,25 @@
   :straight t)
 
 (leaf rust-mode
+  ;; 文法が入っていない環境向けのフォールバック。文法があれば組み込みの
+  ;; rust-ts-mode に差し替わる。
   :straight t
   :custom
   (rust-format-on-save . t)
+  :preface
+  (defun my:rust-ts-setup ()
+    "rust-ts-mode には rust-format-on-save が無いので eglot で整形する。"
+    (add-hook 'before-save-hook #'eglot-format-buffer nil t))
   :hook
   ;; 診断は rust-analyzer が eglot 経由で flymake に出すため、
   ;; flycheck-rust (cargo check をラップするもの) は外した。
-  (rust-mode-hook . eglot-ensure)
-  (rust-mode-hook . cargo-minor-mode)
-  (rust-mode-hook . yas-minor-mode))
+  ((rust-mode-hook rust-ts-mode-hook) . eglot-ensure)
+  ((rust-mode-hook rust-ts-mode-hook) . cargo-minor-mode)
+  ((rust-mode-hook rust-ts-mode-hook) . yas-minor-mode)
+  (rust-ts-mode-hook . my:rust-ts-setup)
+  :config
+  (setq rust-ts-mode-indent-offset 4)
+  (my:treesit-remap 'rust-mode 'rust-ts-mode 'rust))
 
 ;;; [3] C++
 
@@ -50,8 +60,21 @@
 (leaf csharp-mode
   ;; Emacs 29 以降 csharp-mode / csharp-ts-mode は組み込み。
   ;; 外部パッケージ (v1.1.1) が組み込みを上書きしていたため :straight t を外す。
-  :hook (csharp-mode-hook . my:csharp-mode-setup)
+  ;; csharp-mode は cc-mode 派生、csharp-ts-mode は tree-sitter 派生で
+  ;; インデントの設定方法が違うため、セットアップ関数を分けてある。
+  :hook
+  (csharp-mode-hook . my:csharp-mode-setup)
+  (csharp-ts-mode-hook . my:csharp-ts-mode-setup)
   :config
+  (setq csharp-ts-mode-indent-offset 4)
+  (my:treesit-remap 'csharp-mode 'csharp-ts-mode 'c-sharp)
+  (defun my:csharp-ts-mode-setup ()
+    "csharp-ts-mode 用のセットアップ。"
+    (turn-on-auto-revert-mode)
+    (setq indent-tabs-mode nil)
+    (setq comment-column 40)
+    (yas-minor-mode-on)
+    (eglot-ensure))
   (defun my:csharp-mode-setup ()
     "my function that runs when csharp-mode is initialized for a buffer."
     (turn-on-font-lock)

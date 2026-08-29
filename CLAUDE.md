@@ -70,8 +70,8 @@ Emacs 31.1 の `user-lisp/` は、既定では `package-activate-all` の直後�
 | `my-dired` | dired、hydra-dired、neotree |
 | `my-text` | org-mode、ox-pandoc、markdown、rst、adoc |
 | `my-lang-lisp` | Emacs Lisp、Clojure（cider）、Common Lisp（slime） |
-| `my-lang-python` | Python（elpy、pyvenv、py-isort、blacken） |
-| `my-lang-web` | PHP、JavaScript / TypeScript（tide、web-mode、scss） |
+| `my-lang-python` | Python（python-ts-mode、pyvenv、py-isort、blacken） |
+| `my-lang-web` | PHP、JavaScript / TypeScript（js-ts-mode / typescript-ts-mode、web-mode、scss） |
 | `my-lang-native` | Rust、C++、C# |
 | `my-lang-misc` | SQL、bat、Swift、Lua、VisualBasic |
 | `my-lsp` | eglot（組み込み、プレフィックス: `C-c l`）、flycheck |
@@ -81,6 +81,26 @@ Emacs 31.1 の `user-lisp/` は、既定では `package-activate-all` の直後�
 | `my-shell` | exec-path-from-shell、Windows 用 shell 設定 |
 | `my-utils` | calendar、open-junk-file、grep/ripgrep、blog 用ヘルパ |
 | `my-platform` | Windows / macOS 固有設定 |
+
+## tree-sitter
+
+メジャーモードは tree-sitter 版（`*-ts-mode`）を使う方針。ただし文法は
+共有ライブラリで別途ビルドが必要（**C コンパイラと git が要る**）。
+文法が無い環境で `*-ts-mode` に切り替えると何も動かなくなるため、
+**従来のモードを残したうえで、文法が実際に使えるときだけ差し替える**形にしてある。
+
+- `my:treesit-remap MODE TS-MODE LANGUAGE`（`my-core.el`）が
+  `major-mode-remap-alist` に登録する。文法が無ければ何もしない
+- `my:install-treesit-grammars`（`M-x`）で `treesit-language-source-alist` の
+  文法をまとめてビルドする。反映には再起動が必要
+- **フォントロックやインデントの設定はモードごとに別物**。`csharp-mode` は
+  cc-mode 派生（`c-set-offset`）、`csharp-ts-mode` は tree-sitter 派生
+  （`csharp-ts-mode-indent-offset`）なので、セットアップ関数を分けてある
+- `*-ts-mode` は従来モードのフックを継承しない。`:hook` は
+  `((foo-mode-hook foo-ts-mode-hook) . func)` の形で両方に張ること
+
+2026-08 時点でこのマシンには C コンパイラが無く、文法も 1 つも入っていない。
+つまり実際に動いているのは従来モード側である。
 
 ## パッケージ管理
 
@@ -220,6 +240,8 @@ emacs --batch --debug-init -l early-init.el -l init.el --eval '(message "OK")'
   `git pull` していく方針 (corfu と git-gutter は対応済み)
 - `fonts/` の all-the-icons 用 6 フォントは設定から参照されなくなった。
   Windows にインストール済みのものと合わせて削除してよい
+- tree-sitter の文法が 1 つも入っていない。C コンパイラ（`scoop install gcc` など）を
+  入れてから `M-x my:install-treesit-grammars` を実行する必要がある
 - LSP サーバがこのマシンに一つも入っていない。`rust-analyzer` は rustup の
   プロキシだけで本体未インストール（`rustup component add rust-analyzer` が必要）、
   `intelephense` / `bash-language-server` も未導入。eglot の設定自体は

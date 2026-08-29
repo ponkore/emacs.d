@@ -68,44 +68,51 @@
   ;;                      "--tab-width" "2"))
   )
 
-(leaf tide
-  :straight t
-  :commands setup-tide-mode
-  :after typescript-mode flycheck
+;;; [4] TypeScript / JavaScript
+
+;; tide は廃止した。tsserver とのやりとりを tide が独自に持つ必要はもう無く、
+;; 型情報・補完・診断は eglot (typescript-language-server) から得られる。
+;; tide は flycheck と密結合しており、flymake への移行の妨げにもなっていた。
+;;
+;; メジャーモードは tree-sitter 版 (typescript-ts-mode / tsx-ts-mode /
+;; js-ts-mode) を使う。ただし文法が入っていない環境では *-ts-mode は
+;; そもそも起動できないため、従来のモードを残したうえで
+;; my:treesit-remap で差し替える形にしてある。
+
+(defun my:web-lang-setup ()
+  "JS / TS 系メジャーモード共通のセットアップ。"
+  (add-node-modules-path)
+  (setq-local tab-width 2)
+  (eglot-ensure)
+  (prettier-js-mode))
+
+(leaf js
+  ;; 組み込みの js-mode。以前は js2-mode を使っていたが、js-mode 側が
+  ;; 十分に育っており、tree-sitter 版 (js-ts-mode) への差し替えもしやすい。
+  :mode (("\\.\\(js\\|cjs\\|mjs\\)\\'" . js-mode)
+         ("\\.json\\'" . js-json-mode))
   :custom
-  (typescript-indent-level . 2)
   (js-indent-level . 2)
-  (js2-basic-offset . 2)
-  (web-mode-code-indent-offset . 2)
-  (web-mode-markup-indent-offset . 2)
-  (tide-format-options . '(:indentSize 2 :tabSize 2))
-  :hook
-  (typescript-mode . setup-tide-mode)
-  (typescript-mode . tide-hl-identifier-mode)
-  ;; formats the buffer before saving
-                                        ;(before-save-hook . tide-format-before-save)
-  ;; (before-save-hook . prettier-js) は全ファイルの保存時に prettier を
-  ;; 走らせてしまうグローバル登録だった。setup-tide-mode の中で
-  ;; prettier-js-mode を有効にしており、そちらがバッファローカルに
-  ;; before-save-hook を張るので不要。
+  :hook ((js-mode-hook js-ts-mode-hook) . my:web-lang-setup)
   :config
-  (defun setup-tide-mode ()
-    (interactive)
-    (add-node-modules-path)
-    (tide-setup)
-    (flycheck-add-mode 'javascript-eslint 'web-mode)
-    (flycheck-mode +1)
-    ;; (setq flycheck-check-syntax-automatically '(save mode-enabled))
-    (setq flycheck-check-syntax-automatically '(idle-change))
-    (eldoc-mode +1)
-    (tide-hl-identifier-mode +1)
-    ;; 補完は corfu が tide の capf (tide-completion-at-point) を使うので、
-    ;; company-mode の有効化は不要になった。
-    (prettier-js-mode)))
+  (my:treesit-remap 'js-mode 'js-ts-mode 'javascript)
+  (my:treesit-remap 'js-json-mode 'json-ts-mode 'json))
 
 (leaf typescript-mode
+  ;; 文法が入っていない環境向けのフォールバック。文法があれば
+  ;; typescript-ts-mode (組み込み) に差し替わる。
   :straight t
-  :hook (typescript-mode-hook . setup-tide-mode))
+  :mode ("\\.\\(ts\\|mts\\|cts\\)\\'" . typescript-mode)
+  :custom
+  (typescript-indent-level . 2)
+  :hook ((typescript-mode-hook typescript-ts-mode-hook tsx-ts-mode-hook)
+         . my:web-lang-setup)
+  :config
+  (setq typescript-ts-mode-indent-offset 2)
+  (my:treesit-remap 'typescript-mode 'typescript-ts-mode 'typescript)
+  ;; .tsx は文法があれば tsx-ts-mode、無ければ web-mode (下記) で開く。
+  (when (my:treesit-available-p 'tsx)
+    (add-to-list 'auto-mode-alist '("\\.tsx\\'" . tsx-ts-mode))))
 
 (leaf web-mode
   :straight t
@@ -113,30 +120,13 @@
          ("\\.html\\'" . web-mode)
          ("\\.htm\\'" . web-mode)
          ("\\.njk\\'" . web-mode))
+  :custom
+  (web-mode-code-indent-offset . 2)
+  (web-mode-markup-indent-offset . 2)
   :hook
   (web-mode-hook . (lambda ()
-                     (when (string-equal "tsx" (file-name-extension buffer-file-name))
-                       (setup-tide-mode))
                      (setq tab-width 4)
                      (indent-tabs-mode 0)
-                     (whitespace-mode)))
-  :config
-  ;; enable typescript-tslint checker
-  ;; なお (prettier-js-mode) を :config トップレベルで呼んでいたが、これは
-  ;; web-mode のロード時点のカレントバッファに対して実行されてしまうため削除した。
-  ;; tsx は上の :hook から setup-tide-mode 経由で prettier-js-mode が有効になる。
-  (flycheck-add-mode 'typescript-tslint 'web-mode))
-
-(leaf js2-mode
-  :straight t
-  :mode
-  ("\\.js"   . js2-mode)
-  ("\\.json" . javascript-mode)
-  ("\\.cjs"   . js2-mode)
-  :hook
-  (js2-mode-hook . (lambda ()
-                     (setq tab-width 4)
-                     (indent-tabs-mode)
                      (whitespace-mode))))
 
 (leaf scss-mode
