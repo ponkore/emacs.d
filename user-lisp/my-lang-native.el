@@ -12,17 +12,14 @@
 (leaf cargo
   :straight t)
 
-(leaf flycheck-rust
-  :straight t)
-
 (leaf rust-mode
   :straight t
   :custom
   (rust-format-on-save . t)
   :hook
-  (rust-mode-hook . flycheck-rust-setup)
-  (rust-mode-hook . lsp)
-  (rust-mode-hook . flycheck-mode)
+  ;; 診断は rust-analyzer が eglot 経由で flymake に出すため、
+  ;; flycheck-rust (cargo check をラップするもの) は外した。
+  (rust-mode-hook . eglot-ensure)
   (rust-mode-hook . cargo-minor-mode)
   (rust-mode-hook . yas-minor-mode))
 

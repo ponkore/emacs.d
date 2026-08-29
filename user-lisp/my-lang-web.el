@@ -9,7 +9,6 @@
 (leaf php-mode
   :mode ("\\.\\(cgi\\|phpm\\|inc\\)\\'" . php-mode)
   :straight t
-  :after lsp-mode
   :custom
   (ac-php-debug-flag . nil)
   (php-manual-url . 'ja)
@@ -25,16 +24,14 @@
                      ;; (ac-php-core-eldoc-setup)
                      ;; (add-to-list 'company-backends 'company-ac-php-backend)
                      ;; (make-local-variable 'company-backends)
-                     ;; (require 'flycheck-phpstan)
-                     (add-to-list 'flycheck-disabled-checkers 'php-phpmd)
-                     ;; (add-to-list 'flycheck-disabled-checkers 'php-phpcs)
-                     ;; (setq flycheck-phpcs-standard "PSR2")
-                     (flycheck-mode t)))
-  (php-mode-hook . lsp-deferred)
-  :config
-  ;; (leaf company-php
-  ;;   :straight t)
-  (setq lsp-intelephense-files-associations ["*.php" "*.phpm" "*.inc"])
+                     ;; intelephense の files.associations。lsp-mode の
+                     ;; lsp-intelephense-files-associations に相当する。
+                     ;; eglot はサーバ設定を eglot-workspace-configuration で渡す。
+                     (setq-local eglot-workspace-configuration
+                                 '(:intelephense
+                                   (:files (:associations ["*.php" "*.phpm" "*.inc"]))))))
+  ;; 診断は eglot が flymake 経由で出すので flycheck の設定は要らなくなった。
+  (php-mode-hook . eglot-ensure)
   :bind
   (:php-mode-map
    (";" . self-insert-command)

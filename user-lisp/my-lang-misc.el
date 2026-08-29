@@ -131,17 +131,10 @@ set pagesize 1000
 
 (leaf swift-mode
   :straight t
-  :hook (swift-mode-hook . (lambda () (lsp))))
+  :hook (swift-mode-hook . eglot-ensure))
 
-(leaf lsp-sourcekit
-  ;; sourcekit-lsp は macOS (Xcode) 専用
-  :if (eq system-type 'darwin)
-  :straight t
-  :after lsp-mode
-  :config
-  (let ((sourcekit (or (executable-find "sourcekit-lsp")
-                       "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/sourcekit-lsp")))
-    (setq lsp-sourcekit-executable sourcekit)))
+;; lsp-sourcekit は lsp-mode 用のパッケージなので削除した。
+;; sourcekit-lsp の登録は my-lsp.el の eglot-server-programs で行っている。
 
 ;;; [3] lua
 

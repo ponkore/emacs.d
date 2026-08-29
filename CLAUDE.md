@@ -74,7 +74,7 @@ Emacs 31.1 の `user-lisp/` は、既定では `package-activate-all` の直後�
 | `my-lang-web` | PHP、JavaScript / TypeScript（tide、web-mode、scss） |
 | `my-lang-native` | Rust、C++、C# |
 | `my-lang-misc` | SQL、bat、Swift、Lua、VisualBasic |
-| `my-lsp` | lsp-mode、flycheck |
+| `my-lsp` | eglot（組み込み、プレフィックス: `C-c l`）、flycheck |
 | `my-fileformat` | yaml、diff、log4j、Dockerfile、vimrc、mayu |
 | `my-project` | projectile（プレフィックス: `C-c p`） |
 | `my-vc` | magit、git-gutter（プレフィックス: `C-c g`）、Windows の SVN 対応 |
@@ -220,6 +220,12 @@ emacs --batch --debug-init -l early-init.el -l init.el --eval '(message "OK")'
   `git pull` していく方針 (corfu と git-gutter は対応済み)
 - `fonts/` の all-the-icons 用 6 フォントは設定から参照されなくなった。
   Windows にインストール済みのものと合わせて削除してよい
+- LSP サーバがこのマシンに一つも入っていない。`rust-analyzer` は rustup の
+  プロキシだけで本体未インストール（`rustup component add rust-analyzer` が必要）、
+  `intelephense` / `bash-language-server` も未導入。eglot の設定自体は
+  プロセス起動まで検証済み
+- `straight/build/` に lsp-mode / lsp-ui / lsp-sourcekit / company 系 /
+  flycheck-rust など、設定から参照されなくなったパッケージが残っている
 - `w32-symlinks` ブロックは `:disabled t`。6 年間タイポで無効だったため、
   グローバル advice を無検証で有効化するのを避けている
 - org 9.8 で削除された `org-extract-archive-file` への advice をコメントアウト中
