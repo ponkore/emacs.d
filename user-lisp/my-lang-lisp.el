@@ -35,7 +35,6 @@
   :hook
   (clojure-mode-hook . yas-minor-mode)
   (clojure-mode-hook . smartparens-strict-mode)
-  (clojure-mode-hook . flycheck-mode)
   (clojure-mode-hook . cljstyle-format-on-save-mode)
   :config
   (define-clojure-indent
@@ -63,8 +62,13 @@
   ;; (cljstyle-format-on-save-mode t)
   )
 
-(leaf flycheck-clj-kondo
-  :straight t)
+(leaf flymake-kondor
+  ;; 旧 flycheck-clj-kondo。clj-kondo の診断を flymake に流す。
+  ;; clojure-mode-hook の flycheck-mode は prog-mode-hook の flymake-mode に
+  ;; 置き換わったので不要になった。
+  :straight t
+  :hook ((clojure-mode-hook clojurescript-mode-hook clojurec-mode-hook)
+         . flymake-kondor-setup))
 
 (leaf cljstyle-format
   :straight t)

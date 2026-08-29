@@ -45,8 +45,9 @@
    ("C-c C--" . php-current-class)
    ("C-c C-=" . php-current-namespace)))
 
-(leaf flycheck-phpstan
-  :straight t)
+;; flycheck-phpstan は導入するだけで有効化されておらず (require は
+;; コメントアウトされていた)、実際には一度も動いていなかったため削除した。
+;; phpstan を使いたくなったら flymake-phpstan を入れる。
 
 ;;; [3] JavaScript / TypeScript
 
@@ -79,11 +80,22 @@
 ;; そもそも起動できないため、従来のモードを残したうえで
 ;; my:treesit-remap で差し替える形にしてある。
 
+(leaf flymake-eslint
+  ;; 旧 (flycheck-add-mode 'javascript-eslint 'web-mode) の置き換え。
+  ;; eslint はプロジェクトの node_modules/.bin にあるので、
+  ;; add-node-modules-path のあとに有効化する。
+  :straight t
+  :commands flymake-eslint-enable
+  :custom
+  (flymake-eslint-defer-binary-check . t))
+
 (defun my:web-lang-setup ()
   "JS / TS 系メジャーモード共通のセットアップ。"
   (add-node-modules-path)
   (setq-local tab-width 2)
   (eglot-ensure)
+  (when (executable-find "eslint")
+    (flymake-eslint-enable))
   (prettier-js-mode))
 
 (leaf js

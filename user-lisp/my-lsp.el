@@ -1,4 +1,4 @@
-;;; my-lsp.el --- LSP (eglot) と flycheck  -*- lexical-binding: nil -*-
+;;; my-lsp.el --- LSP (eglot) と flymake  -*- lexical-binding: nil -*-
 ;;; Commentary:
 ;; init.el から機械的に分割したもの。読み込み順は init.el を参照。
 ;; lexical-binding は分割前と同じ意味論を保つため nil のまま。
@@ -45,40 +45,50 @@
                               "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/sourcekit-lsp")
                          "sourcekit-lsp")))))
 
-;;; [3] flycheck-pos-tip
+;;; [3] flymake
 
-(leaf flycheck-pos-tip
-  :straight t)
+;; flycheck / flycheck-pos-tip / flycheck-inline から組み込みの flymake に
+;; 移行した。eglot が診断を flymake 経由で出すため、LSP と構文チェックを
+;; 二重に持たなくて済む。
+;; エラーの行末表示は Emacs 30 で入った
+;; flymake-show-diagnostics-at-end-of-line が flycheck-inline の代わりになる。
 
-;;; [3] flycheck
-
-(leaf flycheck
-  :straight t
-  :commands flycheck-mode flycheck-add-mode
-  :hook ((flycheck-mode-hook . flycheck-pos-tip-mode)
-         (prog-mode-hook . flycheck-mode))
+(leaf flymake
   :custom
-  (flycheck-disabled-checkers . '(javascript-jshint javascript-jscs))
-  (flycheck-display-errors-function . #'flycheck-pos-tip-error-messages)
-  :config (leaf flycheck-inline
-            :straight t
-            :hook (flycheck-mode-hook . flycheck-inline-mode))
+  ;; 旧 flycheck-check-syntax-automatically '(idle-change) 相当
+  (flymake-no-changes-timeout . 1.0)
+  (flymake-fringe-indicator-position . 'right-fringe)
+  ;; 旧 flycheck-inline / flycheck-pos-tip 相当
+  (flymake-show-diagnostics-at-end-of-line . 'short)
+  :hook
+  (prog-mode-hook . flymake-mode)
+  :bind
+  ;; flycheck の慣例だった C-c ! をそのまま使う。
+  ;; なお旧設定の hydra-flycheck はどこにも割り当てられておらず、
+  ;; 6 年間呼び出す手段が無かった。今回は C-c ! h に割り当てる。
+  (:flymake-mode-map
+   ("C-c ! n" . flymake-goto-next-error)
+   ("C-c ! p" . flymake-goto-prev-error)
+   ("C-c ! l" . flymake-show-buffer-diagnostics)
+   ("C-c ! P" . flymake-show-project-diagnostics)
+   ("C-c ! h" . hydra-flymake/body))
   :hydra
-  (hydra-flycheck nil
-                  "
+  (hydra-flymake nil
+                 "
       Navigate Error^^    Miscellaneous
       ---------------------------------------------------
-      [_k_] Prev          [_c_] Clear
-      [_j_] Next
+      [_k_] Prev          [_l_] Buffer diagnostics
+      [_j_] Next          [_L_] Project diagnostics
       [_f_] First Error   [_q_] Quit
-      [_l_] Lask Error
+      [_e_] Last Error
       "
-                  ("j" flycheck-next-error)
-                  ("k" flycheck-previous-error)
-                  ("f" flycheck-first-error)
-                  ("l" (progn (goto-char (point-max)) (flycheck-previous-error)))
-                  ("c" flycheck-clear)
-                  ("q" nil)))
+                 ("j" flymake-goto-next-error)
+                 ("k" flymake-goto-prev-error)
+                 ("f" (progn (goto-char (point-min)) (flymake-goto-next-error)))
+                 ("e" (progn (goto-char (point-max)) (flymake-goto-prev-error)))
+                 ("l" flymake-show-buffer-diagnostics :exit t)
+                 ("L" flymake-show-project-diagnostics :exit t)
+                 ("q" nil)))
 
 (provide 'my-lsp)
 ;;; my-lsp.el ends here
