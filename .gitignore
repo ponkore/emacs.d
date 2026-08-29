@@ -25,3 +25,10 @@
 /org-persist
 /tramp
 /my-config/init.el
+
+# --- 2026-08 リファクタリングに伴う追加 ---
+/eln-cache/
+*~
+/tmp/*
+!/tmp/*.md
+/user-lisp/.user-lisp-autoloads.el

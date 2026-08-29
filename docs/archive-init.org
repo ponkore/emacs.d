@@ -2497,7 +2497,8 @@
 *** dashboard
 #+begin_src emacs-lisp
   (leaf dashboard
-    :when (version<= "25.1" emacs-version)
+    ;; :when (version<= "25.1" emacs-version)
+    :when nil
     :ensure t
     :custom ((dashboard-items . '((recents . 15)
                                   (projects . 5)
