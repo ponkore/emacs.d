@@ -74,7 +74,7 @@
 
 ;;; [3] site-lisp 以下を読み込む
 
-(let ((default-directory (expand-file-name "~/.emacs.d/site-lisp")))
+(let ((default-directory (expand-file-name "site-lisp" user-emacs-directory)))
   (add-to-list 'load-path default-directory)
   (if (fboundp 'normal-top-level-add-subdirs-to-load-path)
       (normal-top-level-add-subdirs-to-load-path)))
@@ -84,6 +84,23 @@
 (leaf s
   :straight t
   :commands s-join s-split)
+
+;;; [3] 汎用ヘルパ
+
+(defun my:pandoc-data-directory ()
+  "pandoc のユーザーデータディレクトリを返す。
+Windows は %APPDATA%/pandoc、それ以外は XDG または ~/.pandoc。"
+  (cond
+   ((eq system-type 'windows-nt)
+    (expand-file-name "pandoc" (or (getenv "APPDATA") "~")))
+   (t
+    (let ((xdg (expand-file-name "pandoc" (or (getenv "XDG_DATA_HOME")
+                                              "~/.local/share"))))
+      (if (file-directory-p xdg) xdg (expand-file-name "~/.pandoc"))))))
+
+(defun my:pandoc-data-file (name)
+  "pandoc のユーザーデータディレクトリ配下の NAME を返す。"
+  (expand-file-name name (my:pandoc-data-directory)))
 
 ;;; [3] custom.el
 
@@ -259,11 +276,11 @@
   (migemo-options . '("-q" "--emacs"))
   ;; (migemo-options . '("-q" "--emacs" "-i" "\g"))
   ;; (migemo-options . '("-q" "--emacs" "-i" "\a"))
-  `((migemo-dictionary . ,(expand-file-name "~/.emacs.d/migemo/utf-8/migemo-dict")))
+  `((migemo-dictionary . ,(expand-file-name "migemo/utf-8/migemo-dict" user-emacs-directory)))
   ;; (migemo-dictionary . "C~/.emacs.d/migemo-dict/utf-8")
   (migemo-user-dictionary . nil)
   (migemo-regex-dictionary . nil)
-  (migemo-coding-system 'utf-8-unix)
+  (migemo-coding-system . 'utf-8-unix)
   ;; 遅いのを防ぐためにキャッシュする。
   (migemo-use-pattern-alist . t)
   (migemo-use-frequent-pattern-alist . t)
@@ -349,10 +366,17 @@
 
   (defun setup-font ()
     (interactive)
-    (when (eq window-system 'ns)
-      (emacs-font-setting "HackGen" 16)) ;; previous: "Ricty"
-    (when (eq window-system 'w32)
-      (emacs-font-setting "HackGen" 12))) ;; previous: ("HackGenNerd" 11)
+    ;; 以前は ns / w32 しか分岐が無く、Linux (x / pgtk) では
+    ;; フォントが一切設定されなかった。
+    (pcase window-system
+      ('ns  (emacs-font-setting "HackGen" 16))   ;; previous: "Ricty"
+      ('w32 (emacs-font-setting "HackGen" 12))   ;; previous: ("HackGenNerd" 11)
+      ((or 'x 'pgtk)
+       ;; Linux では入っているものを順に探す
+       (let ((family (seq-find (lambda (f) (member f (font-family-list)))
+                               '("HackGen" "HackGenNerd" "Ricty"
+                                 "Noto Sans Mono CJK JP" "DejaVu Sans Mono"))))
+         (when family (emacs-font-setting family 12))))))
   (setup-font))
 
 ;;; [3] text-scale
@@ -447,6 +471,10 @@ Providing ARG-OVERRIDES will modify the creation of the icon."
 
 ;;; [3] Mac用
 
+;; 注意: default-frame-alist は early-init.el でも設定している
+;; (ツールバー等の非表示)。setq で丸ごと上書きするとそれが消えるため、
+;; 以下ではいずれも append で既存の値を残している。
+
 (leaf frame-setting-mac
   :if (eq system-type 'darwin)
   :config
@@ -458,8 +486,9 @@ Providing ARG-OVERRIDES will modify the creation of the icon."
            (internal-border-width . 0)
            (top . 0)
            (width . 180)
-           (height . 83))))
-  (setq default-frame-alist initial-frame-alist))
+           (height . 83))
+         initial-frame-alist))
+  (setq default-frame-alist (append initial-frame-alist default-frame-alist)))
 
 ;;; [3] Windows用
 
@@ -468,18 +497,35 @@ Providing ARG-OVERRIDES will modify the creation of the icon."
   :config
   (setq initial-frame-alist
         (append
-         '((ns-transparent-titlebar . t) ;; タイトルバーを透過
-           (vertical-scroll-bars . nil) ;; スクロールバーを消す
-           ;; (ns-appearance . dark) ;; 26.1 {light, dark}
+         ;; ns-transparent-titlebar は macOS 専用パラメータなので削除した
+         '((vertical-scroll-bars . nil) ;; スクロールバーを消す
            (internal-border-width . 0)
            ;; position
            (top . 40)
            (left . 670)
            (width . 136)
-           (height . 50))))
-  (setq default-frame-alist initial-frame-alist))
+           (height . 50))
+         initial-frame-alist))
+  (setq default-frame-alist (append initial-frame-alist default-frame-alist)))
 
-;;; [3] Mac/Windows共通
+;;; [3] Linux用
+
+(leaf frame-setting-linux
+  ;; これまで Linux の分岐が無く default-frame-alist が未設定だった
+  :if (memq system-type '(gnu/linux berkeley-unix))
+  :config
+  (setq initial-frame-alist
+        (append
+         '((vertical-scroll-bars . nil)
+           (internal-border-width . 0)
+           (top . 0)
+           (left . 0)
+           (width . 160)
+           (height . 50))
+         initial-frame-alist))
+  (setq default-frame-alist (append initial-frame-alist default-frame-alist)))
+
+;;; [3] 共通
 
 (leaf frame-setting-common
   :config
@@ -950,15 +996,16 @@ Providing ARG-OVERRIDES will modify the creation of the icon."
   :straight t
   :custom
   (recentf-max-saved-items . 200)
-  `(recentf-save-file . ,(expand-file-name "~/.emacs.d/recentf"))
+  `(recentf-save-file . ,(expand-file-name "recentf" user-emacs-directory))
   ;; (recentf-auto-cleanup . 10)
   :config
   ;; 最近開いたファイルを保存する数を増やす
   (setq recentf-exclude `("r:/.+$"
                           "s:/.+$"
                           "p:/.+$"
-                          ,(concat (expand-file-name "~/") ".emacs.d/elpa/.*$")
-                          ,(expand-file-name "~/.emacs.d/recentf")
+                          ,(concat (regexp-quote (expand-file-name "elpa/" user-emacs-directory)) ".*$")
+                          ,(concat (regexp-quote (expand-file-name "straight/" user-emacs-directory)) ".*$")
+                          ,(expand-file-name "recentf" user-emacs-directory)
                           ))
   ;; from http://qiita.com/itiut@github/items/d917eafd6ab255629346
   (defmacro with-suppressed-message (&rest body)
@@ -1508,7 +1555,7 @@ _R_ename    ch_M_od        _t_oggle       _e_dit    _[_ hide detail     _._toggg
     (org-pandoc-options . '((standalone . t)))
     ;; cancel above settings only for 'docx' format
     (org-pandoc-options-for-docx . '((standalone . nil)
-                                     (reference-doc . ,(expand-file-name "~/AppData/Roaming/pandoc/custom-reference.docx"))))
+                                     (reference-doc . ,(my:pandoc-data-file "custom-reference.docx"))))
     ;; special settings for beamer-pdf and latex-pdf exporters
     (org-pandoc-options-for-beamer-pdf . '((pdf-engine . "xelatex")))
     (org-pandoc-options-for-latex-pdf . '((pdf-engine . "xelatex"))))
@@ -1558,9 +1605,14 @@ _R_ename    ch_M_od        _t_oggle       _e_dit    _[_ hide detail     _._toggg
                                                 "--from=gfm+footnotes"
                                                 "--to=html"
                                                 "--metadata"
-                                                ,(expand-file-name "~/AppData/Roaming/pandoc/metadata.yml"))))
+                                                ,(my:pandoc-data-file "metadata.yml"))))
                           (concat "pandoc " (s-join " " pandoc-options))))
-  (markdown-open-command . "c:/Program Files/Typora/Typora.exe")
+  ;; Typora は Windows のインストールパス直書きだったため、存在するときだけ設定する
+  `(markdown-open-command
+    . ,(seq-find #'file-executable-p
+                 (list "c:/Program Files/Typora/Typora.exe"
+                       "/Applications/Typora.app/Contents/MacOS/Typora"
+                       "/usr/bin/typora")))
   (markdown-use-pandoc-style-yaml-metadata . t)
   (markdown-header-scaling . nil)
   :hydra
@@ -2123,7 +2175,7 @@ set timing on
 set pagesize 1000
 ")))
     ;; only for my office environment
-    (load (expand-file-name "~/.emacs.d/config-sqlplus.el") t)
+    (load (expand-file-name "config-sqlplus.el" user-emacs-directory) t)
     ;; customize font-lock
     (font-lock-add-keywords 'sql-mode
                             '(("\"\\([^\"]*\\)\"" . 'font-lock-constant-face)
@@ -2198,10 +2250,14 @@ set pagesize 1000
   :hook (swift-mode-hook . (lambda () (lsp))))
 
 (leaf lsp-sourcekit
+  ;; sourcekit-lsp は macOS (Xcode) 専用
+  :if (eq system-type 'darwin)
   :straight t
   :after lsp-mode
   :config
-  (setq lsp-sourcekit-executable "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/sourcekit-lsp"))
+  (let ((sourcekit (or (executable-find "sourcekit-lsp")
+                       "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/sourcekit-lsp")))
+    (setq lsp-sourcekit-executable sourcekit)))
 
 ;;; [3] lua
 
@@ -2449,7 +2505,9 @@ set pagesize 1000
 
 (leaf exec-path-from-shell
   :straight t
-  :if (eq system-type 'darwin)
+  ;; macOS 限定だったが、Linux でも GUI 起動時はログインシェルの
+  ;; 環境変数を引き継がないため必要になる。
+  :if (memq system-type '(darwin gnu/linux berkeley-unix))
   :config
   (exec-path-from-shell-initialize))
 
@@ -2465,7 +2523,10 @@ set pagesize 1000
                        (set-process-coding-system 'cp932 'cp932)
                        (set-buffer-file-coding-system    'cp932)))
   :config
-  (setq exec-path (append '("C:/Users/masao/scoop/shims") exec-path))
+  ;; ユーザー名を直書きしていたので USERPROFILE 基準にする
+  (let ((shims (expand-file-name "scoop/shims" (getenv "USERPROFILE"))))
+    (when (file-directory-p shims)
+      (add-to-list 'exec-path shims)))
   (require 'shell)
   (setq explicit-shell-file-name "bash.exe")
   (setq shell-command-switch "-c")
@@ -2521,7 +2582,14 @@ set pagesize 1000
   :straight t
   :bind ("C-x j" . open-junk-file)
   :custom
-  (open-junk-file-format . "~/Library/CloudStorage/Dropbox-個人用/junk/%Y-%m-%d-%H%M%S."))
+  ;; macOS の Dropbox パス直書きだったため Windows / Linux で壊れていた。
+  ;; 存在する Dropbox ディレクトリを探し、無ければ ~/junk/ にする。
+  `(open-junk-file-format
+    . ,(concat (or (seq-find #'file-directory-p
+                             (list (expand-file-name "~/Library/CloudStorage/Dropbox-個人用")
+                                   (expand-file-name "~/Dropbox")))
+                   (expand-file-name "~"))
+               "/junk/%Y-%m-%d-%H%M%S.")))
 
 ;;; [3] dashboard
 
