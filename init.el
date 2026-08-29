@@ -1781,8 +1781,15 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
 
 (leaf py-isort
   :straight t
+  ;; before-save-hook にグローバル登録していたため、Python 以外の
+  ;; すべてのファイル保存時にも py-isort が走っていた。python-mode 限定にする。
+  ;; フックはパッケージのロード前に登録されるので関数定義は :preface に置く。
+  :preface
+  (defun my:py-isort-on-save ()
+    "python-mode のバッファにだけ py-isort を仕込む。"
+    (add-hook 'before-save-hook #'py-isort-before-save nil t))
   :hook
-  (before-save-hook . py-isort-before-save))
+  (python-mode-hook . my:py-isort-on-save))
 
 (leaf python
   :mode ("\\.py$" . python-mode)
@@ -1795,8 +1802,19 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
 (leaf elpy
   ;; https://elpy.readthedocs.io/en/latest/index.html
   :straight t
-  :init
-  (elpy-enable)
+  ;; :init で (elpy-enable) を呼ぶと Python を使わない起動でも elpy 一式が
+  ;; 読み込まれる。python-mode に入ったときだけ有効化する。
+  ;; フックはパッケージのロード前に登録されるので、関数定義は :preface に置く
+  ;; (:config はロード後に走るため間に合わない)。
+  :preface
+  (defvar my:elpy-enabled nil)
+  (defun my:elpy-enable-once ()
+    (unless my:elpy-enabled
+      (setq my:elpy-enabled t)
+      (elpy-enable)))
+  :hook
+  (python-mode-hook . my:elpy-enable-once)
+  (elpy-mode-hook . flycheck-mode)
   :bind (elpy-mode-map
          ("C-c C-r f" . elpy-format-code))
   :config
@@ -1804,8 +1822,7 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
   (remove-hook 'elpy-modules 'elpy-module-flymake) ;; flymakeの無効化
   :custom
   (elpy-rpc-python-command . "python")
-  (flycheck-python-flake8-executable . "flake8")
-  :hook (elpy-mode-hook . flycheck-mode))
+  (flycheck-python-flake8-executable . "flake8"))
 
 (leaf blacken
   :straight t
@@ -1899,7 +1916,10 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
   (typescript-mode . tide-hl-identifier-mode)
   ;; formats the buffer before saving
                                         ;(before-save-hook . tide-format-before-save)
-  (before-save-hook . prettier-js)
+  ;; (before-save-hook . prettier-js) は全ファイルの保存時に prettier を
+  ;; 走らせてしまうグローバル登録だった。setup-tide-mode の中で
+  ;; prettier-js-mode を有効にしており、そちらがバッファローカルに
+  ;; before-save-hook を張るので不要。
   :config
   (defun setup-tide-mode ()
     (interactive)
@@ -1937,8 +1957,10 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
                      (whitespace-mode)))
   :config
   ;; enable typescript-tslint checker
-  (flycheck-add-mode 'typescript-tslint 'web-mode)
-  (prettier-js-mode))
+  ;; なお (prettier-js-mode) を :config トップレベルで呼んでいたが、これは
+  ;; web-mode のロード時点のカレントバッファに対して実行されてしまうため削除した。
+  ;; tsx は上の :hook から setup-tide-mode 経由で prettier-js-mode が有効になる。
+  (flycheck-add-mode 'typescript-tslint 'web-mode))
 
 (leaf js2-mode
   :straight t
@@ -1959,6 +1981,9 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
   (scss-compile-at-save . nil) ;; 自動コンパイルをオフにする
   (css-indent-offset . 2)
   (scss-compile-at-save . nil)
+  ;; (yas-minor-mode) は :config トップレベルにあり、scss-mode のロード時点の
+  ;; カレントバッファに対して実行されてしまっていた。:hook へ移動する。
+  :hook (scss-mode-hook . yas-minor-mode)
   :bind
   (:scss-mode-map
    ("\M-{" . my:css-electric-pair-brace)
@@ -1971,13 +1996,12 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
     (newline-and-indent)
     (insert "}")
     (indent-for-tab-command)
-    (previous-line)
+    (forward-line -1)
     (indent-for-tab-command))
   (defun my:semicolon-ret ()
     (interactive)
     (insert ";")
-    (newline-and-indent))
-  (yas-minor-mode))
+    (newline-and-indent)))
 
 ;;; [3] rust
 
@@ -2324,8 +2348,9 @@ set pagesize 1000
   (projectile-enable-caching . t)
   (projectile-mode-line-prefix . " P")
   ;; (projectile-completion-system . 'ivy)
+  ;; :preface で (require 'ripgrep) しており起動時に eager load していた。
+  ;; ripgrep は projectile-ripgrep の依存として入るので、使用時に読めば足りる。
   :preface
-  (require 'ripgrep)
   (defun my:projectile-search-dwim (search-term)
     "Merge version to search document via grep/ag/rg.
       Use fast alternative if it exists, fallback grep if no alternatives in system.
@@ -2333,7 +2358,9 @@ set pagesize 1000
     (interactive (list (projectile--read-search-string-with-default
                         "Dwim search for")))
     (cond
-     ((and (featurep 'ripgrep) (executable-find "rg")) (projectile-ripgrep search-term))
+     ((executable-find "rg")
+      (require 'ripgrep nil t)
+      (projectile-ripgrep search-term))
      ((executable-find "ag") (projectile-ag search-term))
      (t (projectile-grep search-term)))))
 
