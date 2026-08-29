@@ -92,7 +92,7 @@ eglot が使う言語サーバは自分で入れる。2026-08 時点の導入状
 | PHP | intelephense 1.18.5 | `npm i -g intelephense` |
 | bash | bash-language-server 5.6.0 | `npm i -g bash-language-server` |
 | Rust | rust-analyzer 1.97.1 | `rustup component add rust-analyzer` |
-| Python | 未導入 | `uv tool install basedpyright` |
+| Python | basedpyright 1.39.10 | `uv tool install basedpyright` |
 
 ### TypeScript は 5.x に固定すること
 
@@ -100,6 +100,10 @@ eglot が使う言語サーバは自分で入れる。2026-08 時点の導入状
 7.x には `lib/tsserver.js` が無く、typescript-language-server が
 `Could not find a valid TypeScript installation` で初期化に失敗する。
 `npm i -g typescript@5` を使う。
+
+basedpyright の実行ファイルは `~/scoop/persist/uv/tools/shims`（PATH 済み）。
+eglot は pylsp → pyls → basedpyright-langserver の順に探すので、
+pylsp を入れるとそちらが優先される点に注意。
 
 ### npm グローバルは nvm のバージョンに紐づく
 
@@ -278,7 +282,6 @@ emacs --batch --debug-init -l early-init.el -l init.el --eval '(message "OK")'
   `git pull` していく方針 (corfu と git-gutter は対応済み)
 - `fonts/` の all-the-icons 用 6 フォントは設定から参照されなくなった。
   Windows にインストール済みのものと合わせて削除してよい
-- Python の LSP サーバ（basedpyright / pylsp）が未導入
 - `straight/build/` に lsp-mode / lsp-ui / lsp-sourcekit / company 系 /
   flycheck 系 / tide / js2-mode / elpy など、
   設定から参照されなくなったパッケージが残っている
