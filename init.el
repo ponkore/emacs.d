@@ -96,13 +96,20 @@
 ;; leaf マクロが未定義のままバイトコンパイルされて壊れた .elc ができるため。
 ;; ここまでで straight と leaf が使える状態になっているので明示的に呼ぶ。
 ;; user-lisp/ 配下は再帰的にバイトコンパイルされ load-path に追加される。
-;; autoloads の出力先を user-lisp/ の外に置いている。
-;; 既定では user-lisp/.user-lisp-autoloads.el に書かれるが、そのファイルは
-;; loaddefs-generate が no-byte-compile: t 付きで生成するため .elc ができず、
-;; prepare-user-lisp が毎起動でコンパイルを試みてメッセージを出し続ける
-;; (走査対象ディレクトリの中にあると .el として拾われてしまうため)。
-(prepare-user-lisp nil (expand-file-name "user-lisp-autoloads.el"
-                                         user-emacs-directory))
+;; 第 1 引数 JUST-ACTIVATE を t にして、バイトコンパイルと autoload 走査を
+;; 行わず load-path への追加だけをさせている。
+;;
+;; バイトコンパイルすると、パッケージ由来のマクロを leaf の :config で
+;; 使っている箇所が壊れる。コンパイル時点では当該パッケージが未ロードで
+;; マクロが未定義のため、関数呼び出しとしてコンパイルされてしまうため。
+;; 例: doom-modeline-def-segment が関数扱いになり、実行時に引数の
+;;     my:buffer-encoding が変数として評価されて void エラーになる。
+;; (defhydra や define-clojure-indent なども同じ問題を持つ)
+;;
+;; 起動時間を実測したところコンパイルの有無で差が無かったため
+;; (約 1250ms で同じ)、確実性を取ってコンパイルしない。
+;; モジュールは init.el から明示的に require しているので autoload も不要。
+(prepare-user-lisp t)
 
 (require 'my-core)   ; 汎用ヘルパと基礎ライブラリ
 

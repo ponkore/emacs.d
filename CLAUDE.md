@@ -46,13 +46,16 @@ Emacs 31.1 の `user-lisp/` は、既定では `package-activate-all` の直後�
 
 - `early-init.el` で `user-lisp-auto-scrape` を `nil` にして自動実行を止める
 - `init.el` で straight/leaf を用意したあと `(prepare-user-lisp ...)` を明示的に呼ぶ
-- autoloads の出力先を `user-lisp/` の**外**（`user-lisp-autoloads.el`）に指定する。
-  既定の `user-lisp/.user-lisp-autoloads.el` は `no-byte-compile: t` 付きで
-  生成されるため `.elc` ができず、走査対象内にあると毎起動コンパイルを試み続ける
+- **バイトコンパイルはしない**（`prepare-user-lisp` の第 1 引数 JUST-ACTIVATE を `t`）。
+  コンパイルすると、パッケージ由来のマクロを leaf の `:config` で使っている箇所が壊れる。
+  コンパイル時点では当該パッケージが未ロードでマクロが未定義のため、
+  関数呼び出しとしてコンパイルされてしまう。
+  実例: `doom-modeline-def-segment` が関数扱いになり、実行時に引数の
+  `my:buffer-encoding` が変数として評価されて void エラーになった。
+  `defhydra` や `define-clojure-indent` も同じ問題を持つ。
+  起動時間はコンパイルの有無で差が無かった（約 1250ms で同じ）ため確実性を取っている。
 
 モジュールを追加した場合は `init.el` の `require` 列に加える。
-編集後のバイトコンパイルは起動時に自動で行われる（タイムスタンプ判定）。
-手動で全再コンパイルするなら `C-u M-x prepare-user-lisp`。
 
 ## モジュール構成（`user-lisp/`）
 
