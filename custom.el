@@ -7,7 +7,6 @@
  ;; If you edit it by hand, you could mess it up, so be careful.
  ;; Your init file should contain only one such instance.
  ;; If there is more than one, they won't work right.
- '(company-tooltip-selection ((t (:extend t :background "steelblue" :foreground "#7285b7" :inverse-video t))))
  '(doom-modeline-buffer-minor-mode ((t (:inherit mode-line :slant normal))))
  '(font-lock-function-name-face ((t (:foreground "DodgerBlue1"))))
  '(font-lock-preprocessor-face ((t (:foreground "steel blue"))))
@@ -45,7 +44,6 @@
  ;; If there is more than one, they won't work right.
  '(ac-php-debug-flag nil t)
  '(ac-php-php-executable "c:/Apps/php-7.4.22-Win32-vc15-x64/php.exe" t)
- '(all-the-icons-scale-factor 1.0 t)
  '(auto-revert-interval 1)
  '(calendar-day-header-array ["日" "月" "火" "水" "木" "金" "土"] t)
  '(calendar-day-name-array ["日" "月" "火" "水" "木" "金" "土"] t)
@@ -56,26 +54,6 @@
  '(cider-repl-result-prefix ";; => ")
  '(cider-show-error-buffer t)
  '(column-number-mode 0)
- '(company-begin-commands '(self-insert-command))
- '(company-box-backends-colors
-   '((company-yasnippet :candidate "yellow" :annotation some-face)
-     (company-elisp :icon "yellow" :selected
-                    (:background "orange" :foreground "black"))
-     (company-dabbrev . "purple")) t)
- '(company-box-background
-   '((t
-      (:inherit company-tooltip :background "midnight blue"))) t)
- '(company-box-doc-enable t)
- '(company-box-icons-alist 'company-box-icons-all-the-icons)
- '(company-box-max-candidates 50)
- '(company-box-show-single-candidate t)
- '(company-echo-delay 0 t)
- '(company-idle-delay 0)
- '(company-minimum-prefix-length 1)
- '(company-quickhelp-color-foreground "black")
- '(company-selection-wrap-around t)
- '(company-tooltip-align-annotations t)
- '(company-tooltip-limit 20)
  '(completion-styles '(orderless))
  '(css-indent-offset 2 t)
  '(cua-enable-cua-keys nil)

@@ -17,7 +17,6 @@
   :hook
   (php-mode-hook . (lambda ()
                      (c-set-style "bsd")
-                     (company-mode t)
                      (subword-mode 1)
                      (setq indent-tabs-mode t)
                      (setq tab-width 4)
@@ -75,7 +74,7 @@
 (leaf tide
   :straight t
   :commands setup-tide-mode
-  :after typescript-mode company flycheck
+  :after typescript-mode flycheck
   :custom
   (typescript-indent-level . 2)
   (js-indent-level . 2)
@@ -83,8 +82,6 @@
   (web-mode-code-indent-offset . 2)
   (web-mode-markup-indent-offset . 2)
   (tide-format-options . '(:indentSize 2 :tabSize 2))
-  ;; aligns annotation to the right hand side
-  (company-tooltip-align-annotations . t)
   :hook
   (typescript-mode . setup-tide-mode)
   (typescript-mode . tide-hl-identifier-mode)
@@ -105,11 +102,8 @@
     (setq flycheck-check-syntax-automatically '(idle-change))
     (eldoc-mode +1)
     (tide-hl-identifier-mode +1)
-    ;; company is an optional dependency. You have to
-    ;; install it separately via package-install
-    ;; `M-x package-install [ret] company`
-    (company-mode +1)
-    ;;
+    ;; 補完は corfu が tide の capf (tide-completion-at-point) を使うので、
+    ;; company-mode の有効化は不要になった。
     (prettier-js-mode)))
 
 (leaf typescript-mode

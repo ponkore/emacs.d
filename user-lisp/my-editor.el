@@ -160,16 +160,10 @@
   (leaf yatemplate
     :straight t
     :config (yatemplate-fill-alist))
-  (defvar company-mode/enable-yas t
-    "Enable yasnippet for all backends.")
-  (defun company-mode/backend-with-yas (backend)
-    (if (or (not company-mode/enable-yas) (and (listp backend) (member 'company-yasnippet backend)))
-        backend
-      (append (if (consp backend) backend (list backend))
-              '(:with company-yasnippet))))
-  (defun set-yas-as-company-backend ()
-    (setq company-backends (mapcar #'company-mode/backend-with-yas company-backends)))
-  :hook (company-mode-hook . set-yas-as-company-backend))
+  ;; 以前は company-backends に company-yasnippet を混ぜ込んでいたが、
+  ;; corfu へ移行したのでやめた。スニペットの補完は my-completion.el の
+  ;; yasnippet-capf が capf として供給する。
+  )
 
 ;;; [3] anzu
 

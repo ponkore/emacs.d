@@ -37,6 +37,10 @@
 
 (leaf git-gutter
   :straight t
+  ;; :bind があるため leaf が :config を (eval-after-load 'git-gutter ...) で
+  ;; 包む。git-gutter を読み込む他のパッケージが無く、:config の
+  ;; (global-git-gutter-mode +1) が一度も実行されていなかった。
+  :require t
   :bind
   ;; hydra-git-gutter起動のキーバインド
   ("C-c g" . hydra-git-gutter/body)

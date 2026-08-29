@@ -64,7 +64,7 @@ Emacs 31.1 の `user-lisp/` は、既定では `package-activate-all` の直後�
 | `my-core` | 汎用ヘルパ（`my:pandoc-data-file` など）、`s` |
 | `my-japanese` | 文字コード、cp932/UTF-8 変換テーブル、Windows IME（tr-ime）、migemo |
 | `my-appearance` | フォント、フレーム、modus-vivendi テーマ、doom-modeline、all-the-icons |
-| `my-completion` | vertico、consult、marginalia、orderless、company |
+| `my-completion` | vertico、consult、marginalia、orderless、corfu、cape |
 | `my-keybind` | グローバルキーバインド（`C-h` → `delete-backward-char`、`C-z` → `scroll-down`） |
 | `my-editor` | hydra、symbol-overlay、smartparens、whitespace、yasnippet、recentf ほか |
 | `my-dired` | dired、hydra-dired、neotree |
@@ -101,6 +101,15 @@ straight は自動更新しない。追従が必要なときは：
 (straight-pull-package "NAME")       ; 個別パッケージを更新
 ```
 
+レシピリポジトリを更新しても、**すでに clone 済みのパッケージ本体は古いまま**
+であることに注意。`straight/repos/NAME` の HEAD は clone 時点で止まる。
+2026-08 時点で vertico / consult / marginalia / orderless などは
+まだ 2021 年のままになっている。
+
+パッケージ本体を更新したあとは **`straight/build/NAME` を消してから起動**する。
+straight の変更検知はこれを取りこぼすことがあり、`straight-rebuild-package` でも
+再ビルドされない場合がある (corfu の extensions がコピーされない事例があった)。
+
 過去に **レシピリポジトリと straight.el 本体が 2021 年で凍結**しており、
 それが「新しいバージョンに追従できていない」原因になっていた。
 upstream がデフォルトブランチを `master` → `main` に変えている場合は
@@ -121,6 +130,16 @@ leaf は `:hook` / `:bind` / `:mode` などの遅延キーワードがあると 
 実例: `*font-setting` が `:after nerd-icons` だったが nerd-icons に `:require t` が
 無く、フォント設定が一度も実行されないまま既定の Courier New で起動していた。
 `:after` の対象には `:require t` を付けるか、そもそも依存が本当に必要か見直すこと。
+
+`:custom` にマイナーモードの変数を書いても、そのパッケージが未ロードなら
+**モードは有効にならない**。`customize-set-variable` は
+`(get VAR 'custom-set)` が未設定のとき `set-default` にフォールバックするため、
+変数に `t` が入るだけでモード関数が呼ばれない。
+実例: `(leaf corfu :custom (global-corfu-mode . t))` では corfu が読まれず、
+変数だけ `t` で補完が一切出なかった。
+`:require t` でロードした上で `:config` から明示的に呼ぶこと。
+他のパッケージが偶然 require してくれている場合 (vertico / yasnippet など) は
+動いてしまうので、**動いていることが正しさの証拠にならない**点に注意。
 
 到達不能な設定は次で検出できる：
 
@@ -195,8 +214,12 @@ emacs --batch --debug-init -l early-init.el -l init.el --eval '(message "OK")'
 
 ## 既知の課題（未対応）
 
-- `my-completion.el` の company-box がまだ all-the-icons のアイコン定義を持つ。
-  company → corfu 移行のときにまとめて削除する
+- dired を開くと `Failed: (git status --porcelain --ignored --untracked-files=normal .)`
+  が出る (dired-k)。優先度が低いため保留
+- `straight/repos/` のパッケージ本体の多くが 2021 年のまま。必要になった順に
+  `git pull` していく方針 (corfu と git-gutter は対応済み)
+- `fonts/` の all-the-icons 用 6 フォントは設定から参照されなくなった。
+  Windows にインストール済みのものと合わせて削除してよい
 - `w32-symlinks` ブロックは `:disabled t`。6 年間タイポで無効だったため、
   グローバル advice を無検証で有効化するのを避けている
 - org 9.8 で削除された `org-extract-archive-file` への advice をコメントアウト中

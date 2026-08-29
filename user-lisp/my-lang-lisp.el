@@ -14,8 +14,10 @@
   :require t
   :preface
   (defun my:emacs-lisp-hooks ()
-    (setq-local company-idle-delay 0.2)
-    (setq-local company-backends '(company-semantic company-files company-elisp))
+    ;; corfu 移行前は company-backends に company-elisp などを指定していた。
+    ;; elisp-mode は elisp-completion-at-point を capf として提供するので
+    ;; 追加の指定は要らない。ポップアップを出すまでの間隔だけ短くする。
+    (setq-local corfu-auto-delay 0.2)
     (setq-local show-paren-style 'expression))
   ;; (set-newline-and-indent)
   :hook
@@ -70,9 +72,8 @@
 (leaf cider
   :straight t
   :bind ("C-c M-j" . cider-jack-in)
-  :hook
-  (cider-repl-mode-hook . company-mode)
-  (cider-mode-hook . company-mode)
+  ;; cider-repl-mode-hook / cider-mode-hook で company-mode を有効化していたが、
+  ;; corfu は global-corfu-mode で全バッファに効くので不要になった。
   :custom
   (cider-show-error-buffer . t)
   (cider-auto-select-error-buffer . t)
@@ -93,9 +94,6 @@
 ;;
 ;; lisp
 ;;
-(leaf slime-company
-  :straight t)
-
 (leaf slime
   :straight t
   :commands slime-setup
@@ -108,12 +106,10 @@
                                      ((executable-find "sbcl") "sbcl")
                                      ((executable-find "ccl") "ccl")
                                      (t "sbcl"))))
-  :bind
-  (:company-active-map
-   ("C-d" . company-show-doc-buffer)
-   ("M-." . company-show-location))
   :config
-  (slime-setup '(slime-repl slime-fancy slime-banner slime-company)))
+  ;; slime-company は corfu 移行にともない外した。slime-fancy が
+  ;; slime-complete-symbol を capf として提供するので corfu から使える。
+  (slime-setup '(slime-repl slime-fancy slime-banner)))
 
 (leaf pretty-print
   :hook
