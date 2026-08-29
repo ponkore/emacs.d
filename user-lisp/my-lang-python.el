@@ -35,7 +35,6 @@
   ;; 補完・定義ジャンプ・診断は eglot (pylsp や basedpyright) が担当し、
   ;; 整形は blacken、import 整理は py-isort に任せる。
   ;; REPL は組み込みの python-mode が持っている (C-c C-c / C-c C-p)。
-  ;; 不要になった elpy/rpc-venv は削除してよい。
   :mode ("\\.py\\'" . python-mode)
   :preface
   (defun my:python-setup ()
