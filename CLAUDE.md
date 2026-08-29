@@ -82,6 +82,32 @@ Emacs 31.1 の `user-lisp/` は、既定では `package-activate-all` の直後�
 | `my-utils` | calendar、open-junk-file、grep/ripgrep、blog 用ヘルパ |
 | `my-platform` | Windows / macOS 固有設定 |
 
+## LSP サーバ
+
+eglot が使う言語サーバは自分で入れる。2026-08 時点の導入状況:
+
+| 言語 | サーバ | 入れ方 |
+|---|---|---|
+| TypeScript / JS | typescript-language-server 5.3.0 + **typescript 5.9.3** | `npm i -g typescript@5 typescript-language-server` |
+| PHP | intelephense 1.18.5 | `npm i -g intelephense` |
+| bash | bash-language-server 5.6.0 | `npm i -g bash-language-server` |
+| Rust | rust-analyzer 1.97.1 | `rustup component add rust-analyzer` |
+| Python | 未導入 | `uv tool install basedpyright` |
+
+### TypeScript は 5.x に固定すること
+
+**`npm i -g typescript` で入る 7.x（Go 実装のネイティブ版）は使えない。**
+7.x には `lib/tsserver.js` が無く、typescript-language-server が
+`Could not find a valid TypeScript installation` で初期化に失敗する。
+`npm i -g typescript@5` を使う。
+
+### npm グローバルは nvm のバージョンに紐づく
+
+prefix は `~/scoop/apps/nvm/current/nodejs/nodejs`。**nvm で Node を切り替えると
+グローバルパッケージも切り替わる**ので、切り替えたら入れ直しが要る。
+プロジェクトローカル（`npm i -D`）に寄せると安定する。`add-node-modules-path` が
+`node_modules/.bin` を `exec-path` に足すので、ローカル版が優先される。
+
 ## tree-sitter
 
 メジャーモードは tree-sitter 版（`*-ts-mode`）を使う方針。ただし文法は
@@ -252,9 +278,7 @@ emacs --batch --debug-init -l early-init.el -l init.el --eval '(message "OK")'
   `git pull` していく方針 (corfu と git-gutter は対応済み)
 - `fonts/` の all-the-icons 用 6 フォントは設定から参照されなくなった。
   Windows にインストール済みのものと合わせて削除してよい
-- LSP サーバは `rust-analyzer` のみ導入済み。`intelephense` /
-  `typescript-language-server` / `bash-language-server` / `pylsp` は未導入
-  （npm や pip で入れる）
+- Python の LSP サーバ（basedpyright / pylsp）が未導入
 - `straight/build/` に lsp-mode / lsp-ui / lsp-sourcekit / company 系 /
   flycheck 系 / tide / js2-mode / elpy など、
   設定から参照されなくなったパッケージが残っている
