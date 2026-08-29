@@ -1046,29 +1046,32 @@ Providing ARG-OVERRIDES will modify the creation of the icon."
 ;;; [3] スクロール設定
 
 (leaf buffer
+  ;; TODO: 組み込みの `scroll-error-top-bottom' を t にすれば
+  ;; scroll-up-command / scroll-down-command について同じ効果が得られる。
+  ;; ただしこの設定は生の scroll-up / scroll-down を対象にしており
+  ;; (C-z が scroll-down に直接バインドされている)、挙動が完全には一致しないため
+  ;; ここでは既存の動作を保ったまま advice-add へ置き換えるにとどめる。
   :config
-  ;; バッファの先頭までスクロールアップ
-  (defadvice scroll-up (around scroll-up-around)
-    (interactive)
-    (let* ( (start_num (+ 1 (count-lines (point-min) (point))) ) )
+  ;; バッファの末尾までスクロールできないときは末尾へ飛ぶ
+  (defun my:scroll-up-to-bottom (orig &rest args)
+    "残り行数が 1 画面に満たなければ point-max へ移動する。"
+    (let ((start-num (1+ (count-lines (point-min) (point)))))
       (goto-char (point-max))
-      (let* ( (end_num (+ 1 (count-lines (point-min) (point))) ) )
-        ;;(goto-line start_num )
+      (let ((end-num (1+ (count-lines (point-min) (point)))))
         (goto-char (point-min))
-        (forward-line (1- start_num))
-        (let* ( (limit_num (- (- end_num start_num) (window-height)) ))
-          (if (< (- (- end_num start_num) (window-height)) 0)
-              (goto-char (point-max))
-            ad-do-it)) )) )
-  (ad-activate 'scroll-up)
-  ;; バッファの最後までスクロールダウン
-  (defadvice scroll-down (around scroll-down-around)
-    (interactive)
-    (let* ( (start_num (+ 1 (count-lines (point-min) (point)))) )
-      (if (< start_num (window-height))
+        (forward-line (1- start-num))
+        (if (< (- (- end-num start-num) (window-height)) 0)
+            (goto-char (point-max))
+          (apply orig args)))))
+  (advice-add 'scroll-up :around #'my:scroll-up-to-bottom)
+  ;; バッファの先頭までスクロールできないときは先頭へ飛ぶ
+  (defun my:scroll-down-to-top (orig &rest args)
+    "先頭から 1 画面以内にいるなら point-min へ移動する。"
+    (let ((start-num (1+ (count-lines (point-min) (point)))))
+      (if (< start-num (window-height))
           (goto-char (point-min))
-        ad-do-it) ))
-  (ad-activate 'scroll-down))
+        (apply orig args))))
+  (advice-add 'scroll-down :around #'my:scroll-down-to-top))
 
 ;;; [3] バックアップファイルを作らない
 
@@ -1483,12 +1486,12 @@ _R_ename    ch_M_od        _t_oggle       _e_dit    _[_ hide detail     _._toggg
     (org-pandoc-options-for-beamer-pdf . '((pdf-engine . "xelatex")))
     (org-pandoc-options-for-latex-pdf . '((pdf-engine . "xelatex"))))
   :config
-  (defadvice org-pandoc-run (around ad-org-pandoc-run compile)
-    (let ((old-default-process-coding-system default-process-coding-system))
-      (setq default-process-coding-system '(utf-8 . cp932))
-      ad-do-it
-      (setq default-process-coding-system old-default-process-coding-system)))
-  (ad-activate 'org-pandoc-run))
+  ;; pandoc の呼び出し中だけ出力側を cp932 にする。
+  ;; setq での退避/復元は非局所脱出で復元されないため let 束縛にした。
+  (defun my:org-pandoc-run-with-cp932 (orig &rest args)
+    (let ((default-process-coding-system '(utf-8 . cp932)))
+      (apply orig args)))
+  (advice-add 'org-pandoc-run :around #'my:org-pandoc-run-with-cp932))
 
 (leaf ob-mermaid
   :straight t
@@ -2378,12 +2381,10 @@ set pagesize 1000
   :config
   ;; Windows 上の SVN で日本語ファイル名がうまく扱えない問題への対応
   ;; (一時的に default-process-coding-system を '(utf-8 . cp932) に変更する)
-  (defadvice vc-svn-command (around vc-svn-coding-system-setup compile)
-    (let ((old-default-process-coding-system default-process-coding-system))
-      (setq default-process-coding-system '(utf-8 . cp932))
-      ad-do-it
-      (setq default-process-coding-system old-default-process-coding-system)))
-  (ad-activate-regexp "vc-svn-coding-system-setup"))
+  (defun my:vc-svn-command-with-cp932 (orig &rest args)
+    (let ((default-process-coding-system '(utf-8 . cp932)))
+      (apply orig args)))
+  (advice-add 'vc-svn-command :around #'my:vc-svn-command-with-cp932))
 
 ;;; --------------------------------------------------
 ;;; Shell
@@ -2565,19 +2566,15 @@ set pagesize 1000
   ;;   "When a prefix argument given, specify coding-system-for-read."
   ;;   (let ((coding-system-for-read 'utf-8))
   ;;     ad-do-it))
-  (defadvice grep (around grep-coding-system-setup compile)
-    ""
-    (let ((old-default-process-coding-system default-process-coding-system)
-          (old-null-device null-device))
-      (setq default-process-coding-system '(utf-8 . cp932))
-      (setq null-device "/dev/null")
-      ad-do-it
-      ;;(setq null-device default-null-device)
-      (setq default-process-coding-system old-default-process-coding-system)))
-  ;; (ad-activate-regexp "grep-coding-system-setup")
-  ;; (ad-deactivate-regexp "grep-coding-system-setup")
-  (ad-activate 'grep)
-  )
+  ;; grep 実行中だけ出力を cp932 として読み、null-device を Unix 形式にする。
+  ;; 旧コードは null-device を復元しておらず (復元行がコメントアウトされていた)、
+  ;; 一度 M-x grep するとセッション全体で null-device が "/dev/null" のままだった。
+  ;; let 束縛にしたので両方とも確実に元へ戻る。
+  (defun my:grep-with-cp932 (orig &rest args)
+    (let ((default-process-coding-system '(utf-8 . cp932))
+          (null-device "/dev/null"))
+      (apply orig args)))
+  (advice-add 'grep :around #'my:grep-with-cp932))
 
 ;;; [3] ripgrep
 
