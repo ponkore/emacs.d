@@ -99,8 +99,20 @@ Emacs 31.1 の `user-lisp/` は、既定では `package-activate-all` の直後�
 - `*-ts-mode` は従来モードのフックを継承しない。`:hook` は
   `((foo-mode-hook foo-ts-mode-hook) . func)` の形で両方に張ること
 
-2026-08 時点でこのマシンには C コンパイラが無く、文法も 1 つも入っていない。
-つまり実際に動いているのは従来モード側である。
+- **`my:treesit-remap` は必ずトップレベルで呼ぶこと**。leaf の `:config` は
+  `(eval-after-load '<leaf名>)` に包まれるので、そこで差し替えても
+  「その回に開いたバッファ」には間に合わない。さらに差し替えが効くと
+  従来のモードはもうロードされないため、`:config` は二度と実行されない
+- `.tsx` の `auto-mode-alist` 登録は **web-mode の leaf より後**に置くこと。
+  `:mode` が先頭に積むので、前に置くと web-mode に負ける
+
+導入済みの文法（`tree-sitter/`、git 管理外）:
+bash / c-sharp / css / dockerfile / html / javascript / jsdoc / json /
+python / rust / toml / tsx / typescript / yaml の 14 個。
+`jsdoc` は `js-ts-mode` がコメント解析に `treesit-ensure-installed` するので必要。
+
+コンパイラは scoop の `gcc`（mingw-w64 15.2.0、`~/scoop/apps/gcc/current/bin`）。
+Emacs は `cc` → `gcc` → `c99` の順に探すので `gcc` があれば足りる。
 
 ## パッケージ管理
 
@@ -240,12 +252,9 @@ emacs --batch --debug-init -l early-init.el -l init.el --eval '(message "OK")'
   `git pull` していく方針 (corfu と git-gutter は対応済み)
 - `fonts/` の all-the-icons 用 6 フォントは設定から参照されなくなった。
   Windows にインストール済みのものと合わせて削除してよい
-- tree-sitter の文法が 1 つも入っていない。C コンパイラ（`scoop install gcc` など）を
-  入れてから `M-x my:install-treesit-grammars` を実行する必要がある
-- LSP サーバがこのマシンに一つも入っていない。`rust-analyzer` は rustup の
-  プロキシだけで本体未インストール（`rustup component add rust-analyzer` が必要）、
-  `intelephense` / `bash-language-server` も未導入。eglot の設定自体は
-  プロセス起動まで検証済み
+- LSP サーバは `rust-analyzer` のみ導入済み。`intelephense` /
+  `typescript-language-server` / `bash-language-server` / `pylsp` は未導入
+  （npm や pip で入れる）
 - `straight/build/` に lsp-mode / lsp-ui / lsp-sourcekit / company 系 /
   flycheck 系 / tide / js2-mode / elpy など、
   設定から参照されなくなったパッケージが残っている

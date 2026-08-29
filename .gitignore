@@ -32,3 +32,5 @@
 /tmp/*
 !/tmp/*.md
 /user-lisp-autoloads.el
+/tree-sitter/
+/intelephense/

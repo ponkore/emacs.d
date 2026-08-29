@@ -28,10 +28,13 @@
   ((rust-mode-hook rust-ts-mode-hook) . eglot-ensure)
   ((rust-mode-hook rust-ts-mode-hook) . cargo-minor-mode)
   ((rust-mode-hook rust-ts-mode-hook) . yas-minor-mode)
-  (rust-ts-mode-hook . my:rust-ts-setup)
-  :config
-  (setq rust-ts-mode-indent-offset 4)
-  (my:treesit-remap 'rust-mode 'rust-ts-mode 'rust))
+  (rust-ts-mode-hook . my:rust-ts-setup))
+
+;; leaf の :config は (eval-after-load 'rust-mode ...) に包まれる。
+;; rust-ts-mode に差し替えると rust-mode 自体がロードされなくなるので、
+;; 差し替えとインデント設定はトップレベルで済ませる。
+(setq rust-ts-mode-indent-offset 4)
+(my:treesit-remap 'rust-mode 'rust-ts-mode 'rust)
 
 ;;; [3] C++
 
@@ -66,8 +69,6 @@
   (csharp-mode-hook . my:csharp-mode-setup)
   (csharp-ts-mode-hook . my:csharp-ts-mode-setup)
   :config
-  (setq csharp-ts-mode-indent-offset 4)
-  (my:treesit-remap 'csharp-mode 'csharp-ts-mode 'c-sharp)
   (defun my:csharp-ts-mode-setup ()
     "csharp-ts-mode 用のセットアップ。"
     (turn-on-auto-revert-mode)
@@ -94,6 +95,10 @@
     ;; 組み込みの csharp-mode には存在しないため無効化
     ;; (setq csharp-want-imenu nil)
     ))
+
+;; csharp-mode の :config も同じ理由でトップレベルに出す。
+(setq csharp-ts-mode-indent-offset 4)
+(my:treesit-remap 'csharp-mode 'csharp-ts-mode 'c-sharp)
 
 (provide 'my-lang-native)
 ;;; my-lang-native.el ends here

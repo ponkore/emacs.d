@@ -46,6 +46,8 @@ Windows は %APPDATA%/pandoc、それ以外は XDG または ~/.pandoc。"
           (html       . ("https://github.com/tree-sitter/tree-sitter-html"))
           (javascript . ("https://github.com/tree-sitter/tree-sitter-javascript"))
           (json       . ("https://github.com/tree-sitter/tree-sitter-json"))
+          ;; js-ts-mode がコメントの解析に使う (treesit-ensure-installed される)
+          (jsdoc      . ("https://github.com/tree-sitter/tree-sitter-jsdoc"))
           (python     . ("https://github.com/tree-sitter/tree-sitter-python"))
           (rust       . ("https://github.com/tree-sitter/tree-sitter-rust"))
           (toml       . ("https://github.com/tree-sitter/tree-sitter-toml"))

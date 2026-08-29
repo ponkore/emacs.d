@@ -105,10 +105,7 @@
          ("\\.json\\'" . js-json-mode))
   :custom
   (js-indent-level . 2)
-  :hook ((js-mode-hook js-ts-mode-hook) . my:web-lang-setup)
-  :config
-  (my:treesit-remap 'js-mode 'js-ts-mode 'javascript)
-  (my:treesit-remap 'js-json-mode 'json-ts-mode 'json))
+  :hook ((js-mode-hook js-ts-mode-hook) . my:web-lang-setup))
 
 (leaf typescript-mode
   ;; 文法が入っていない環境向けのフォールバック。文法があれば
@@ -118,13 +115,16 @@
   :custom
   (typescript-indent-level . 2)
   :hook ((typescript-mode-hook typescript-ts-mode-hook tsx-ts-mode-hook)
-         . my:web-lang-setup)
-  :config
-  (setq typescript-ts-mode-indent-offset 2)
-  (my:treesit-remap 'typescript-mode 'typescript-ts-mode 'typescript)
-  ;; .tsx は文法があれば tsx-ts-mode、無ければ web-mode (下記) で開く。
-  (when (my:treesit-available-p 'tsx)
-    (add-to-list 'auto-mode-alist '("\\.tsx\\'" . tsx-ts-mode))))
+         . my:web-lang-setup))
+
+;; leaf の :config は (eval-after-load '<leaf名> ...) に包まれるので、
+;; そこでメジャーモードを差し替えても「その回に開いたバッファ」には
+;; 間に合わない。そもそも差し替えが効くと従来のモードはロードされなく
+;; なるため、差し替えとインデント設定はトップレベルで済ませる。
+(setq typescript-ts-mode-indent-offset 2)
+(my:treesit-remap 'js-mode 'js-ts-mode 'javascript)
+(my:treesit-remap 'js-json-mode 'json-ts-mode 'json)
+(my:treesit-remap 'typescript-mode 'typescript-ts-mode 'typescript)
 
 (leaf web-mode
   :straight t
@@ -140,6 +140,12 @@
                      (setq tab-width 4)
                      (indent-tabs-mode 0)
                      (whitespace-mode))))
+
+;; .tsx は文法があれば tsx-ts-mode、無ければ web-mode で開く。
+;; web-mode の :mode が auto-mode-alist の先頭に .tsx を積むので、
+;; それより後に登録する必要がある。
+(when (my:treesit-available-p 'tsx)
+  (add-to-list 'auto-mode-alist '("\\.tsx\\'" . tsx-ts-mode)))
 
 (leaf scss-mode
   :straight t

@@ -46,9 +46,12 @@
   :bind
   ;; 旧 elpy-format-code の置き換え
   (:python-mode-map
-   ("C-c C-r f" . blacken-buffer))
-  :config
-  (my:treesit-remap 'python-mode 'python-ts-mode 'python))
+   ("C-c C-r f" . blacken-buffer)))
+
+;; leaf の :config は (eval-after-load 'python ...) に包まれるため、
+;; そこで差し替えても「その回に開いたバッファ」には間に合わない。
+;; メジャーモードの差し替えは起動時に済ませておく必要がある。
+(my:treesit-remap 'python-mode 'python-ts-mode 'python)
 
 (leaf blacken
   :straight t
