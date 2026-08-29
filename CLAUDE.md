@@ -116,6 +116,12 @@ leaf は `:hook` / `:bind` / `:mode` などの遅延キーワードがあると 
 - 疑似パッケージ名（`shell-windows` など OS 別のまとまり）を使う場合は
   `:leaf-defer nil` を付けて遅延を無効化する
 
+`:after FOO` も同じ罠を持つ。leaf は `:config` を `(eval-after-load 'FOO ...)` で
+包むため、**FOO がどこからも `require` されない構成だと設定が永久に走らない**。
+実例: `*font-setting` が `:after nerd-icons` だったが nerd-icons に `:require t` が
+無く、フォント設定が一度も実行されないまま既定の Courier New で起動していた。
+`:after` の対象には `:require t` を付けるか、そもそも依存が本当に必要か見直すこと。
+
 到達不能な設定は次で検出できる：
 
 ```elisp
@@ -125,6 +131,10 @@ leaf は `:hook` / `:bind` / `:mode` などの遅延キーワードがあると 
     (when (and (symbolp f) (not (featurep f)) (not (locate-library (symbol-name f))))
       (princ (format "%s\n" f)))))
 ```
+
+この検出スニペットは `locate-library` が通る（= インストール済みだがロードされない）
+パッケージに対する `:after` は拾えない点に注意。実際に GUI 起動して
+`(featurep 'FOO)` を確認するのが確実。
 
 ## プラットフォーム固有の注意事項
 
@@ -158,12 +168,8 @@ emacs --batch --debug-init -l early-init.el -l init.el --eval '(message "OK")'
 
 ## 既知の課題（未対応）
 
-- `M-x grep` が Windows で失敗する。MSYS の bash は `c:/...` 形式のパスを
-  解釈できない（`/c/...` が必要）ため、`grep-command` に絶対パスを
-  埋め込んでいるのが原因
-- all-the-icons のフォントが Windows にインストールされておらず、
-  モードライン等のアイコンが豆腐になる。`fonts/` に TTF はある。
-  中期的には nerd-icons への移行を検討（`HackGenNerd` はインストール済み）
+- `my-completion.el` の company-box がまだ all-the-icons のアイコン定義を持つ。
+  company → corfu 移行のときにまとめて削除する
 - `w32-symlinks` ブロックは `:disabled t`。6 年間タイポで無効だったため、
   グローバル advice を無検証で有効化するのを避けている
 - org 9.8 で削除された `org-extract-archive-file` への advice をコメントアウト中

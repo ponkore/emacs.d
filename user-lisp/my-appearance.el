@@ -12,7 +12,11 @@
 
 (leaf *font-setting
   :if window-system
-  :after nerd-icons
+  ;; 以前は :after all-the-icons だったが、フォント設定自体はアイコン
+  ;; パッケージに依存しない。:after を付けると leaf が :config を
+  ;; (eval-after-load 'nerd-icons ...) で包むため、nerd-icons が
+  ;; require されない構成では設定が永久に適用されず、既定の
+  ;; Courier New のままになっていた。
   :config
   (defun emacs-font-setting (font-name size)
     "Set emacs japanese fonts."
@@ -108,6 +112,10 @@
 
 (leaf nerd-icons
   :straight t
+  ;; nerd-icons-dired / -ibuffer / -completion が :after nerd-icons で
+  ;; ぶら下がっているため、ここで必ずロードしておく。
+  ;; そうしないと feature が読まれず、それらが一切有効にならない。
+  :require t
   :custom
   ;; インストール済みの Nerd Font を使う。
   ;; nerd-icons-install-fonts を実行すると Symbols Nerd Font Mono が入るが、
