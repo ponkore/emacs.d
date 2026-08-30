@@ -279,8 +279,8 @@ dired のディレクトリアイコンが `U+E6AD` なので、HackGen 系だ�
 実際のグリフ有無を見て選ぶので、**フォント名を決め打ちしないこと**。
 名前で決め打ちすると、v2 のフォントを掴んでアイコンが全滅する。
 
-`fonts/` の all-the-icons 用 6 フォントは company-box がまだ使っている。
-corfu へ移行したら削除してよい。
+`fonts/` に置くのは `NFM.ttf` だけ。all-the-icons 用の 6 フォントは
+（all-the-icons をやめたので）リポジトリからも Windows からも削除済み。
 
 ## プラットフォーム固有の注意事項
 
@@ -329,12 +329,8 @@ emacs --batch --debug-init -l early-init.el -l init.el --eval '(message "OK")'
 
 ## 既知の課題（未対応）
 
-- dired を開くと `Failed: (git status --porcelain --ignored --untracked-files=normal .)`
-  が出る (dired-k)。優先度が低いため保留
 - `straight/repos/` のパッケージ本体の多くが 2021 年のまま。必要になった順に
   `git pull` していく方針 (corfu と git-gutter は対応済み)
-- `fonts/` の all-the-icons 用 6 フォントは設定から参照されなくなった。
-  Windows にインストール済みのものと合わせて削除してよい
 - `w32-symlinks` ブロックは `:disabled t`。6 年間タイポで無効だったため、
   グローバル advice を無検証で有効化するのを避けている
 - org 9.8 で削除された `org-extract-archive-file` への advice をコメントアウト中

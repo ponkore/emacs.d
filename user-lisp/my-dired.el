@@ -10,7 +10,8 @@
 ;;; [3] dired
 
 (leaf dired-k
-  :straight t)
+  :straight t
+  :commands dired-k dired-k-no-revert)
 
 (leaf dired
   :commands dired-vc-status
@@ -19,11 +20,19 @@
    ("V" . dired-vc-status)
    ("K" . dired-k)
    ("G" . ripgrep-regexp)
-   ("g" . my:dired-revert-buffer)
    ("." . hydra-dired/body))
   :hook
-  (dired-mode-hook . dired-k)
-  (dired-initial-position-hook . dired-k)
+  ;; 以前は dired-mode-hook と dired-initial-position-hook の両方に
+  ;; dired-k を付けていた。dired バッファを開くと両方が発火し、
+  ;; dired-k--start-git-status が 2 回走る。2 回目は 1 回目のプロセスを
+  ;; interrupt-process するため、1 回目のセンチネルが非 0 終了を見て
+  ;;   Failed: (git status --porcelain --ignored --untracked-files=normal .)
+  ;; を出していた (ハイライト自体は 2 回目が成功するので効いていた)。
+  ;; upstream の README どおり 1 つに絞る。dired-after-readin-hook なら
+  ;; 初回表示と g での再読み込みの両方で 1 回だけ走る。
+  ;; dired-k は先頭で revert-buffer を呼ぶのでこのフックでは使えない
+  ;; (再帰する)。revert しない dired-k-no-revert を使う。
+  (dired-after-readin-hook . dired-k-no-revert)
   :custom
   ;;
   ;; http://qiita.com/l3msh0@github/items/8665122e01f6f5ef502f
@@ -37,10 +46,9 @@
   ;;
   (ls-lisp-dirs-first . t)
   :config
-  (defun my:dired-revert-buffer ()
-    (interactive)
-    (revert-buffer)
-    (dired-k))
+  ;; my:dired-revert-buffer (g に割り当てていた revert-buffer + dired-k) は
+  ;; 削除した。dired 既定の g (revert-buffer) で dired-after-readin-hook が
+  ;; 走り dired-k-no-revert が呼ばれるので、明示的な呼び出しは二重起動になる。
   ;; バージョン管理システム
   ;; diredから適切なバージョン管理システムの*-statusを起動
   (defun find-path-in-parents (directory base-names)
