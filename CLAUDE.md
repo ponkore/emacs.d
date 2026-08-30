@@ -67,7 +67,7 @@ Emacs 31.1 の `user-lisp/` は、既定では `package-activate-all` の直後�
 | `my-completion` | vertico、consult、marginalia、orderless、corfu、cape |
 | `my-keybind` | グローバルキーバインド（`C-h` → `delete-backward-char`、`C-z` → `scroll-down`） |
 | `my-editor` | hydra、symbol-overlay、smartparens、whitespace、yasnippet、recentf ほか |
-| `my-dired` | dired、hydra-dired、neotree（差分表示は my-vc の diff-hl） |
+| `my-dired` | dired、hydra-dired、dired-sidebar（`F8`。差分表示は my-vc の diff-hl） |
 | `my-text` | org-mode、ox-pandoc、markdown、rst、adoc |
 | `my-lang-lisp` | Emacs Lisp、Clojure（cider）、Common Lisp（slime） |
 | `my-lang-python` | Python（python-ts-mode、pyvenv、py-isort、blacken） |

@@ -1,4 +1,4 @@
-;;; my-dired.el --- dired と neotree  -*- lexical-binding: t -*-
+;;; my-dired.el --- dired と dired-sidebar  -*- lexical-binding: t -*-
 ;;; Commentary:
 ;; init.el から機械的に分割したもの。読み込み順は init.el を参照。
 ;;; Code:
@@ -99,42 +99,58 @@ _R_ename    ch_M_od        _t_oggle       _e_dit    _[_ hide detail     _._toggg
                ("q" nil)
                ("." nil :color blue)))
 
-;;; [3] neotree
+;;; [3] dired-sidebar
 
-(leaf neotree
+;; neotree から移行した。neotree をやめた理由:
+;;   - 手元のクローンが 2020-03 で止まっていた
+;;   - neo-theme 'icons が all-the-icons を要求するため、all-the-icons を
+;;     外した時点で F8 が
+;;       Package `all-the-icons' isn't installed
+;;     でエラーになり、サイドバーが開けなくなっていた
+;;
+;; dired-sidebar はサイドバーのバッファ自体が dired バッファなので、
+;; dired 用に設定してあるもの (キーバインド、nerd-icons-dired、
+;; diff-hl-dired) がそのまま効く。依存も emacs + compat だけで増えない。
+;; treemacs も候補だったが、独自のバッファ・キーマップ・アイコン体系を持ち
+;; 依存が 4 つ増えるため、この設定の作りには合わないと判断した。
+
+(leaf dired-sidebar
   :straight t
-  :bind (("<f8>" . neotree-toggle)
-         (:neotree-mode-map
-          ;; ("RET" . neotree-enter-hide)  ;; ファイルを開く時自動で neotree を閉じる。あまり便利じゃなかったので一旦コメントアウト
-          ("a" . neotree-hidden-file-toggle)
-          ("<left>" . neotree-select-up-node)
-          ("<right>" . neotree-change-root)))
-  :hook (neo-after-create-hook . (lambda (_) (if (display-graphic-p) (call-interactively 'neotree-text-scale))))
+  :commands dired-sidebar-toggle-sidebar
+  :bind
+  (("<f8>" . dired-sidebar-toggle-sidebar)
+   (:dired-sidebar-mode-map
+    ;; neotree の a (隠しファイルの表示切替) 相当。
+    ;; dired-omit-mode は dired-x (組み込み) のもの。
+    ("a" . dired-omit-mode)
+    ;; neotree の <left> (親ノードへ) 相当。既定では ^ と - にもある。
+    ("<left>" . dired-sidebar-up-directory)
+    ;; neotree の <right> (そこをルートにする) 相当。
+    ;; dired-sidebar-find-file はディレクトリ上ではそこを新しいルートにする。
+    ("<right>" . dired-sidebar-find-file)))
+  :custom
+  ;; nerd-icons-dired を使ってアイコンを出す (他の箇所と同じ体系)
+  (dired-sidebar-theme . 'nerd-icons)
+  (dired-sidebar-width . 35)
+  ;; neotree では開くたびに text-scale を 1 段階下げていた。
+  ;; dired-sidebar は dired-sidebar-face を buffer-face-mode で当てる。
+  (dired-sidebar-use-custom-font . t)
+  ;; ファイルを開いてもサイドバーは開いたままにする
+  ;; (neotree の neotree-enter-hide は「あまり便利じゃなかった」と
+  ;;  コメントされ、割り当てもされていなかったので同じ方針にする)
+  (dired-sidebar-close-sidebar-on-file-open . nil)
+  ;; 選択中のバッファのファイルをサイドバー上で追いかける
+  (dired-sidebar-should-follow-file . t)
   :config
-  (setq neo-theme (if (display-graphic-p) 'icons 'arrow))
-
-  ;; Change neotree's font size
-  ;; Tips from https://github.com/jaypei/emacs-neotree/issues/218
-  (defun neotree-text-scale ()
-    "Text scale for neotree."
-    (interactive)
-    (text-scale-adjust 0)
-    (text-scale-decrease 1)
-    (message nil))
-  ;; neotree enter hide
-  ;; Tips from https://github.com/jaypei/emacs-neotree/issues/77
-  (defun neo-open-file-hide (full-path &optional arg)
-    "Open file and hiding neotree.
-     The description of FULL-PATH & ARG is in `neotree-enter'."
-    (neo-global--select-mru-window arg)
-    (find-file full-path)
-    (neotree-hide))
-
-  (defun neotree-enter-hide (&optional arg)
-    "Neo-open-file-hide if file, Neo-open-dir if dir.
-     The description of ARG is in `neo-buffer--execute'."
-    (interactive "P")
-    (neo-buffer--execute arg 'neo-open-file-hide 'neo-open-dir)))
+  ;; dired-sidebar-face は defface だが、dired-sidebar-set-font は
+  ;;   (when (bound-and-true-p dired-sidebar-face)
+  ;;     (setq-local buffer-face-mode-face dired-sidebar-face) ...)
+  ;; と「変数」として読み、buffer-face-mode-face に渡している。
+  ;; つまり :custom-face ではなく face 属性のプロパティリストを
+  ;; 変数に入れる必要がある。
+  (setq dired-sidebar-face '(:height 0.9))
+  ;; dired-omit-mode のため
+  (require 'dired-x))
 
 (provide 'my-dired)
 ;;; my-dired.el ends here
