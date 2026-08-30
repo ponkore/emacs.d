@@ -115,8 +115,10 @@
 ;; tr-ime / w32-ime はこれまでどの leaf ブロックでも宣言されておらず、
 ;; elpa/ に残っていた 2020〜2021 年版が package-activate-all によって
 ;; 暗黙に有効化されるのに依存していた。straight で明示的に導入する。
+;; 2026-08 に確認したところ、tr-ime は 0.5.0 (2022-06)、w32-ime は 2020-11 の
+;; コミットが、それぞれ upstream の最新だった。より新しい版は存在しない。
 ;; 導入手順 (tr-ime-advanced-install -> default-input-method -> w32-ime-initialize)
-;; は現行版でも変わっていない。
+;; も README の推奨どおりで、変更の必要はない。
 (leaf w32-ime
   :if (eq system-type 'windows-nt)
   :straight t)
@@ -143,21 +145,35 @@
   ;; 標準IMEの設定
   (setq default-input-method "W32-IME")
 
-  ;; IME状態のモードライン表示 (TODO: doom-modeline に細工が必要)
-  (setq-default w32-ime-mode-line-state-indicator "[Aa]")
-  (setq w32-ime-mode-line-state-indicator-list '("[Aa]" "[あ]" "[Aa]"))
+  ;; IME 状態のモードライン表示
+  ;;
+  ;; w32-ime-mode-line-state-indicator(-list) は w32-ime が自前で
+  ;; mode-line-format の先頭に差し込むための変数で、mode-line-format を
+  ;; まるごと差し替える doom-modeline とは併用できない (差し込みが消える)。
+  ;; doom-modeline の input-method セグメントは current-input-method-title を
+  ;; 見ており、w32-ime はそこに w32-ime-input-method-title を代入する。
+  ;; この変数は既定が nil なので、何も設定しないとモードラインに何も出ない。
+  ;; ここを設定するのが doom-modeline 側に出す正しい方法。
+  (setq w32-ime-input-method-title "[あ]")
 
   ;; IMEの初期化
   (w32-ime-initialize)
 
   ;; IME 制御 (yes/no などの入力の時に IME を off にする)
-  (wrap-function-to-control-ime 'universal-argument t nil)
-  (wrap-function-to-control-ime 'read-string nil nil)
-  (wrap-function-to-control-ime 'read-char nil nil)
-  (wrap-function-to-control-ime 'read-from-minibuffer nil nil)
-  (wrap-function-to-control-ime 'y-or-n-p nil nil)
-  (wrap-function-to-control-ime 'yes-or-no-p nil nil)
-  (wrap-function-to-control-ime 'map-y-or-n-p nil nil)
+  ;;
+  ;; wrap-function-to-control-ime は 2020 年に
+  ;; w32-ime-wrap-function-to-control-ime へ改名され、旧名は
+  ;; define-obsolete-function-alias で残っているだけ (警告が出る)。
+  ;; 第 2 引数以降も現行版ではダミーで、渡しても何の効果もない
+  ;; (中身は単なる advice-add になっている)。
+  (dolist (fn '(universal-argument
+                read-string
+                read-char
+                read-from-minibuffer
+                y-or-n-p
+                yes-or-no-p
+                map-y-or-n-p))
+    (w32-ime-wrap-function-to-control-ime fn))
 
   ;; IME OFF時の初期カーソルカラー
   (set-cursor-color "white")
@@ -172,8 +188,12 @@
   ;; バッファ切り替え時にIME状態を引き継ぐ
   (setq w32-ime-buffer-switch-p nil)
 
-  ;; IME on/off key bind
-  (global-set-key (kbd "M-`") 'toggle-input-method)
+  ;; IME の on/off は C-\ (toggle-input-method) と 漢字キーで行う。
+  ;; ここには (global-set-key (kbd "M-`") 'toggle-input-method) があったが、
+  ;; my-keybind.el が後から M-` を ignore に割り当てるため死んでいた。
+  ;; M-` (= Alt + 半角/全角) と M-kanji を ignore にしているのは意図的で、
+  ;; その組み合わせは tr-ime / Windows 側が IME のトグルとして処理するため、
+  ;; Emacs 側では何もしないのが正しい。
 
   ;; minibuffer に入った時、IME を OFF にする
   ;; helm-minibuffer-set-up-hook にも同じものを足していたが、helm は

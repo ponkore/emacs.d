@@ -364,7 +364,20 @@ dired のディレクトリアイコンが `U+E6AD` なので、HackGen 系だ�
   未設定だと Windows の Emacs は `%APPDATA%` を `~` とみなすため、
   Explorer やスタートメニューから起動したときに `init.el` が見つからない
 - Windows のシェルは Git 付属の `bash.exe`（存在するときだけ設定）、エンコーディングは cp932/UTF-8 混在
-- Windows IME 統合には `tr-ime` + `w32-ime`（どちらも straight で導入）
+- Windows IME 統合には `tr-ime` + `w32-ime`（どちらも straight で導入）。
+  2026-08 時点で tr-ime 0.5.0（2022-06）、w32-ime は 2020-11 のコミットが
+  それぞれ upstream の最新で、これより新しい版は無い。導入手順
+  （`tr-ime-advanced-install` → `default-input-method` → `w32-ime-initialize`）も
+  README の推奨どおり
+- **モードラインの IME 表示は `w32-ime-input-method-title` で設定する。**
+  `w32-ime-mode-line-state-indicator` は w32-ime が自前で `mode-line-format` の
+  先頭に差し込むための変数で、`mode-line-format` をまるごと差し替える
+  doom-modeline とは併用できない。doom-modeline の `input-method` セグメントは
+  `current-input-method-title` を見ており、w32-ime はそこに
+  `w32-ime-input-method-title`（既定 nil）を入れる
+- `M-\`` と `M-kanji` を `ignore` にしているのは意図的。その組み合わせは
+  tr-ime / Windows 側が IME のトグルとして処理するので、Emacs 側では
+  何もしないのが正しい。Emacs から切り替えるのは `C-\` と 漢字キー
 - macOS / Linux では `exec-path-from-shell` を使用
 - OS 判定は `(eq system-type 'windows-nt)` / `'darwin` / `'gnu/linux`。
   ウィンドウシステム判定は `window-system` の `'w32` / `'ns` / `'x` / `'pgtk`
