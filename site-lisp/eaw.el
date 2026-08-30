@@ -1,4 +1,4 @@
-;;; eaw.el --- Fix east asian ambiguous width issue for emacs
+;;; eaw.el --- Fix east asian ambiguous width issue for emacs  -*- lexical-binding: nil -*-
 ;; Author: HAMANO Tsukasa <code@cuspy.org>
 ;; URL: https://github.com/hamano/locale-eaw
 ;; Version: 12

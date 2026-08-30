@@ -1,5 +1,4 @@
 /elpa/
-/elpy/
 /auto-save-list/
 /history
 /url/cookies
@@ -10,6 +9,7 @@
 /.org-id-locations
 /projectile-bookmarks.eld
 /projectile.cache
+/projectile-frecency.eld
 /recentf
 /meghanada
 /network-security.data
@@ -25,3 +25,12 @@
 /org-persist
 /tramp
 /my-config/init.el
+
+# --- 2026-08 リファクタリングに伴う追加 ---
+/eln-cache/
+*~
+/tmp/*
+!/tmp/*.md
+/user-lisp-autoloads.el
+/tree-sitter/
+/intelephense/

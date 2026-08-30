@@ -1,4 +1,4 @@
-;;; cp5022x.el --- cp50220, cp50221, cp50222 coding system
+;;; cp5022x.el --- cp50220, cp50221, cp50222 coding system  -*- lexical-binding: nil -*-
 
 ;; Copyright (C) 2008  ARISAWA Akihiro
 
