@@ -34,7 +34,16 @@
   :hook
   (clojure-mode-hook . yas-minor-mode)
   (clojure-mode-hook . smartparens-strict-mode)
-  (clojure-mode-hook . cljstyle-format-on-save-mode)
+  ;; (clojure-mode-hook . cljstyle-format-on-save-mode) は削除した。
+  ;; cljstyle-format はどのレシピリポジトリにも無く導入されていないのに
+  ;; フックに残っていたため、Clojure ファイルを開くたびに
+  ;;   File mode specification error: (error "Autoloading file ...
+  ;;    failed to define function cljstyle-format-on-save-mode")
+  ;; になっていた。しかもフックはそこで中断するので、この後ろに
+  ;; 登録されていた smartparens-strict-mode と yas-minor-mode も
+  ;; Clojure バッファでは効いていなかった。
+  ;; 使いたい場合は明示的なレシピ (:straight (cljstyle-format :type git
+  ;; :host github :repo "...")) を書いて導入すること。
   :config
   (define-clojure-indent
    (defroutes 'defun)
@@ -58,7 +67,6 @@
    (fact 'defun)
    (do-transaction 'defun))
   (eldoc-mode +1)
-  ;; (cljstyle-format-on-save-mode t)
   )
 
 (leaf flymake-kondor
@@ -68,9 +76,6 @@
   :straight t
   :hook ((clojure-mode-hook clojurescript-mode-hook clojurec-mode-hook)
          . flymake-kondor-setup))
-
-(leaf cljstyle-format
-  :straight t)
 
 (leaf cider
   :straight t

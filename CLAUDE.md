@@ -249,7 +249,11 @@ done
 straight の変更検知は当てにならない（corfu / doom-modeline で取りこぼした実績あり）。
 再ビルドは GUI 起動で数分かかる。
 
-2026-08 の棚卸しでは 93 個中 50 個が遅れていた。うち 35 個を更新済み。
+2026-08 の棚卸しでは 93 個中 50 個が遅れていた。**全 50 個を更新済み**
+（段階 1〜4 に分けて、各段階で GUI 起動して検証した）。
+
+更新の過程で、設定側の非互換が 2 件と、更新とは無関係の既存バグが 3 件見つかった。
+棚卸しは「古いまま放置していると壊れているのに気づけない」ことの確認になった。
 
 ### org のクローンは使っていない
 
@@ -488,11 +492,6 @@ emacs --batch --debug-init -l early-init.el -l init.el --eval '(message "OK")'
 
 ## 既知の課題（未対応）
 
-- `straight/repos/` のうち次の 9 個がまだ 2021〜2022 年のまま。
-  cider / clojure-mode / parseclj / parseedn / sesman / slime /
-  rust-mode / cargo / projectile。個別に確認しながら更新する方針。
-  `projectile` は `projectile--read-search-string-with-default` という内部関数を
-  `my-project.el` から呼んでいるので要注意
 - `w32-symlinks` ブロックは `:disabled t`。6 年間タイポで無効だったため、
   グローバル advice を無検証で有効化するのを避けている
 - org 9.8 で削除された `org-extract-archive-file` への advice をコメントアウト中

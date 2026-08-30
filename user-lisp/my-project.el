@@ -23,7 +23,8 @@
    ("<f12>" . projectile-toggle-between-implementation-and-test))
   ("C-c p" . projectile-command-map)
   :custom
-  (projectile-enable-idle-timer . nil)
+  ;; projectile-enable-idle-timer は upstream から削除された
+  ;; (アイドル時のキャッシュ更新の仕組み自体が無くなった)。
   (projectile-enable-caching . t)
   (projectile-mode-line-prefix . " P")
   ;; (projectile-completion-system . 'ivy)
