@@ -34,13 +34,18 @@
   :require smartparens-config
   :hook (emacs-startup-hook . smartparens-global-strict-mode))
 
-;;; [3] fill-column-indicator
+;;; [3] fill-column の目印
 
-(leaf fill-column-indicator
-  :straight t
+;; 外部の fill-column-indicator (fci-mode) から組み込みの
+;; display-fill-column-indicator-mode (Emacs 27+) へ移行した。
+;; fci-mode は縦線をオーバーレイで自前描画するため重く、
+;; 他のオーバーレイと干渉することがあった。組み込みは表示エンジン側で
+;; 描画する。列は display-fill-column-indicator-column が既定 t なので
+;; fill-column に従う (fci-mode と同じ)。
+(leaf display-fill-column-indicator
   :hook
-  (markdown-mode-hook . fci-mode)
-  (git-commit-mode-hook . fci-mode))
+  ((markdown-mode-hook git-commit-mode-hook)
+   . display-fill-column-indicator-mode))
 
 ;;; [3] expand-region
 
@@ -51,15 +56,30 @@
 
 ;;; [3] cua-mode
 
+;; 矩形選択のために有効化している (cua-enable-cua-keys nil なので
+;; C-x / C-c / C-v が切り取り・コピー・貼り付けに化けることはない)。
+;; 組み込みの rectangle-mark-mode (C-x SPC) で置き換える案もあったが、
+;; cua-mode 自体が組み込みなので依存は減らず、C-RET の矩形編集は
+;; rectangle-mark-mode より高機能なのでこのまま使う。
+;;
+;; なお cua-mode は cua-enable-cua-keys に関係なく
+;; scroll-up-command / scroll-down-command を cua-scroll-up / -down へ
+;; リマップする (cua-base.el)。これらは「これ以上スクロールできなければ
+;; 端へ移動」する挙動を持つので、スクロール設定の scroll-error-top-bottom と
+;; 実質同じ結果になる。
 (leaf cua-mode
   :custom
   (cua-mode . t)
   (cua-enable-cua-keys . nil))
 
-;;; [3] recentf-ext
+;;; [3] recentf
 
-(leaf recentf-ext
-  :straight t
+;; recentf-ext (2013 年で更新停止) をやめて組み込みの recentf にした。
+;; recentf-ext がやっていたのは実質この 2 つだけなので下の :config に
+;; 取り込んである (obsolete な cl ライブラリを require していた点も解消)。
+;;   - dired のディレクトリを recentf に加える
+;;   - 表示中のファイルバッファを最近使ったものとして押し上げる
+(leaf recentf
   :custom
   (recentf-max-saved-items . 200)
   `(recentf-save-file . ,(expand-file-name "recentf" user-emacs-directory))
@@ -83,6 +103,26 @@
   (setq recentf-auto-save-timer
         (run-with-idle-timer 120 t
                              (lambda () (with-suppressed-message (recentf-save-list)))))
+
+  ;; --- 以下 2 つは recentf-ext から取り込んだもの ---
+  ;; dired で開いたディレクトリも履歴に入れる
+  (defun my:recentf-add-dired-directory ()
+    (when (and (stringp dired-directory)
+               (equal "" (file-name-nondirectory dired-directory)))
+      (recentf-add-file dired-directory)))
+  (add-hook 'dired-mode-hook #'my:recentf-add-dired-directory)
+
+  ;; ウィンドウに出ているファイルを「最近使った」扱いにする。
+  ;; recentf は本来ファイルを開いた時点でしか記録しないので、
+  ;; 開きっぱなしのバッファに戻ってきても順位が上がらない。
+  ;; 元の recentf-ext は add-to-list でフックに積んでいたが add-hook を使う。
+  (defun my:recentf-push-buffers-in-frame ()
+    (walk-windows
+     (lambda (win)
+       (when-let* ((file (buffer-local-value 'buffer-file-name (window-buffer win))))
+         (recentf-add-file file)))))
+  (add-hook 'window-configuration-change-hook #'my:recentf-push-buffers-in-frame)
+
   (recentf-mode 1))
 
 ;;; [3] highlight-indent-guides
@@ -182,33 +222,20 @@
 
 ;;; [3] スクロール設定
 
-(leaf buffer
-  ;; TODO: 組み込みの `scroll-error-top-bottom' を t にすれば
-  ;; scroll-up-command / scroll-down-command について同じ効果が得られる。
-  ;; ただしこの設定は生の scroll-up / scroll-down を対象にしており
-  ;; (C-z が scroll-down に直接バインドされている)、挙動が完全には一致しないため
-  ;; ここでは既存の動作を保ったまま advice-add へ置き換えるにとどめる。
-  :config
-  ;; バッファの末尾までスクロールできないときは末尾へ飛ぶ
-  (defun my:scroll-up-to-bottom (orig &rest args)
-    "残り行数が 1 画面に満たなければ point-max へ移動する。"
-    (let ((start-num (1+ (count-lines (point-min) (point)))))
-      (goto-char (point-max))
-      (let ((end-num (1+ (count-lines (point-min) (point)))))
-        (goto-char (point-min))
-        (forward-line (1- start-num))
-        (if (< (- (- end-num start-num) (window-height)) 0)
-            (goto-char (point-max))
-          (apply orig args)))))
-  (advice-add 'scroll-up :around #'my:scroll-up-to-bottom)
-  ;; バッファの先頭までスクロールできないときは先頭へ飛ぶ
-  (defun my:scroll-down-to-top (orig &rest args)
-    "先頭から 1 画面以内にいるなら point-min へ移動する。"
-    (let ((start-num (1+ (count-lines (point-min) (point)))))
-      (if (< start-num (window-height))
-          (goto-char (point-min))
-        (apply orig args))))
-  (advice-add 'scroll-down :around #'my:scroll-down-to-top))
+;; バッファの端まで来たときに point を端へ飛ばす挙動は、組み込みの
+;; scroll-error-top-bottom で得られる。以前は scroll-up / scroll-down に
+;; advice を当てて自前で実装していたが、コア関数への advice を 2 つ
+;; 抱えることになるうえ、C-z が生の scroll-down に割り当てられていた。
+;;
+;; 挙動の違い: 旧実装は「残りが 1 画面未満なら即座に端へ飛ぶ」
+;; だったのに対し、組み込みは「まず普通にスクロールし、端に達した状態で
+;; もう一度押すと端へ飛ぶ」。Emacs 標準の挙動はこちら。
+;; これに伴い my-keybind.el の C-z を scroll-down-command に変えてある
+;; (scroll-error-top-bottom は *-command 側にしか効かないため)。
+(leaf scroll
+  :leaf-defer nil
+  :custom
+  (scroll-error-top-bottom . t))
 
 ;;; [3] バックアップファイルを作らない
 

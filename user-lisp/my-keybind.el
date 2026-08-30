@@ -12,7 +12,10 @@
 (leaf global-set-keys
   :bind
   ("C-h" . delete-backward-char)
-  ("C-z" . scroll-down)
+  ;; scroll-error-top-bottom (my-editor.el) は scroll-up-command /
+  ;; scroll-down-command にしか効かないので、生の scroll-down ではなく
+  ;; コマンド版に割り当てる。
+  ("C-z" . scroll-down-command)
   ("ESC ?" . apropos)
   ("C-x C-e" . compile)
   ("C-x C-n" . next-error)
