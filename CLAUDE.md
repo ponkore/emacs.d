@@ -515,5 +515,6 @@ emacs --batch --debug-init -l early-init.el -l init.el --eval '(message "OK")'
 
 ## 既知の課題（未対応）
 
-- `w32-symlinks` ブロックは `:disabled t`。6 年間タイポで無効だったため、
-  グローバル advice を無検証で有効化するのを避けている
+現在なし。2026-08 の一連の整理で、棚卸し時に挙げた課題はすべて解消した。
+
+新しく気づいたことはこの節に追記する。

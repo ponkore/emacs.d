@@ -13,33 +13,27 @@
   (setq w32-get-true-file-attributes nil)
   (setenv "HOME" (getenv "USERPROFILE")))
 
-;;; [3] w32-symlinks
+;;; [3] w32-symlinks (削除済み)
 
-(leaf w32-symlinks
-  ;; TODO: :if が 'windoows-nt というタイポだったため、このブロックは
-  ;; 一度も実行されたことがない。タイポは直したが、中身が
-  ;; insert-file-contents-literally と minibuffer-complete への
-  ;; グローバル advice であり、無検証で有効化するのは危険なので
-  ;; 明示的に無効化しておく。必要になったら :disabled t を外して検証すること。
-  ;; あわせて custom-set-variables (custom.el を汚す) は setopt へ、
-  ;; defadvice は advice-add へ書き換えが必要。
-  :disabled t
-  :if (eq system-type 'windows-nt)
-  :config
-  (custom-set-variables '(w32-symlinks-handle-shortcuts t))
-  (require 'w32-symlinks)
-
-  (defadvice insert-file-contents-literally
-      (before insert-file-contents-literally-before activate)
-    (set-buffer-multibyte nil))
-
-  (defadvice minibuffer-complete (before expand-symlinks activate)
-    (let ((file (expand-file-name
-                 (buffer-substring-no-properties
-                  (line-beginning-position) (line-end-position)))))
-      (when (file-symlink-p file)
-        (delete-region (line-beginning-position) (line-end-position))
-        (insert (w32-symlinks-parse-symlink file))))))
+;; site-lisp/w32-symlinks.el (874 行, 2002〜2005 年, EmacsWiki 由来) と
+;; その設定ブロックを削除した。Windows の .lnk を magic file name handler で
+;; シンボリックリンクのように扱うもので、ヘッダには「NTEmacs 21 と一緒に
+;; 使うことを意図している」と書かれていた。
+;;
+;; 削除の理由:
+;;   - :if が 'windoows-nt というタイポで 6 年間一度も実行されていなかった
+;;   - 前提が失われている。当時「Emacs に無い」とされていた dired-do-symlink は
+;;     Emacs 31 に組み込みで存在し、Windows にも本物の NTFS symlink がある
+;;   - 実測すると 2005 年のパーサは現代の .lnk を取りこぼす。
+;;     実在の 8 件で試して 1 件 (Brother Utilities.lnk) が
+;;     c:/Users/Program Files (x86)/... という存在しないパスを返した
+;;   - 動かすには insert-file-contents-literally へのグローバル advice が必須
+;;     だった。一時バッファが multibyte だと署名判定に失敗するためだが、
+;;     この advice は呼ばれるたびにカレントバッファを unibyte にしてしまう
+;;   - minibuffer-complete へのグローバル advice も持っており、vertico を
+;;     使っている現在では冗長かつ干渉の恐れがある
+;;   - このマシンの .lnk は Downloads/old-desktop に 23 件あるだけで、
+;;     21 件が exe、2 件がフォルダ。Emacs から辿りたいものではない
 
 ;;; [3] cygwin (削除済み)
 
