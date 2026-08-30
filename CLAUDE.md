@@ -94,6 +94,38 @@ eglot が使う言語サーバは自分で入れる。2026-08 時点の導入状
 | Rust | rust-analyzer 1.97.1 | `rustup component add rust-analyzer` |
 | Python | basedpyright 1.39.10 | `uv tool install basedpyright` |
 
+### East Asian Ambiguous 幅 (site-lisp/eaw.el)
+
+`site-lisp/eaw.el` は残す。Emacs 31 の組み込み処理では足りないため。
+
+Emacs 31 は `ambiguous-width-chars` を持ち、`cjk-ambiguous-chars-are-wide`
+が t なら `use-cjk-char-width-table` がそれを幅 2 にする。日本語環境に
+すると自動で適用されるので、組み込みだけでもある程度は効く。
+
+HackGen で実測した結果（GUI）:
+
+| | 文字数 |
+|---|---|
+| eaw が挙げる ambiguous 文字 | 3666 |
+| 組み込みだけで幅 2 になるもの | 2170 |
+| **eaw が追加で幅 2 にするもの** | **1496** |
+
+その 1496 文字を実際に描画して測ると:
+
+| 実測幅 | 文字数 | |
+|---|---|---|
+| 16px（全角） | 335 | eaw が正しい |
+| 8px（半角） | 63 | 組み込みが正しい |
+| それ以外 | 1098 | 絵文字・麻雀牌など。プロポーショナルなフォールバックで描かれ、`char-width` をどちらにしても桁は揃わない |
+
+桁揃えが成立する 398 文字のうち **84% で eaw のほうが実描画と一致する**。
+`○△□★※①→≒` のような日常的な記号は組み込みでも幅 2 になるので、
+差が出るのは記号類が中心。
+
+**計測は必ず GUI で行うこと。** Windows の batch では `initial-window-system`
+が nil のため `use-cjk-char-width-table` が ambiguous を幅 1 に倒す分岐に入り、
+組み込みのカバー範囲を過小評価する（2170 ではなく 1424 に見える）。
+
 ### 日本語フォントの全角/半角ピッチ
 
 HackGen は「全角＝半角×2」で設計されているが、**サイズによっては 1px ずれる**。

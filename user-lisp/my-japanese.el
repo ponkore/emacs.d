@@ -17,12 +17,32 @@
   ;; Localeに合わせた環境の設定
   (set-locale-environment nil)
 
-  ;; eaw
+  ;; East Asian Ambiguous 幅 (site-lisp/eaw.el)
+  ;;
+  ;; Emacs 31 は ambiguous-width-chars という文字テーブルを持ち、
+  ;; cjk-ambiguous-chars-are-wide が t なら use-cjk-char-width-table が
+  ;; それを幅 2 にする。上の set-locale-environment で日本語環境になると
+  ;; setup-japanese-environment-internal 経由で自動的に適用される。
+  ;; つまり組み込みだけでもある程度は効く。
+  ;;
+  ;; ただし HackGen での実測では、まだ eaw を入れる価値がある:
+  ;;   eaw が挙げる ambiguous 文字            3666
+  ;;   組み込みだけで幅 2 になるもの          2170
+  ;;   eaw が追加で幅 2 にするもの            1496
+  ;; その 1496 文字を実際に描画して幅を測ると
+  ;;   16px (全角) 335 …… eaw が正しい
+  ;;    8px (半角)  63 …… 組み込みが正しい
+  ;;   それ以外   1098 …… 絵文字・麻雀牌など。プロポーショナルな
+  ;;                       フォールバックで描かれるため、char-width を
+  ;;                       どちらにしても桁は揃わない
+  ;; 桁揃えが成立する 398 文字のうち 84% で eaw のほうが実描画と一致する。
+  ;; ○△□★※①→≒ のような日常的な記号は組み込みでも幅 2 になるので、
+  ;; 差が出るのは記号類が中心。
+  ;;
+  ;; なお eaw を外したいときは組み込みの cjk-ambiguous-chars-are-wide が
+  ;; 対応する設定項目になる。
   (require 'eaw)
   (eaw-fullwidth)
-  ;; (leaf eaw
-  ;;   :require t
-  ;;   (eaw-fullwidth))
 
   ;; 機種依存文字
   (leaf cp5022x
