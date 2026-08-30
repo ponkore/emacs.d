@@ -434,6 +434,29 @@ v2 世代の API（`modus-themes-load-themes` / `modus-themes-load-vivendi` /
 `etc/themes/modus-themes.el` の `modus-vivendi-palette` を見る。
 `:custom` は `:config` より先に走るので、上書きは `load-theme` に間に合う。
 
+## org のアーカイブ先の `#YM`
+
+アーカイブ先の指定に `#YM` と書くと `YYYY-MM` に展開される。
+
+```org
+#+ARCHIVE: %s_#YM_archive::* From %s
+```
+
+→ `note.org_2026-08_archive` に `* From note.org` 見出しで格納される。
+ファイル名部分でも見出し部分でも使える。
+
+実装は `org-archive--compute-location` への `:filter-args` advice
+（`my-text.el`）。旧実装は `org-extract-archive-file` への `:filter-return`
+だったが、この関数は org 9.8 で削除された。後継の
+`org-archive--compute-location` は戻り値が `(FILE . HEADING)` の cons なので
+`:filter-return` は使えず、**入口を `:filter-args` で押さえる**形にしてある。
+引数は `::` で区切る前の生の文字列なので戻り値の形に依存しない。
+
+`org-archive-subtree` は
+`(or (org-entry-get nil "ARCHIVE" 'inherit) org-archive-location)` を
+この関数に渡すので、`#+ARCHIVE:` / `ARCHIVE` プロパティ / 変数のどれで
+指定しても効く（`org-archive-all-*` からの呼び出しも同様）。
+
 ## モードライン (doom-modeline)
 
 背景色は **modus のパレット上書き**で指定する。Emacs 29 以降 `mode-line` とは
@@ -494,5 +517,3 @@ emacs --batch --debug-init -l early-init.el -l init.el --eval '(message "OK")'
 
 - `w32-symlinks` ブロックは `:disabled t`。6 年間タイポで無効だったため、
   グローバル advice を無検証で有効化するのを避けている
-- org 9.8 で削除された `org-extract-archive-file` への advice をコメントアウト中
-  （アーカイブ先ファイル名の `#YM` 置換が効かない）

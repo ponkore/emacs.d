@@ -48,15 +48,29 @@
   ;; 一時間に一回、org-modeの全てのバッファを保存する。
   (run-at-time "00:59" 3600 #'org-save-all-org-buffers)
   ;; local functions
-  (defun my:org-add-ymd-to-archive (name)
-    "replace anchor to YYYY-MM string"
-    (let* ((ymd (format-time-string "%Y-%m")))
-      (replace-regexp-in-string "#YM" ymd name)))
-  ;; TODO: org 9.8 で `org-extract-archive-file' が削除された。
-  ;; 後継は `org-archive--compute-location' だが、戻り値が文字列ではなく
-  ;; (FILE . HEADING) の cons なので上の :filter-return advice はそのまま使えない。
-  ;; またプライベート関数 (--) を advise するのは脆いため、一旦無効化して先送りする。
-  ;; (advice-add 'org-extract-archive-file :filter-return #'my:org-add-ymd-to-archive)
+  ;; アーカイブ先の指定に含まれる #YM を YYYY-MM に置き換える。
+  ;; 例: #+ARCHIVE: %s_#YM_archive::  ->  foo.org_2026-08_archive
+  ;;
+  ;; 旧実装は org-extract-archive-file への :filter-return advice だったが、
+  ;; この関数は org 9.8 で削除された。後継の org-archive--compute-location は
+  ;; 戻り値が (FILE . HEADING) の cons なので :filter-return は使えない。
+  ;;
+  ;; そこで :filter-args で入口を押さえる。引数は「::」で区切る前の生の
+  ;; 指定文字列なので、戻り値の形に依存しない。org-archive-subtree は
+  ;;   (or (org-entry-get nil "ARCHIVE" 'inherit) org-archive-location)
+  ;; をこの関数に渡すので、#+ARCHIVE: や ARCHIVE プロパティ経由の指定も
+  ;; まとめてカバーできる (org-archive-all-* からの呼び出しも同様)。
+  ;;
+  ;; プライベート関数 (--) を advise しているが、渡すのも受け取るのも
+  ;; ただの文字列なので結合度は低い。
+  (defun my:org-archive-expand-ym (args)
+    "アーカイブ先指定 (ARGS の第 1 要素) の #YM を YYYY-MM に置き換える。"
+    (cons (replace-regexp-in-string "#YM" (format-time-string "%Y-%m")
+                                    (car args))
+          (cdr args)))
+  (with-eval-after-load 'org-archive
+    (advice-add 'org-archive--compute-location
+                :filter-args #'my:org-archive-expand-ym))
   ;; screenshot: https://ladicle.com/post/config/
   (defun my:org-screenshot ()
     "Take a screenshot into a time stamped unique-named file in the
