@@ -10,16 +10,20 @@
   :mode ("\\.\\(cgi\\|phpm\\|inc\\)\\'" . php-mode)
   :straight t
   :custom
-  (ac-php-debug-flag . nil)
+  ;; ac-php-debug-flag は ac-php 用。ac-php はもう使っていないので削除した。
   (php-manual-url . 'ja)
   (php-mode-coding-style . 'psr2)
   :hook
   (php-mode-hook . (lambda ()
-                     (c-set-style "bsd")
+                     ;; php-mode 1.28 (2026-08) で cc-mode 依存が外れ、
+                     ;; php-base-mode 由来の独自インデントになった。
+                     ;; (c-set-style "bsd") と c-basic-offset はエラーになり、
+                     ;; そこで php-mode-hook が中断していた
+                     ;; (Buffer index.php is not a CC Mode buffer)。
+                     ;; インデントは php-mode-coding-style で指定する。
                      (subword-mode 1)
                      (setq indent-tabs-mode t)
                      (setq tab-width 4)
-                     (setq c-basic-offset 4)
                      (setq-local page-delimiter "\\_<\\(class\\|function\\|namespace\\)\\_>.+$")
                      ;; (ac-php-core-eldoc-setup)
                      ;; (add-to-list 'company-backends 'company-ac-php-backend)

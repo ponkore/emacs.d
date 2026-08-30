@@ -336,5 +336,73 @@
     '(bar my:buffer-encoding matches buffer-info buffer-position selection-info major-mode vcs)
     '(misc-info debug minor-modes "-" input-method process checker)))
 
+;;; [4] doom-modeline の eglot セグメントの修正
+
+;; doom-modeline 4.3.0 (upstream 6f911e9, 2026-08-28) の eglot セグメントは
+;; Emacs 31.1 で無くなった内部関数を 3 つ呼んでいる:
+;;   jsonrpc--request-continuations -> jsonrpc-continuation-count に置換
+;;   eglot--spinner                 -> 廃止
+;;   eglot--major-mode              -> eglot--major-modes (リストになった)
+;;
+;; これは表示の乱れでは済まない。doom-modeline は eglot--managed-mode-hook に
+;; ぶら下がっており、eglot--maybe-activate-editing-mode は
+;;   (eglot--managed-mode)                  ; ここで上記フックが走る
+;;   (eglot--signal-textDocument/didOpen)
+;;   (eglot-inlay-hints-mode 1) ...
+;; の順に呼ぶ。1 つ目で void-function が投げられると 2 つ目以降が実行されず、
+;; textDocument/didOpen が送られない。接続だけ成立してサーバはバッファを
+;; 知らないままなので、診断も補完も一切出ない状態になる。
+;;
+;; upstream が直したらこのブロックごと削除してよい。
+
+(defun my:doom-modeline-update-eglot ()
+  "`doom-modeline-update-eglot' を現行の eglot / jsonrpc API で書き直したもの。"
+  (setq doom-modeline--eglot
+        (let* ((server (eglot-current-server))
+               (nick (and server (eglot--project-nickname server)))
+               (pending (and server (jsonrpc-continuation-count server)))
+               (busy (and pending (> pending 0)))
+               (last-error (and server (jsonrpc-last-error server)))
+               (face (cond (last-error 'doom-modeline-lsp-error)
+                           (busy 'doom-modeline-lsp-warning)
+                           (nick 'doom-modeline-lsp-success)
+                           (t 'doom-modeline-lsp-warning))))
+          (propertize
+           (doom-modeline-lsp-icon "EGLOT" face)
+           'help-echo
+           (cond
+            (last-error
+             (format "EGLOT\nAn error occured: %s\nmouse-3: Clear this status"
+                     (plist-get last-error :message)))
+            (busy (format "EGLOT\n%d outstanding requests" pending))
+            (nick
+             (format (concat "EGLOT Connected (%s/%s)\n"
+                             "C-mouse-1: Go to server errors\n"
+                             "mouse-1: Go to server events\n"
+                             "mouse-2: Quit server\n"
+                             "mouse-3: Reconnect to server")
+                     nick (eglot--major-modes server)))
+            (t "EGLOT Disconnected\nmouse-1: Start server"))
+           'mouse-face 'mode-line-highlight
+           'local-map
+           (let ((map (make-sparse-keymap)))
+             (cond
+              (last-error
+               (define-key map [mode-line mouse-3] #'eglot-clear-status))
+              (busy
+               (define-key map [mode-line mouse-3] #'eglot-forget-pending-continuations))
+              (nick
+               (define-key map [mode-line C-mouse-1] #'eglot-stderr-buffer)
+               (define-key map [mode-line mouse-1] #'eglot-events-buffer)
+               (define-key map [mode-line mouse-2] #'eglot-shutdown)
+               (define-key map [mode-line mouse-3] #'eglot-reconnect))
+              (t (define-key map [mode-line mouse-1] #'eglot)))
+             map)))))
+
+(with-eval-after-load 'doom-modeline-segments
+  (unless (fboundp 'jsonrpc--request-continuations)
+    (advice-add 'doom-modeline-update-eglot
+                :override #'my:doom-modeline-update-eglot)))
+
 (provide 'my-appearance)
 ;;; my-appearance.el ends here

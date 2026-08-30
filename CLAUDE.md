@@ -112,6 +112,31 @@ prefix は `~/scoop/apps/nvm/current/nodejs/nodejs`。**nvm で Node を切り�
 プロジェクトローカル（`npm i -D`）に寄せると安定する。`add-node-modules-path` が
 `node_modules/.bin` を `exec-path` に足すので、ローカル版が優先される。
 
+### 上流の非互換で eglot が黙って壊れることがある
+
+eglot は `eglot--maybe-activate-editing-mode` の中で
+
+```elisp
+(eglot--managed-mode)                  ; ここで eglot--managed-mode-hook が走る
+(eglot--signal-textDocument/didOpen)   ; ← ここが飛ぶ
+(eglot-inlay-hints-mode 1) ...
+```
+
+の順に呼ぶ。**フックの中でエラーが出ると `textDocument/didOpen` が送られない**。
+接続は成立してモードラインにも出るのに、サーバはバッファの存在を知らないため
+診断も補完も一切出ない、という分かりにくい壊れ方をする。
+
+実例: doom-modeline 4.3.0 の eglot セグメントが Emacs 31.1 で無くなった
+`jsonrpc--request-continuations` / `eglot--spinner` / `eglot--major-mode` を
+呼んでおり、`my-appearance.el` で差し替えている（upstream 未修正）。
+同種の症状が出たら、まず `eglot--managed-mode-hook` の中身を疑うこと。
+
+### php-mode は 1.28 (2026-08) で cc-mode 依存が外れた
+
+`c-set-style` / `c-basic-offset` は使えない（`Buffer ... is not a CC Mode buffer`）。
+インデントは `php-mode-coding-style` で指定する。
+cc-mode 版が要るときは `php-cc-mode` が別に残っている。
+
 ## tree-sitter
 
 メジャーモードは tree-sitter 版（`*-ts-mode`）を使う方針。ただし文法は
