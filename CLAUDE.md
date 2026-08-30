@@ -215,6 +215,23 @@ straight の変更検知はこれを取りこぼすことがあり、`straight-r
 upstream がデフォルトブランチを `master` → `main` に変えている場合は
 `straight/repos/NAME` で手動チェックアウトが必要になることがある（magit で発生）。
 
+## custom.el の扱い
+
+`init.el` の読み込み順は **custom.el → `user-lisp/` の各モジュール**。
+つまり同じ変数を両方で設定すると **`user-lisp/` 側が勝つ**。
+`custom.el` に書いても効かないので、設定は `user-lisp/` に置くこと。
+
+2026-08 に重複を整理して、`custom.el` に残すのは次の 4 変数だけにした:
+
+- `safe-local-variable-values` … ディレクトリローカル変数の許可リスト（Emacs が書く）
+- `warning-suppress-log-types` / `warning-suppress-types` … leaf / straight の警告抑制
+- `yas-new-snippet-default` … スニペットのテンプレート
+
+`customize` を使うと `custom.el` に書き戻されるので、モジュール側と
+重複していないか時々確認する。重複の検出は、`custom.el` の
+`custom-set-variables` から変数名を集め、`user-lisp/` の leaf を
+`macroexpand-1` して出てくる `customize-set-variable` と突き合わせればよい。
+
 ## leaf を使うときの注意
 
 leaf は `:hook` / `:bind` / `:mode` などの遅延キーワードがあると `:config` を
@@ -335,4 +352,7 @@ emacs --batch --debug-init -l early-init.el -l init.el --eval '(message "OK")'
   グローバル advice を無検証で有効化するのを避けている
 - org 9.8 で削除された `org-extract-archive-file` への advice をコメントアウト中
   （アーカイブ先ファイル名の `#YM` 置換が効かない）
-- `custom.el` に `user-lisp/` 側と重複する設定が多数残っている
+- `custom.el` に残る face 設定（`font-lock-*` / `rst-level-*` /
+  `markdown-code-face`）は modus-vivendi のロードで上書きされて効いていない。
+  例: `font-lock-function-name-face` は "DodgerBlue1" ではなくテーマの色になる。
+  残したいならテーマ適用後に当てる形へ直す必要がある

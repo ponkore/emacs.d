@@ -81,7 +81,8 @@
   (cider-show-error-buffer . t)
   (cider-auto-select-error-buffer . t)
   (cider-repl-result-prefix . ";; => ")
-  ;; (nrepl-sync-request-timeout . 40)
+  ;; custom.el にだけ書かれていたのをこちらへ移した
+  (nrepl-sync-request-timeout . 40)
   (nrepl-hide-special-buffers . t)
   :config
   (add-to-list 'completion-category-defaults '(cider (styles basic))))

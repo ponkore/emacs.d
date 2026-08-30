@@ -279,6 +279,16 @@
 
 (leaf diminish :straight t)
 
+;;; [3] モードラインのグローバルモード
+
+;; 行番号・桁番号・which-function はモードラインに出さない (doom-modeline 側で
+;; 表示するため)。以前は doom-modeline の :config に置いていたが、
+;; その leaf は :if window-system なので端末では効かず、同じ設定が
+;; custom.el にも二重に書かれている状態だった。ここで一本化する。
+(line-number-mode 0)
+(column-number-mode 0)
+(which-function-mode 0)
+
 ;;; [3] doom-modeline
 
 (leaf doom-modeline
@@ -297,9 +307,6 @@
   (doom-modeline-buffer-minor-mode . '((t (:inherit mode-line :slant normal))))
   :hook (emacs-startup-hook . doom-modeline-mode)
   :config
-  (line-number-mode 0)
-  (column-number-mode 0)
-  (which-function-mode 0)
   ;;
   (doom-modeline-def-segment my:buffer-encoding
     "Displays the encoding and eol style of the buffer."
