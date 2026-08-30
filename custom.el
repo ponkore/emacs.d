@@ -67,7 +67,7 @@
      (cider-refresh-after-fn . "reloaded.repl/resume")
      (cider-refresh-before-fn . "reloaded.repl/suspend")
      (emacs-lisp-docstring-fill-column . 75)))
- '(warning-suppress-log-types '((leaf) (straight)))
+ '(warning-suppress-log-types '((straight)))
  '(warning-suppress-types '((straight)))
  '(yas-new-snippet-default
    "# -*- mode: snippet -*-

@@ -44,10 +44,11 @@
 
 ;;; [3] フォント設定
 
-(leaf *font-setting
+;; 疑似パッケージなので use-package の名前は emacs にする。
+(use-package emacs
   :if window-system
   ;; 以前は :after all-the-icons だったが、フォント設定自体はアイコン
-  ;; パッケージに依存しない。:after を付けると leaf が :config を
+  ;; パッケージに依存しない。:after を付けると :config を
   ;; (eval-after-load 'nerd-icons ...) で包むため、nerd-icons が
   ;; require されない構成では設定が永久に適用されず、既定の
   ;; Courier New のままになっていた。
@@ -134,13 +135,16 @@
 
 ;;; [3] text-scale
 
-(leaf text-scale
-  :hydra (hydra-zoom ()
-                     "Zoom"
-                     ("g" text-scale-increase "in")
-                     ("l" text-scale-decrease "out")
-                     ("r" (text-scale-set 0) "reset")
-                     ("0" (text-scale-set 0) :bind nil :exit t))
+;; 疑似パッケージなので use-package の名前は emacs にする。
+(use-package emacs
+  ;; leaf の :hydra は init 時にインライン展開されるので :init に置く。
+  :init
+  (defhydra hydra-zoom ()
+    "Zoom"
+    ("g" text-scale-increase "in")
+    ("l" text-scale-decrease "out")
+    ("r" (text-scale-set 0) "reset")
+    ("0" (text-scale-set 0) :bind nil :exit t))
   :bind ("<f2>" . hydra-zoom/body))
 
 ;;; [3] nerd-icons
@@ -150,12 +154,12 @@
 ;; nerd-icons は Nerd Font 1 本 (HackGenNerd など) で全アイコンをまかなえるので、
 ;; all-the-icons のように 6 種類のフォントを個別に入れる必要がない。
 
-(leaf nerd-icons
+(use-package nerd-icons
   :straight t
   ;; nerd-icons-dired / -ibuffer / -completion が :after nerd-icons で
   ;; ぶら下がっているため、ここで必ずロードしておく。
   ;; そうしないと feature が読まれず、それらが一切有効にならない。
-  :require t
+  :demand t
   :config
   ;; 使うフォントは my:nerd-font-family がグリフの有無を見て決める。
   ;; HackGenNerd は Nerd Fonts v2 世代で mdicon (第 15 面) を持たないため
@@ -165,14 +169,14 @@
 
 ;;; [4] nerd-icons-dired
 
-(leaf nerd-icons-dired
+(use-package nerd-icons-dired
   :straight t
   :after nerd-icons
   :hook (dired-mode-hook . nerd-icons-dired-mode))
 
 ;;; [4] nerd-icons-ibuffer
 
-(leaf nerd-icons-ibuffer
+(use-package nerd-icons-ibuffer
   :straight t
   :after nerd-icons
   :hook (ibuffer-mode-hook . nerd-icons-ibuffer-mode)
@@ -181,9 +185,9 @@
 ;;; [4] nerd-icons-completion
 
 ;; vertico / marginalia の候補にアイコンを出す
-(leaf nerd-icons-completion
+(use-package nerd-icons-completion
   :straight t
-  :after nerd-icons marginalia
+  :after (nerd-icons marginalia)
   :config
   (nerd-icons-completion-mode)
   (add-hook 'marginalia-mode-hook #'nerd-icons-completion-marginalia-setup))
@@ -194,7 +198,8 @@
 ;; (ツールバー等の非表示)。setq で丸ごと上書きするとそれが消えるため、
 ;; 以下ではいずれも append で既存の値を残している。
 
-(leaf frame-setting-mac
+;; 疑似パッケージなので use-package の名前は emacs にする。
+(use-package emacs
   :if (eq system-type 'darwin)
   :config
   (setq initial-frame-alist
@@ -211,7 +216,8 @@
 
 ;;; [3] Windows用
 
-(leaf frame-setting-windows
+;; 疑似パッケージなので use-package の名前は emacs にする。
+(use-package emacs
   :if (eq system-type 'windows-nt)
   :config
   (setq initial-frame-alist
@@ -229,7 +235,8 @@
 
 ;;; [3] Linux用
 
-(leaf frame-setting-linux
+;; 疑似パッケージなので use-package の名前は emacs にする。
+(use-package emacs
   ;; これまで Linux の分岐が無く default-frame-alist が未設定だった
   :if (memq system-type '(gnu/linux berkeley-unix))
   :config
@@ -246,7 +253,8 @@
 
 ;;; [3] 共通
 
-(leaf frame-setting-common
+;; 疑似パッケージなので use-package の名前は emacs にする。
+(use-package emacs
   :config
   ;; フレームタイトルの設定
   (setq frame-title-format "%b")
@@ -279,22 +287,27 @@
 ;; :custom は :config より先に走るので、パレットの上書きは load-theme の前に
 ;; 反映される。defcustom は既に値が入っている変数を上書きしないため、
 ;; パッケージ未ロードの状態で customize-set-variable しておいて問題ない。
-(leaf modus-themes
+(use-package modus-themes
+  ;; modus-themes は etc/themes/ にあり load-path に載っていないため
+  ;; (require 'modus-themes) は失敗する。use-package は require に失敗すると
+  ;; :config ごと実行しないので :no-require t が必須。
+  ;; leaf は元々 (require) を出していなかったので挙動は変わらない。
+  :no-require t
   :custom
-  (modus-themes-italic-constructs . t)
-  (modus-themes-bold-constructs . nil)
+  (modus-themes-italic-constructs t)
+  (modus-themes-bold-constructs nil)
   (modus-themes-common-palette-overrides
-   . '(;; 旧 modus-themes-region '(bg-only no-extend) の置き換え。
-       ;; bg-only は「前景色は変えず背景だけ変える」なので fg-region を外す。
-       ;; no-extend (行末まで伸ばさない) は v4 で廃止されており移行先が無い。
-       (fg-region unspecified)
-       ;; アクティブなモードラインを青一色にする。
-       ;; Emacs 29 以降 mode-line とは別に mode-line-active があり、
-       ;; テーマはそちらを塗るので custom-face で mode-line だけ変えても効かない。
-       ;; パレット側を差し替えるのが確実。
-       (bg-mode-line-active "medium blue")
-       (fg-mode-line-active "snow")
-       (border-mode-line-active "medium blue")))
+   '(;; 旧 modus-themes-region '(bg-only no-extend) の置き換え。
+     ;; bg-only は「前景色は変えず背景だけ変える」なので fg-region を外す。
+     ;; no-extend (行末まで伸ばさない) は v4 で廃止されており移行先が無い。
+     (fg-region unspecified)
+     ;; アクティブなモードラインを青一色にする。
+     ;; Emacs 29 以降 mode-line とは別に mode-line-active があり、
+     ;; テーマはそちらを塗るので custom-face で mode-line だけ変えても効かない。
+     ;; パレット側を差し替えるのが確実。
+     (bg-mode-line-active "medium blue")
+     (fg-mode-line-active "snow")
+     (border-mode-line-active "medium blue")))
   :config
   (load-theme 'modus-vivendi :no-confirm))
 
@@ -311,7 +324,7 @@
 
 ;;; [3] diminish
 
-(leaf diminish :straight t)
+(use-package diminish :straight t :defer t)
 
 ;;; [3] モードラインのグローバルモード
 
@@ -325,22 +338,27 @@
 
 ;;; [3] doom-modeline
 
-(leaf doom-modeline
+(use-package doom-modeline
   :straight t
   :if window-system
   :commands (doom-modeline-def-modeline)
   :custom
-  (doom-modeline-buffer-file-name-style . 'truncate-with-project)
-  (doom-modeline-icon . t)
-  (doom-modeline-major-mode-icon . t)
-  (doom-modeline-minor-modes . t)
-  (doom-modeline-buffer-encoding . t)
-  `(doom-modeline-icon . ,(display-graphic-p))
-  :custom-face
+  (doom-modeline-buffer-file-name-style 'truncate-with-project)
+  (doom-modeline-icon t)
+  (doom-modeline-major-mode-icon t)
+  (doom-modeline-minor-modes t)
+  (doom-modeline-buffer-encoding t)
+  ;; 上の (doom-modeline-icon t) を実際の表示環境で上書きする (後勝ち)
+  (doom-modeline-icon (display-graphic-p))
   ;; 背景色は modus のパレット上書き (bg-mode-line-active) で指定している。
   ;; ここでは左端のバーだけ同じ色に揃える (既定はテーマのアクセント色)。
-  (doom-modeline-bar               . '((t (:background "medium blue"))))
-  (doom-modeline-buffer-minor-mode . '((t (:inherit mode-line :slant normal))))
+  ;; use-package の :custom-face は face-spec-set (defface spec) を使うため
+  ;; modus の theme-face に負ける。leaf の :custom-face と同じ
+  ;; custom-set-faces (user テーマ) を直接呼ぶ。
+  :init
+  (custom-set-faces
+   '(doom-modeline-bar               ((t (:background "medium blue"))))
+   '(doom-modeline-buffer-minor-mode ((t (:inherit mode-line :slant normal)))))
   :hook (emacs-startup-hook . doom-modeline-mode)
   :config
   ;;

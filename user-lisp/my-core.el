@@ -5,9 +5,21 @@
 
 ;;; [3] s
 
-(leaf s
+(use-package s
   :straight t
   :commands s-join s-split)
+
+;;; [3] hydra
+
+;; hydra は my-appearance / my-dired / my-lsp / my-editor / my-text の
+;; :init に置いた defhydra から使う。defhydra は autoload マクロなので
+;; straight-use-package で autoloads が読まれていれば足りるが、最初に使う
+;; my-appearance より前に宣言しておく必要がある。my-core は init.el が
+;; 最初に require するモジュールなのでここに置く
+;; (leaf のときは init.el のブートストラップで導入していた)。
+(use-package hydra
+  :straight t
+  :defer t)
 
 ;;; [3] 汎用ヘルパ
 

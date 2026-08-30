@@ -10,18 +10,18 @@
 ;; lsp-ui のような独自 UI を持たない分だけ設定が薄くなる。
 ;; eglot は組み込みなので :straight は付けない。
 
-(leaf eglot
+(use-package eglot
   :custom
   ;; 最後のバッファを閉じたらサーバを落とす
-  (eglot-autoshutdown . t)
+  (eglot-autoshutdown t)
   ;; イベントログはメモリを食うだけなので無効にする
-  (eglot-events-buffer-config . '(:size 0 :format full))
+  (eglot-events-buffer-config '(:size 0 :format full))
   ;; プロジェクト外のファイルへ飛んだ先でも eglot を効かせる
-  (eglot-extend-to-xref . t)
+  (eglot-extend-to-xref t)
   :bind
   ;; lsp-mode の lsp-keymap-prefix "C-c l" に相当するものを自前で用意する。
   ;; eglot にはプレフィックスキーの仕組みが無い。
-  (:eglot-mode-map
+  (:map eglot-mode-map
    ("C-c l r" . eglot-rename)
    ("C-c l a" . eglot-code-actions)
    ("C-c l f" . eglot-format)
@@ -52,28 +52,32 @@
 ;; エラーの行末表示は Emacs 30 で入った
 ;; flymake-show-diagnostics-at-end-of-line が flycheck-inline の代わりになる。
 
-(leaf flymake
+(use-package flymake
   :custom
   ;; 旧 flycheck-check-syntax-automatically '(idle-change) 相当
-  (flymake-no-changes-timeout . 1.0)
-  (flymake-fringe-indicator-position . 'right-fringe)
+  (flymake-no-changes-timeout 1.0)
+  (flymake-fringe-indicator-position 'right-fringe)
   ;; 旧 flycheck-inline / flycheck-pos-tip 相当
-  (flymake-show-diagnostics-at-end-of-line . 'short)
+  (flymake-show-diagnostics-at-end-of-line 'short)
   :hook
   (prog-mode-hook . flymake-mode)
   :bind
   ;; flycheck の慣例だった C-c ! をそのまま使う。
   ;; なお旧設定の hydra-flycheck はどこにも割り当てられておらず、
   ;; 6 年間呼び出す手段が無かった。今回は C-c ! h に割り当てる。
-  (:flymake-mode-map
+  (:map flymake-mode-map
    ("C-c ! n" . flymake-goto-next-error)
    ("C-c ! p" . flymake-goto-prev-error)
    ("C-c ! l" . flymake-show-buffer-diagnostics)
    ("C-c ! P" . flymake-show-project-diagnostics)
    ("C-c ! h" . hydra-flymake/body))
-  :hydra
-  (hydra-flymake nil
-                 "
+  ;; leaf の :hydra は init 時にインライン展開される (eval-after-load に
+  ;; 包まれない)。use-package では :init に置いて同じ挙動にする。
+  ;; :config にすると flymake がロードされるまで hydra-flymake/body が
+  ;; 定義されず、C-c ! h が効かなくなる。
+  :init
+  (defhydra hydra-flymake nil
+    "
       Navigate Error^^    Miscellaneous
       ---------------------------------------------------
       [_k_] Prev          [_l_] Buffer diagnostics
@@ -81,13 +85,13 @@
       [_f_] First Error   [_q_] Quit
       [_e_] Last Error
       "
-                 ("j" flymake-goto-next-error)
-                 ("k" flymake-goto-prev-error)
-                 ("f" (progn (goto-char (point-min)) (flymake-goto-next-error)))
-                 ("e" (progn (goto-char (point-max)) (flymake-goto-prev-error)))
-                 ("l" flymake-show-buffer-diagnostics :exit t)
-                 ("L" flymake-show-project-diagnostics :exit t)
-                 ("q" nil)))
+    ("j" flymake-goto-next-error)
+    ("k" flymake-goto-prev-error)
+    ("f" (progn (goto-char (point-min)) (flymake-goto-next-error)))
+    ("e" (progn (goto-char (point-max)) (flymake-goto-prev-error)))
+    ("l" flymake-show-buffer-diagnostics :exit t)
+    ("L" flymake-show-project-diagnostics :exit t)
+    ("q" nil)))
 
 (provide 'my-lsp)
 ;;; my-lsp.el ends here

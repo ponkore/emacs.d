@@ -13,10 +13,10 @@
 ;; dired-k は 2021 年から更新が止まり emacsorphanage に移されていた。
 ;; ファイルサイズ・更新日時の色分けは diff-hl には無いので失われる。
 
-(leaf dired
+(use-package dired
   :commands dired-vc-status
   :bind
-  (:dired-mode-map
+  (:map dired-mode-map
    ("V" . dired-vc-status)
    ;; 本家 ripgrep-regexp は検索ディレクトリも聞いてくる。dired では
    ;; そのバッファのディレクトリで検索したいので my:ripgrep-regexp を使う
@@ -29,13 +29,13 @@
   ;; http://qiita.com/l3msh0@github/items/8665122e01f6f5ef502f
   ;;
   ;; diredを2つのウィンドウで開いている時に、デフォルトの移動orコピー先をもう一方のdiredで開いているディレクトリにする
-  (dired-dwim-target . t)
+  (dired-dwim-target t)
   ;; ディレクトリを再帰的にコピーする
-  (dired-recursive-copies . 'always)
+  (dired-recursive-copies 'always)
   ;; diredバッファでC-sした時にファイル名だけにマッチするように
-  (dired-isearch-filenames . t)
+  (dired-isearch-filenames t)
   ;;
-  (ls-lisp-dirs-first . t)
+  (ls-lisp-dirs-first t)
   :config
   ;; my:dired-revert-buffer (g に割り当てていた revert-buffer + dired-k) は
   ;; 削除した。dired 既定の g (revert-buffer) で dired-after-readin-hook が
@@ -62,42 +62,43 @@
              ;; 現在の入口は magit-status-setup-buffer。
              (magit-status-setup-buffer (file-name-directory path))))))
   ;;
-  :hydra
-  (hydra-dired (:hint nil :color pink)
+  ;; leaf の :hydra は init 時にインライン展開されるので :init に置く。
+  :init
+  (defhydra hydra-dired (:hint nil :color pink)
                "
 _+_ mkdir   _v_iew         _m_ark         _z_ip     _w_ get filename
 _C_opy      view _o_ther   _U_nmark all   un_Z_ip   _W_ get fullpath
 _D_elete    open _f_ile    _u_nmark       _s_ort    _g_ revert buffer
 _R_ename    ch_M_od        _t_oggle       _e_dit    _[_ hide detail     _._togggle hydra
 "
-               ("[" dired-hide-details-mode)
-               ("+" dired-create-directory)
-               ("RET" dired-open-in-accordance-with-situation :exit t)
-               ("f" dired-open-in-accordance-with-situation :exit t)
-               ("C" dired-do-copy)   ;; Copy all marked files
-               ("D" dired-do-delete)
-               ("M" dired-do-chmod)
-               ("m" dired-mark)
-               ("o" dired-view-file-other-window :exit t)
-               ("?" dired-summary :exit t)
-               ("R" dired-do-rename)
-               ("a" dired-list-all-mode)
-               ("g" revert-buffer)
-               ("e" wdired-change-to-wdired-mode :exit t)
-               ("s" dired-sort-toggle-or-edit)
+    ("[" dired-hide-details-mode)
+    ("+" dired-create-directory)
+    ("RET" dired-open-in-accordance-with-situation :exit t)
+    ("f" dired-open-in-accordance-with-situation :exit t)
+    ("C" dired-do-copy)   ;; Copy all marked files
+    ("D" dired-do-delete)
+    ("M" dired-do-chmod)
+    ("m" dired-mark)
+    ("o" dired-view-file-other-window :exit t)
+    ("?" dired-summary :exit t)
+    ("R" dired-do-rename)
+    ("a" dired-list-all-mode)
+    ("g" revert-buffer)
+    ("e" wdired-change-to-wdired-mode :exit t)
+    ("s" dired-sort-toggle-or-edit)
                ;; ("T" counsel-tramp :exit t)
-               ("t" dired-toggle-marks)
-               ("U" dired-unmark-all-marks)
-               ("u" dired-unmark)
-               ("v" dired-view-file :exit t)
-               ("w" dired-copy-filename-as-kill)
-               ("W" dired-get-fullpath-filename)
-               ("z" dired-zip-files)
-               ("Z" dired-do-compress)
+    ("t" dired-toggle-marks)
+    ("U" dired-unmark-all-marks)
+    ("u" dired-unmark)
+    ("v" dired-view-file :exit t)
+    ("w" dired-copy-filename-as-kill)
+    ("W" dired-get-fullpath-filename)
+    ("z" dired-zip-files)
+    ("Z" dired-do-compress)
                ;; ("F" my:finder-app)
                ;; ("T" my:iterm-app)
-               ("q" nil)
-               ("." nil :color blue)))
+    ("q" nil)
+    ("." nil :color blue)))
 
 ;;; [3] dired-sidebar
 
@@ -114,34 +115,34 @@ _R_ename    ch_M_od        _t_oggle       _e_dit    _[_ hide detail     _._toggg
 ;; treemacs も候補だったが、独自のバッファ・キーマップ・アイコン体系を持ち
 ;; 依存が 4 つ増えるため、この設定の作りには合わないと判断した。
 
-(leaf dired-sidebar
+(use-package dired-sidebar
   :straight t
   :commands dired-sidebar-toggle-sidebar
   :bind
   (("<f8>" . dired-sidebar-toggle-sidebar)
-   (:dired-sidebar-mode-map
-    ;; neotree の a (隠しファイルの表示切替) 相当。
-    ;; dired-omit-mode は dired-x (組み込み) のもの。
-    ("a" . dired-omit-mode)
-    ;; neotree の <left> (親ノードへ) 相当。既定では ^ と - にもある。
-    ("<left>" . dired-sidebar-up-directory)
-    ;; ディレクトリ行でその場にサブツリーを展開する (もう一度押すと畳む)。
-    ;; 既定では TAB にも割り当てられている。
-    ;; ルートごと移動したいときは RET (dired-sidebar-find-file)。
-    ("<right>" . dired-sidebar-subtree-toggle)))
+   :map dired-sidebar-mode-map
+   ;; neotree の a (隠しファイルの表示切替) 相当。
+   ;; dired-omit-mode は dired-x (組み込み) のもの。
+   ("a" . dired-omit-mode)
+   ;; neotree の <left> (親ノードへ) 相当。既定では ^ と - にもある。
+   ("<left>" . dired-sidebar-up-directory)
+   ;; ディレクトリ行でその場にサブツリーを展開する (もう一度押すと畳む)。
+   ;; 既定では TAB にも割り当てられている。
+   ;; ルートごと移動したいときは RET (dired-sidebar-find-file)。
+   ("<right>" . dired-sidebar-subtree-toggle))
   :custom
   ;; nerd-icons-dired を使ってアイコンを出す (他の箇所と同じ体系)
-  (dired-sidebar-theme . 'nerd-icons)
-  (dired-sidebar-width . 35)
+  (dired-sidebar-theme 'nerd-icons)
+  (dired-sidebar-width 35)
   ;; neotree では開くたびに text-scale を 1 段階下げていた。
   ;; dired-sidebar は dired-sidebar-face を buffer-face-mode で当てる。
-  (dired-sidebar-use-custom-font . t)
+  (dired-sidebar-use-custom-font t)
   ;; ファイルを開いてもサイドバーは開いたままにする
   ;; (neotree の neotree-enter-hide は「あまり便利じゃなかった」と
   ;;  コメントされ、割り当てもされていなかったので同じ方針にする)
-  (dired-sidebar-close-sidebar-on-file-open . nil)
+  (dired-sidebar-close-sidebar-on-file-open nil)
   ;; 選択中のバッファのファイルをサイドバー上で追いかける
-  (dired-sidebar-should-follow-file . t)
+  (dired-sidebar-should-follow-file t)
   :config
   ;; --- clone-buffer 経由でサイドバーを作ると dired-mode-hook が壊れる件 ---
   ;;
@@ -192,14 +193,14 @@ _R_ename    ch_M_od        _t_oggle       _e_dit    _[_ hide detail     _._toggg
 ;; dired-subtree が入っているときだけ有効になる。入れていないと
 ;; TAB や <right> はディレクトリへ移動するだけで、ツリーとして
 ;; その場に展開できない。
-(leaf dired-subtree
+(use-package dired-subtree
   :straight t
   :after dired
   :custom
   ;; 階層ごとの背景色の差を付けない (modus のテーマに任せる)
-  (dired-subtree-use-backgrounds . nil)
+  (dired-subtree-use-backgrounds nil)
   :bind
-  (:dired-mode-map
+  (:map dired-mode-map
    ("<tab>" . dired-subtree-toggle)
    ("<backtab>" . dired-subtree-cycle)))
 

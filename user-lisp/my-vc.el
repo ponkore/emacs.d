@@ -9,13 +9,18 @@
 
 ;;; [3] magit
 
-(leaf magit
+(use-package magit
   :straight t
   :hook (magit-mode-hook . my:magit-setup-diff)
   ;; magit-status-internal は magit 4.x で削除済み。
   ;; git-commit-mode-hook はコマンドではなく変数なので :commands から外す。
   :commands magit-status-setup-buffer git-commit-mode
-  :advice (:filter-args magit-expand-git-file-name magit-expand-git-file-name--msys)
+  ;; leaf の :advice は init 時にインライン展開される (eval-after-load に
+  ;; 包まれない) ので :init に置く。advice-add は対象が未定義でも登録でき、
+  ;; magit のロード時に有効になる。
+  :init
+  (advice-add 'magit-expand-git-file-name :filter-args
+              #'magit-expand-git-file-name--msys)
   :config
   (defun magit-expand-git-file-name--msys (args)
     "Handle Msys directory names such as /c/* by changing them to C:/*"
@@ -48,22 +53,27 @@
 ;; ビットマップを描く。色は face の foreground で決まるので、
 ;; git-gutter で背景色に使っていた色をそのまま foreground に移した。
 
-(leaf diff-hl
+(use-package diff-hl
   :straight t
-  ;; :bind / :hook があると leaf が :config を eval-after-load で包む。
+  ;; :bind / :hook があると use-package が :config を eval-after-load で包む。
   ;; diff-hl を読み込む他のパッケージが無いので明示的にロードする
-  ;; (git-gutter で同じ理由で :require t を付けていたのと同様)。
-  :require t
+  ;; (leaf では :require t だったもの)。
+  :demand t
   :bind
   ;; hydra 起動のキーバインド (git-gutter 時代と同じ C-c g)
   ("C-c g" . hydra-diff-hl/body)
   :custom
   ;; 保存前のバッファでも差分を追う (git-gutter と同じ感覚にする)
-  (diff-hl-flydiff-delay . 0.5)
-  :custom-face
-  (diff-hl-insert . '((t (:foreground "#50fa7b"))))
-  (diff-hl-change . '((t (:foreground "#f1fa8c"))))
-  (diff-hl-delete . '((t (:foreground "#ff79c6"))))
+  (diff-hl-flydiff-delay 0.5)
+  ;; use-package の :custom-face は face-spec-set (defface spec) を使うため
+  ;; modus-vivendi の theme-face に負けて色が反映されない。leaf の
+  ;; :custom-face は custom-set-faces (user テーマ) で、こちらはテーマに勝つ。
+  ;; 同じ挙動にするため custom-set-faces を直接呼ぶ。
+  :init
+  (custom-set-faces
+   '(diff-hl-insert ((t (:foreground "#50fa7b"))))
+   '(diff-hl-change ((t (:foreground "#f1fa8c"))))
+   '(diff-hl-delete ((t (:foreground "#ff79c6")))))
   :hook
   (dired-mode-hook . diff-hl-dired-mode)
   ;; magit の操作後にマーカーを更新する
@@ -71,23 +81,20 @@
   :config
   (global-diff-hl-mode +1)
   (diff-hl-flydiff-mode +1)
-  :hydra
-  (hydra-diff-hl nil
+  ;; leaf の :hydra 相当 (init 時にインライン展開される)。
+  :init
+  (defhydra hydra-diff-hl nil
                  "diff hunk"
-                 ("p" diff-hl-previous-hunk "previous")
-                 ("n" diff-hl-next-hunk "next")
-                 ("s" diff-hl-stage-dwim "stage")
-                 ("r" diff-hl-revert-hunk "revert")
-                 ("SPC" diff-hl-show-hunk "show diff")))
+    ("p" diff-hl-previous-hunk "previous")
+    ("n" diff-hl-next-hunk "next")
+    ("s" diff-hl-stage-dwim "stage")
+    ("r" diff-hl-revert-hunk "revert")
+    ("SPC" diff-hl-show-hunk "show diff")))
 
 ;;; [3] Windows 環境でのSVN support
 
-(leaf vc-windows
-  ;; leaf は :hook / :bind / :mode などがあると :config を
-  ;; (eval-after-load '<leaf名>) で包んで遅延させる。この leaf 名は
-  ;; 実在する feature ではないため、:config が永久に実行されなかった。
-  ;; :leaf-defer nil で遅延を無効化する。
-  :leaf-defer nil
+;; 疑似パッケージなので use-package の名前は emacs にする。
+(use-package emacs
   :if (eq system-type 'windows-nt)
   :hook
   ;; svn log の出力は cp932

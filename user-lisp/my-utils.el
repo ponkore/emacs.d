@@ -9,20 +9,22 @@
 
 ;;; [3] Calendar
 
-(leaf calendar
-  ;; 組み込みライブラリなのでインストール指定は不要
+(use-package calendar
+  ;; 組み込みライブラリなのでインストール指定は不要。
+  ;; leaf は (require) を出さなかったので :defer t で揃える。
+  :defer t
   :custom
-  (mark-holidays-in-calendar . t) ; 祝日をカレンダーに表示
-  (calendar-month-name-array . ["01" "02" "03" "04" "05" "06" "07" "08" "09" "10" "11" "12" ])
-  (calendar-day-name-array   . ["日" "月" "火" "水" "木" "金" "土"])
-  (calendar-day-header-array . ["日" "月" "火" "水" "木" "金" "土"])
-  (calendar-week-start-day   . 0)) ;; 日曜開始
+  (mark-holidays-in-calendar t) ; 祝日をカレンダーに表示
+  (calendar-month-name-array ["01" "02" "03" "04" "05" "06" "07" "08" "09" "10" "11" "12" ])
+  (calendar-day-name-array   ["日" "月" "火" "水" "木" "金" "土"])
+  (calendar-day-header-array ["日" "月" "火" "水" "木" "金" "土"])
+  (calendar-week-start-day   0)) ;; 日曜開始
 
-(leaf japanese-holidays
+(use-package japanese-holidays
   :straight t
   :custom
-  (japanese-holiday-weekend . '(0 6)) ; 土日を祝日として表示
-  (japanese-holiday-weekend-marker . '(holiday nil nil nil nil nil japanese-holiday-saturday)) ; 土曜日を水色で表示
+  (japanese-holiday-weekend '(0 6)) ; 土日を祝日として表示
+  (japanese-holiday-weekend-marker '(holiday nil nil nil nil nil japanese-holiday-saturday)) ; 土曜日を水色で表示
   ;;    `((calendar-holidays . ,(append japanese-holidays holiday-local-holidays holiday-other-holidays))) ; 他の国の祝日も表示させたい場合は適当に調整
   :hook
   (calendar-today-visible-hook . japanese-holiday-mark-weekend)
@@ -31,36 +33,37 @@
 
 ;;; [3] open-junk-file
 
-(leaf open-junk-file
+(use-package open-junk-file
   :straight t
   :bind ("C-x j" . open-junk-file)
   :custom
   ;; macOS の Dropbox パス直書きだったため Windows / Linux で壊れていた。
   ;; 存在する Dropbox ディレクトリを探し、無ければ ~/junk/ にする。
-  `(open-junk-file-format
-    . ,(concat (or (seq-find #'file-directory-p
-                             (list (expand-file-name "~/Library/CloudStorage/Dropbox-個人用")
-                                   (expand-file-name "~/Dropbox")))
-                   (expand-file-name "~"))
-               "/junk/%Y-%m-%d-%H%M%S.")))
+  (open-junk-file-format
+   (concat (or (seq-find #'file-directory-p
+                         (list (expand-file-name "~/Library/CloudStorage/Dropbox-個人用")
+                               (expand-file-name "~/Dropbox")))
+               (expand-file-name "~"))
+           "/junk/%Y-%m-%d-%H%M%S.")))
 
 ;;; [3] dashboard
 
-(leaf dashboard
+(use-package dashboard
   ;; :when (version<= "25.1" emacs-version)
   :when nil
   :straight t
-  :custom ((dashboard-items . '((recents . 15)
-                                (projects . 5)
-                                (bookmarks . 5)
-                                ;; (agenda . 5)
-                                )))
+  :custom ((dashboard-items '((recents . 15)
+                              (projects . 5)
+                              (bookmarks . 5)
+                              ;; (agenda . 5)
+                              )))
   :config
   (dashboard-setup-startup-hook))
 
 ;;; [3] 再帰的に grep
 
-(leaf grep-r
+;; 疑似パッケージなので use-package の名前は emacs にする。
+(use-package emacs
   :config
   ;; 再帰的にgrep
   (require 'grep)
@@ -118,7 +121,8 @@
 
 ;;; [3] ripgrep
 
-(leaf ripgrep*
+;; 疑似パッケージなので use-package の名前は emacs にする。
+(use-package emacs
   :init
   (defun my:ripgrep-regexp (regexp &optional args)
     "Run a ripgrep search with `REGEXP' rooted at `.'.
@@ -144,7 +148,8 @@
 
 ;;; [3] 自分の Blog 記述用に作成したもの（あまり使ってない）
 
-(leaf myblog-hugo
+;; 疑似パッケージなので use-package の名前は emacs にする。
+(use-package emacs
   :config
   (defvar myblog-hugo/base-directory-format-string "~/blog/myblog-hugo/content/post/%Y-%m/%d/"
     "format string for post directory. use this with `format-time-string'")

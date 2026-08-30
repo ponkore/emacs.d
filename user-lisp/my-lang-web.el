@@ -5,13 +5,13 @@
 
 ;;; [3] PHP
 
-(leaf php-mode
+(use-package php-mode
   :mode ("\\.\\(cgi\\|phpm\\|inc\\)\\'" . php-mode)
   :straight t
   :custom
   ;; ac-php-debug-flag は ac-php 用。ac-php はもう使っていないので削除した。
-  (php-manual-url . 'ja)
-  (php-mode-coding-style . 'psr2)
+  (php-manual-url 'ja)
+  (php-mode-coding-style 'psr2)
   :hook
   (php-mode-hook . (lambda ()
                      ;; php-mode 1.28 (2026-08) で cc-mode 依存が外れ、
@@ -36,7 +36,7 @@
   ;; 診断は eglot が flymake 経由で出すので flycheck の設定は要らなくなった。
   (php-mode-hook . eglot-ensure)
   :bind
-  (:php-mode-map
+  (:map php-mode-map
    (";" . self-insert-command)
    ("{" . self-insert-command)
    ;; ("[" . #'(smartchr "[]" "array()" "[[]]"))
@@ -57,13 +57,15 @@
 ;;
 ;; javascript / typescript
 ;;
-(leaf add-node-modules-path
+(use-package add-node-modules-path
   :straight t
   :commands add-node-modules-path)
 
-(leaf prettier-js
+(use-package prettier-js
   :straight t
-  :diminish t
+  ;; use-package は遅延キーワードが無いと (require) を出すので :defer t が要る
+  :defer t
+  :diminish
   ;; :commands prettier-js-mode
   ;; :custom
   ;; (prettier-js-args . ("--print-width" "120"
@@ -83,14 +85,14 @@
 ;; そもそも起動できないため、従来のモードを残したうえで
 ;; my:treesit-remap で差し替える形にしてある。
 
-(leaf flymake-eslint
+(use-package flymake-eslint
   ;; 旧 (flycheck-add-mode 'javascript-eslint 'web-mode) の置き換え。
   ;; eslint はプロジェクトの node_modules/.bin にあるので、
   ;; add-node-modules-path のあとに有効化する。
   :straight t
   :commands flymake-eslint-enable
   :custom
-  (flymake-eslint-defer-binary-check . t))
+  (flymake-eslint-defer-binary-check t))
 
 (defun my:web-lang-setup ()
   "JS / TS 系メジャーモード共通のセットアップ。"
@@ -101,26 +103,26 @@
     (flymake-eslint-enable))
   (prettier-js-mode))
 
-(leaf js
+(use-package js
   ;; 組み込みの js-mode。以前は js2-mode を使っていたが、js-mode 側が
   ;; 十分に育っており、tree-sitter 版 (js-ts-mode) への差し替えもしやすい。
   :mode (("\\.\\(js\\|cjs\\|mjs\\)\\'" . js-mode)
          ("\\.json\\'" . js-json-mode))
   :custom
-  (js-indent-level . 2)
+  (js-indent-level 2)
   :hook ((js-mode-hook js-ts-mode-hook) . my:web-lang-setup))
 
-(leaf typescript-mode
+(use-package typescript-mode
   ;; 文法が入っていない環境向けのフォールバック。文法があれば
   ;; typescript-ts-mode (組み込み) に差し替わる。
   :straight t
   :mode ("\\.\\(ts\\|mts\\|cts\\)\\'" . typescript-mode)
   :custom
-  (typescript-indent-level . 2)
+  (typescript-indent-level 2)
   :hook ((typescript-mode-hook typescript-ts-mode-hook tsx-ts-mode-hook)
          . my:web-lang-setup))
 
-;; leaf の :config は (eval-after-load '<leaf名> ...) に包まれるので、
+;; use-package の :config は (eval-after-load '<パッケージ名> ...) に包まれるので、
 ;; そこでメジャーモードを差し替えても「その回に開いたバッファ」には
 ;; 間に合わない。そもそも差し替えが効くと従来のモードはロードされなく
 ;; なるため、差し替えとインデント設定はトップレベルで済ませる。
@@ -129,15 +131,15 @@
 (my:treesit-remap 'js-json-mode 'json-ts-mode 'json)
 (my:treesit-remap 'typescript-mode 'typescript-ts-mode 'typescript)
 
-(leaf web-mode
+(use-package web-mode
   :straight t
   :mode (("\\.tsx\\'" . web-mode)
          ("\\.html\\'" . web-mode)
          ("\\.htm\\'" . web-mode)
          ("\\.njk\\'" . web-mode))
   :custom
-  (web-mode-code-indent-offset . 2)
-  (web-mode-markup-indent-offset . 2)
+  (web-mode-code-indent-offset 2)
+  (web-mode-markup-indent-offset 2)
   :hook
   (web-mode-hook . (lambda ()
                      (setq tab-width 4)
@@ -150,18 +152,18 @@
 (when (my:treesit-available-p 'tsx)
   (add-to-list 'auto-mode-alist '("\\.tsx\\'" . tsx-ts-mode)))
 
-(leaf scss-mode
+(use-package scss-mode
   :straight t
   :mode ("\\.\\(scss\\|css\\)\\'" . scss-mode)
   :custom
-  (scss-compile-at-save . nil) ;; 自動コンパイルをオフにする
-  (css-indent-offset . 2)
-  (scss-compile-at-save . nil)
+  (scss-compile-at-save nil) ;; 自動コンパイルをオフにする
+  (css-indent-offset 2)
+  (scss-compile-at-save nil)
   ;; (yas-minor-mode) は :config トップレベルにあり、scss-mode のロード時点の
   ;; カレントバッファに対して実行されてしまっていた。:hook へ移動する。
   :hook (scss-mode-hook . yas-minor-mode)
   :bind
-  (:scss-mode-map
+  (:map scss-mode-map
    ("\M-{" . my:css-electric-pair-brace)
    (";" . my:semicolon-ret))
   :config

@@ -20,7 +20,7 @@ Windows（主）、macOS、Linux 向けの個人 Emacs 設定リポジトリ。E
 - `init.el` — ブートストラップと読み込み順の宣言のみ
   1. straight.el のブートストラップ
   2. 組み込みを使うパッケージの宣言（`org` / `transient` を `:type built-in`）
-  3. leaf + leaf-keywords の初期化
+  3. use-package の初期化（Emacs 同梱。キーワード順と挙動を調整する）
   4. `site-lisp/` を `load-path` に追加
   5. `(prepare-user-lisp ...)`
   6. `custom.el` の読み込み
@@ -31,6 +31,16 @@ Windows（主）、macOS、Linux 向けの個人 Emacs 設定リポジトリ。E
 - `docs/archive-init.org` — Org 方式だった頃の設定（履歴として保存）
 - `docs/extract.el`, `docs/verify.el`, `docs/split.py`, `docs/verify-split.el` —
   Org からの抽出・分割に使った検証スクリプト（等価性の証跡）
+- `docs/snapshot.el` — 設定を読み込んだ Emacs の観測可能な状態
+  （defcustom 全変数、全 `*-hook` / `*-functions`、全キーバインド、face の
+  `theme-face` / `defface` / 実効属性、ロード済み feature）を決定的な順序で
+  ダンプする。leaf → use-package 移行の等価性検証に使った。同一設定なら
+  2 回採取して差分 0 行になるので、書き換えの前後で diff すれば足りる
+
+  ```sh
+  emacs --batch -l early-init.el -l init.el -l docs/snapshot.el \
+        --eval '(my:snapshot-dump "before.txt")'
+  ```
 
 ## `user-lisp/` の扱い（重要）
 
@@ -38,16 +48,15 @@ Emacs 31.1 の `user-lisp/` は、既定では `package-activate-all` の直後�
 `init.el` の読み込み**前**に `prepare-user-lisp` が走り、配下を再帰的に
 バイトコンパイルして autoload を生成し `load-path` に追加する。
 
-しかしその時点では straight.el のブートストラップが済んでおらず `leaf` マクロが
-未定義のため、leaf を使ったモジュールが関数呼び出しとしてコンパイルされ、
-壊れた `.elc` が生成される。
+しかしその時点では straight.el のブートストラップが済んでおらず、
+`use-package` も未初期化のため、モジュールが壊れた `.elc` にコンパイルされる。
 
 そのため以下のようにしている：
 
 - `early-init.el` で `user-lisp-auto-scrape` を `nil` にして自動実行を止める
-- `init.el` で straight/leaf を用意したあと `(prepare-user-lisp ...)` を明示的に呼ぶ
+- `init.el` で straight と use-package を用意したあと `(prepare-user-lisp ...)` を明示的に呼ぶ
 - **バイトコンパイルはしない**（`prepare-user-lisp` の第 1 引数 JUST-ACTIVATE を `t`）。
-  コンパイルすると、パッケージ由来のマクロを leaf の `:config` で使っている箇所が壊れる。
+  コンパイルすると、パッケージ由来のマクロを `:init` / `:config` で使っている箇所が壊れる。
   コンパイル時点では当該パッケージが未ロードでマクロが未定義のため、
   関数呼び出しとしてコンパイルされてしまう。
   実例: `doom-modeline-def-segment` が関数扱いになり、実行時に引数の
@@ -204,11 +213,11 @@ cc-mode 版が要るときは `php-cc-mode` が別に残っている。
 - `*-ts-mode` は従来モードのフックを継承しない。`:hook` は
   `((foo-mode-hook foo-ts-mode-hook) . func)` の形で両方に張ること
 
-- **`my:treesit-remap` は必ずトップレベルで呼ぶこと**。leaf の `:config` は
-  `(eval-after-load '<leaf名>)` に包まれるので、そこで差し替えても
+- **`my:treesit-remap` は必ずトップレベルで呼ぶこと**。`:config` は
+  `(eval-after-load '<パッケージ名>)` に包まれるので、そこで差し替えても
   「その回に開いたバッファ」には間に合わない。さらに差し替えが効くと
   従来のモードはもうロードされないため、`:config` は二度と実行されない
-- `.tsx` の `auto-mode-alist` 登録は **web-mode の leaf より後**に置くこと。
+- `.tsx` の `auto-mode-alist` 登録は **web-mode のブロックより後**に置くこと。
   `:mode` が先頭に積むので、前に置くと web-mode に負ける
 
 導入済みの文法（`tree-sitter/`、git 管理外）:
@@ -223,7 +232,7 @@ Emacs は `cc` → `gcc` → `c99` の順に探すので `gcc` があれば足�
 
 **straight.el に一本化**している（`package.el` は `early-init.el` で無効化済み）。
 
-- 新しいパッケージは該当モジュール内で `(leaf package-name :straight t ...)`
+- 新しいパッケージは該当モジュール内で `(use-package package-name :straight t ...)`
 - 組み込みライブラリには `:straight` / `:ensure` を付けない
 - Emacs 同梱のものを使いたい場合は `init.el` で
   `(straight-use-package '(NAME :type built-in))` を宣言する（`org`、`transient` が該当）。
@@ -307,7 +316,7 @@ upstream がデフォルトブランチを `master` → `main` に変えてい�
 2026-08 に重複を整理して、`custom.el` に残すのは次の 4 変数だけにした:
 
 - `safe-local-variable-values` … ディレクトリローカル変数の許可リスト（Emacs が書く）
-- `warning-suppress-log-types` / `warning-suppress-types` … leaf / straight の警告抑制
+- `warning-suppress-log-types` / `warning-suppress-types` … straight の警告抑制
 - `yas-new-snippet-default` … スニペットのテンプレート
 
 face は `rst-level-1`〜`6` の 6 面だけ残した（modus も同じ face を定義するが、
@@ -320,36 +329,109 @@ face（`font-lock-*` など）はテーマが勝ち、`custom.el` に書いて�
 
 `customize` を使うと `custom.el` に書き戻されるので、モジュール側と
 重複していないか時々確認する。重複の検出は、`custom.el` の
-`custom-set-variables` から変数名を集め、`user-lisp/` の leaf を
+`custom-set-variables` から変数名を集め、`user-lisp/` の `use-package` を
 `macroexpand-1` して出てくる `customize-set-variable` と突き合わせればよい。
 
-## leaf を使うときの注意
+なお `use-package` の `:custom` は既定 (`use-package-use-theme` = `t`) では
+`custom-theme-set-variables`（`use-package` という擬似テーマ）を使う。これだと
+`custom.el` が書く `user` テーマのほうが優先順位が高くなり、上の
+「`user-lisp/` 側が勝つ」が逆転してしまう。`init.el` で
+`use-package-use-theme` を `nil` にして `customize-set-variable` に戻してある。
 
-leaf は `:hook` / `:bind` / `:mode` などの遅延キーワードがあると `:config` を
-`(eval-after-load '<leaf名>)` で包む。**leaf 名が実在する feature でないと
-`:config` も `:bind` も永久に適用されない**。
+## use-package を使うときの注意
+
+設定の記述は **Emacs 同梱の use-package**（`lisp/use-package/`）で行う。
+2026-08 に leaf から移行した。leaf は直近 12 ヶ月で 3 コミットまで開発が細り、
+日本語圏以外ではほとんど使われていないのに対し、use-package は Emacs 本体に
+入っているため腐りようがない、というのが理由。パッケージマネージャは straight の
+まま（elpaca への移行は見送り）。設定本体が use-package なら、将来 elpaca や
+package.el に移るときも `:straight` の 1 行を差し替えるだけで済む。
+
+### `init.el` で調整している 3 点
+
+素の use-package のままでは leaf と挙動が変わってしまうため、`init.el` で以下を
+設定している。**外すと静かに壊れる**ので注意。
+
+| 設定 | 外すとどうなるか |
+|---|---|
+| `use-package-hook-name-suffix` = `nil` | `:hook (foo-mode-hook . f)` が `foo-mode-hook-hook` に登録される |
+| `use-package-use-theme` = `nil` | `:custom` が擬似テーマ経由になり、`custom.el` に負ける（上記） |
+| `:straight` を `:unless` の直後へ移動 | `:straight` は `use-package-keywords` の先頭に push されるため `:if` より先に処理され、**`:if` が偽でも `straight-use-package` が走る**。Windows で `exec-path-from-shell`、Linux で `w32-ime` / `tr-ime` まで clone / build しにいく |
+
+### 遅延キーワードが無いブロックには `:defer t` を足す
+
+leaf は `:require t` が無い限り `(require)` を出さないが、**use-package は遅延
+キーワード（`:commands` `:bind` `:hook` `:mode` `:after` など）が 1 つも無いと
+`(require)` を出す**。インストールするだけのブロックには `:defer t` を付ける。
+
+`:defer t` を付けると `:config` は `(with-eval-after-load '<name>)` に包まれる。
+そのパッケージを誰もロードしないなら `:config` は永久に走らないので、
+「ロードせずに実行したい設定」は `:init` に置くこと（leaf の `:config` が
+インライン実行だったものはここに移す）。
+
+### 名前は実在する feature にする。疑似パッケージは `emacs`
+
+`:hook` / `:bind` / `:mode` などがあると `:config` は
+`(eval-after-load '<パッケージ名>)` に包まれる。**名前が実在する feature で
+ないと `:config` も `:bind` も永久に適用されない**（leaf でも同じ罠だった）。
 
 - 実在する feature 名を使う（例: `sql-mode` ではなく `sql`）
-- 疑似パッケージ名（`shell-windows` など OS 別のまとまり）を使う場合は
-  `:leaf-defer nil` を付けて遅延を無効化する
+- OS 別のまとまりなど**疑似パッケージには `emacs` を使う**。`(require 'emacs)`
+  は no-op、`(with-eval-after-load 'emacs ...)` は即実行されるので安全
 
-`:after FOO` も同じ罠を持つ。leaf は `:config` を `(eval-after-load 'FOO ...)` で
-包むため、**FOO がどこからも `require` されない構成だと設定が永久に走らない**。
-実例: `*font-setting` が `:after nerd-icons` だったが nerd-icons に `:require t` が
-無く、フォント設定が一度も実行されないまま既定の Courier New で起動していた。
-`:after` の対象には `:require t` を付けるか、そもそも依存が本当に必要か見直すこと。
+### `:custom-face` は使わない
 
-`:custom` にマイナーモードの変数を書いても、そのパッケージが未ロードなら
-**モードは有効にならない**。`customize-set-variable` は
-`(get VAR 'custom-set)` が未設定のとき `set-default` にフォールバックするため、
-変数に `t` が入るだけでモード関数が呼ばれない。
-実例: `(leaf corfu :custom (global-corfu-mode . t))` では corfu が読まれず、
-変数だけ `t` で補完が一切出なかった。
-`:require t` でロードした上で `:config` から明示的に呼ぶこと。
-他のパッケージが偶然 require してくれている場合 (vertico / yasnippet など) は
-動いてしまうので、**動いていることが正しさの証拠にならない**点に注意。
+**use-package の `:custom-face` はテーマに負ける。** 実測:
 
-到達不能な設定は次で検出できる：
+| 方法 | modus-vivendi が同じ face を定義しているとき |
+|---|---|
+| `custom-set-faces`（leaf の `:custom-face` 相当） | `theme-face` に `user` が積まれ **自分の指定が勝つ** |
+| use-package の `:custom-face`（`face-spec-set` + `face-defface-spec`） | **テーマが勝ち、指定が消える** |
+| `face-spec-set` に spec-type `user` を明示 | 同上、**消える** |
+
+そのため `:init` から `custom-set-faces` を直接呼ぶ形にしてある
+（`diff-hl` / `highlight-indent-guides` / `doom-modeline` の 3 箇所）。
+
+### `require` できないものには `:no-require t`
+
+use-package は **`require` に失敗すると `:config` ごと実行しない**。
+`modus-themes` は `etc/themes/` にあり `load-path` に載っていないため
+`(require 'modus-themes)` は失敗する。`:no-require t` が無いと `load-theme` が
+呼ばれず、テーマが一切適用されない。
+
+### `:custom` にマイナーモードの変数を書く場合
+
+`customize-set-variable` は `(get VAR 'custom-set)` が未設定のとき
+`set-default` にフォールバックするため、**パッケージが未ロードだと変数に `t` が
+入るだけでモード関数が呼ばれない**。
+実例: `(corfu :custom (global-corfu-mode t))` では corfu が読まれず補完が出なかった。
+`:demand t` でロードした上で `:config` から明示的に呼ぶこと。
+
+ただし autoloads に `custom-autoload` が入っている変数（`cua-mode`、
+`global-whitespace-mode`、`yas-global-mode` など）は `customize-set-variable` が
+パッケージをロードして setter を呼ぶので動く。**動いていることが正しさの証拠に
+ならない**点に注意。
+
+### leaf キーワードの対応表
+
+| leaf | use-package |
+|---|---|
+| `:straight t` | 同じ |
+| `:custom (var . val)` | `:custom (var val)`。値の位置は式として評価されるのでバッククォートは不要 |
+| `:custom-face (face . '(...))` | 使わない。`:init (custom-set-faces '(face (...)))` |
+| `:bind (:foo-map ...)` | `:bind (:map foo-map ...)`。グローバル束縛は `:map` より前に置き、全体を 1 つのリストにまとめる |
+| `:require t` | `:demand t` |
+| `:require OTHER-FEATURE` | `:demand t` + `:config (require 'OTHER-FEATURE)` |
+| `:leaf-defer nil` | 不要（名前を `emacs` にする） |
+| `:hydra (name () ...)` | `:init (defhydra name () ...)`。leaf の `:hydra` は init 時にインライン展開されるので `:config` に置くと意味が変わる |
+| `:advice (:around f fn)` | `:init (advice-add 'f :around #'fn)`。これも init 時インライン |
+| `:global-minor-mode M` | `:config (M 1)` |
+| `:diminish t` | `:diminish`（引数なしで `<name>-mode` が対象） |
+| `:after a b` | `:after (a b)`。ただし use-package は条件が満たされると `require` するので、leaf と同じく読み込みたくないときは `:defer t` + `:init` |
+| `:doc` / `:tag` / `:includes` | 無い。コメントに落とす |
+| `:disabled t` | 同じ（両者とも完全な no-op） |
+
+### 到達不能な設定の検出
 
 ```elisp
 ;; 決してロードされない feature に対する eval-after-load を列挙
@@ -362,6 +444,23 @@ leaf は `:hook` / `:bind` / `:mode` などの遅延キーワードがあると 
 この検出スニペットは `locate-library` が通る（= インストール済みだがロードされない）
 パッケージに対する `:after` は拾えない点に注意。実際に GUI 起動して
 `(featurep 'FOO)` を確認するのが確実。
+
+### 書き換えたときの検算
+
+`:bind` を `:map` 形式に直すときに閉じ括弧を 1 つ余らせると、`use-package` の
+フォームがそこで閉じてしまい、後続の `:custom` の各行がトップレベルの関数呼び出しに
+なる（`void-function (dired-sidebar-theme)` のような形で表面化する）。
+括弧のバランスは取れているので `check-parens` では検出できない。
+**トップレベルのフォーム数を書き換え前と突き合わせる**のが確実。
+
+```sh
+emacs --batch --eval '(dolist (f command-line-args-left)
+  (with-temp-buffer (insert-file-contents f) (goto-char (point-min))
+    (let ((n 0)) (ignore-errors (while t (read (current-buffer)) (setq n (1+ n))))
+      (message "%s: %d forms" f n))))' user-lisp/*.el
+```
+
+あわせて `docs/snapshot.el` の前後 diff を取る（前掲）。
 
 ## フォントとアイコン
 
@@ -434,6 +533,10 @@ v2 世代の API（`modus-themes-load-themes` / `modus-themes-load-vivendi` /
 `etc/themes/modus-themes.el` の `modus-vivendi-palette` を見る。
 `:custom` は `:config` より先に走るので、上書きは `load-theme` に間に合う。
 
+**`:no-require t` が必須。** `modus-themes` は `etc/themes/` にあり `load-path` に
+載っていないため `(require 'modus-themes)` は失敗する。use-package は require に
+失敗すると `:config` ごと飛ばすので、これが無いと `load-theme` が呼ばれない。
+
 ## org のアーカイブ先の `#YM`
 
 アーカイブ先の指定に `#YM` と書くと `YYYY-MM` に展開される。
@@ -471,7 +574,7 @@ v2 世代の API（`modus-themes-load-themes` / `modus-themes-load-vivendi` /
 ```
 
 左端のバー (`doom-modeline-bar`) だけはテーマのアクセント色なので
-`:custom-face` で別途揃える。`mode-line-inactive` はテーマのまま（灰色）にして、
+`custom-set-faces` で別途揃える（`:custom-face` はテーマに負けるので使わない）。`mode-line-inactive` はテーマのまま（灰色）にして、
 どのウィンドウが選択中か分かるようにしてある。
 
 **セグメント名はバージョンで変わる。** 4.x で `checker` は `check` に改名された。

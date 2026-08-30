@@ -56,13 +56,13 @@
 
 ;;; [3] modifier
 
-(leaf *modifier
+;; leaf では *modifier / *modifier-macos の二重の疑似パッケージだったが、
+;; 外側は :config を持つだけで何もしていなかったので 1 つにまとめた。
+(use-package emacs
+  :if (eq system-type 'darwin)
   :config
-  (leaf *modifier-macos
-    :if (eq system-type 'darwin)
-    :config
-    (setq mac-option-modifier 'super)
-    (setq mac-command-modifier 'meta)))
+  (setq mac-option-modifier 'super)
+  (setq mac-command-modifier 'meta))
 
 (provide 'my-platform)
 ;;; my-platform.el ends here

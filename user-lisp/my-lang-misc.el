@@ -5,18 +5,18 @@
 
 ;;; [3] SQL
 
-(leaf sql
-  ;; leaf 名は "sql-mode" だったが、それは feature 名ではない
-  ;; (ライブラリは sql.el)。leaf は :bind / :config を
-  ;; (eval-after-load '<leaf名>) で遅延させるため、存在しない feature を
+(use-package sql
+  ;; パッケージ名は "sql-mode" だったが、それは feature 名ではない
+  ;; (ライブラリは sql.el)。leaf / use-package は :bind / :config を
+  ;; (eval-after-load '<パッケージ名>) で遅延させるため、存在しない feature を
   ;; 待ち続けて :config も :bind も永久に適用されていなかった。
   ;; その結果 oracle-settings 等が未定義で、C-c " / C-c , も未バインドだった。
   ;; 実在する feature 名 sql に直すことで正しく遅延適用される。
   :mode ("\\.ddl$" . sql-mode)
   :custom
-  (sql-product . 'postgres)
+  (sql-product 'postgres)
   :bind
-  (:sql-mode-map
+  (:map sql-mode-map
    ("C-c \"" . wrap-double-quote-thing-at-symbol)
    ("C-c ," . move-trailing-comma-to-line-start))
   :hook
@@ -93,9 +93,14 @@ set pagesize 1000
 
 ;;; [3] bat
 
-(leaf bat-mode
+;; leaf は (require) を出さないので bat-mode は起動時にロードされない。
+;; use-package で同じにするため :defer t を付け、設定は :init に置く。
+;; bat-font-lock-keywords には bat-mode.el の defvar より先に値が入るため、
+;; defvar は上書きせずこちらの値が残る (leaf のときと同じ)。
+(use-package bat-mode
   :if (eq system-type 'windows-nt)
-  :config
+  :defer t
+  :init
   (setq bat-font-lock-keywords
         (eval-when-compile
           (let ((COMMANDS
@@ -128,7 +133,7 @@ set pagesize 1000
 
 ;;; [3] swift
 
-(leaf swift-mode
+(use-package swift-mode
   :straight t
   :hook (swift-mode-hook . eglot-ensure))
 
@@ -137,13 +142,13 @@ set pagesize 1000
 
 ;;; [3] lua
 
-(leaf lua-mode
+(use-package lua-mode
   :straight t
   :mode (".nyagos" . lua-mode))
 
 ;;; [3] VisualBasic
 
-(leaf visual-basic-mode
+(use-package visual-basic-mode
   ;; in site-lisp
   :mode ("\\.\\(frm\\|bas\\|cls\\|vbs\\|vb\\)$" . visual-basic-mode)
   :hook (visual-basic-mode-hook . (lambda () (setq mode-name "vb")))

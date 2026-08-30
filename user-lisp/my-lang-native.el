@@ -5,18 +5,19 @@
 
 ;;; [3] rust
 
-;; (leaf racer
+;; (use-package racer
 ;;   :straight t)
 
-(leaf cargo
-  :straight t)
+(use-package cargo
+  :straight t
+  :defer t)
 
-(leaf rust-mode
+(use-package rust-mode
   ;; 文法が入っていない環境向けのフォールバック。文法があれば組み込みの
   ;; rust-ts-mode に差し替わる。
   :straight t
   :custom
-  (rust-format-on-save . t)
+  (rust-format-on-save t)
   :preface
   (defun my:rust-ts-setup ()
     "rust-ts-mode には rust-format-on-save が無いので eglot で整形する。"
@@ -29,7 +30,7 @@
   ((rust-mode-hook rust-ts-mode-hook) . yas-minor-mode)
   (rust-ts-mode-hook . my:rust-ts-setup))
 
-;; leaf の :config は (eval-after-load 'rust-mode ...) に包まれる。
+;; use-package の :config は (with-eval-after-load 'rust-mode ...) に包まれる。
 ;; rust-ts-mode に差し替えると rust-mode 自体がロードされなくなるので、
 ;; 差し替えとインデント設定はトップレベルで済ませる。
 (setq rust-ts-mode-indent-offset 4)
@@ -37,7 +38,7 @@
 
 ;;; [3] C++
 
-(leaf cc-mode
+(use-package cc-mode
   :hook (c-mode-common-hook . my:cc-mode-setup)
   :config
   (defun my:cc-mode-setup ()
@@ -59,7 +60,7 @@
 
 ;;; [3] C#
 
-(leaf csharp-mode
+(use-package csharp-mode
   ;; Emacs 29 以降 csharp-mode / csharp-ts-mode は組み込み。
   ;; 外部パッケージ (v1.1.1) が組み込みを上書きしていたため :straight t を外す。
   ;; csharp-mode は cc-mode 派生、csharp-ts-mode は tree-sitter 派生で

@@ -9,15 +9,16 @@
 
 ;;; [3] yaml
 
-(leaf yaml-mode
-  :straight t)
+(use-package yaml-mode
+  :straight t
+  :defer t)
 
 ;;; [3] diff
 
-(leaf diff-mode
+(use-package diff-mode
   :hook
-  (diff-mode-hook . my:diff-mode-setup-faces)
-  (diff-mode-hook . my:diff-mode-refine-automatically)
+  ((diff-mode-hook . my:diff-mode-setup-faces)
+   (diff-mode-hook . my:diff-mode-refine-automatically))
   :config
   (defun my:diff-mode-setup-faces ()
     ;; 追加された行は緑で表示
@@ -33,26 +34,29 @@
 
 ;;; [3] log4j
 
-(leaf log4j-mode
-  :straight t)
+(use-package log4j-mode
+  :straight t
+  :defer t)
 
 ;;; [3] Dockerfile / docker-compose.yml
 
-(leaf dockerfile-mode
+(use-package dockerfile-mode
   :straight t
   :mode ("Dockerfile\\'" . dockerfile-mode))
 
-(leaf docker-compose-mode
-  :straight t)
+(use-package docker-compose-mode
+  :straight t
+  :defer t)
 
 ;;; [3] vimrc
 
-(leaf vimrc-mode
-  :straight t)
+(use-package vimrc-mode
+  :straight t
+  :defer t)
 
 ;;; [3] mayu
 
-(leaf mayu-mode
+(use-package mayu-mode
   ;; in site-lisp
   :mode ("\\.\\(mayu\\)\\'" . mayu-mode))
 

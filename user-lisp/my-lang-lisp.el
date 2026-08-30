@@ -9,8 +9,8 @@
 
 ;;; [3] Emacs lisp
 
-(leaf elisp-mode
-  :require t
+(use-package elisp-mode
+  :demand t
   :preface
   (defun my:emacs-lisp-hooks ()
     ;; corfu 移行前は company-backends に company-elisp などを指定していた。
@@ -27,7 +27,7 @@
 ;;
 ;; clojure
 ;;
-(leaf clojure-mode
+(use-package clojure-mode
   :straight t
   :commands define-clojure-indent
   :mode ("\\(default\\|user\\|emacs\\)\\.\\(behaviors\\|keymap\\)" . clojure-mode)
@@ -69,7 +69,7 @@
   (eldoc-mode +1)
   )
 
-(leaf flymake-kondor
+(use-package flymake-kondor
   ;; 旧 flycheck-clj-kondo。clj-kondo の診断を flymake に流す。
   ;; clojure-mode-hook の flycheck-mode は prog-mode-hook の flymake-mode に
   ;; 置き換わったので不要になった。
@@ -77,22 +77,23 @@
   :hook ((clojure-mode-hook clojurescript-mode-hook clojurec-mode-hook)
          . flymake-kondor-setup))
 
-(leaf cider
+(use-package cider
   :straight t
   :bind ("C-c M-j" . cider-jack-in)
   ;; cider-repl-mode-hook / cider-mode-hook で company-mode を有効化していたが、
   ;; corfu は global-corfu-mode で全バッファに効くので不要になった。
   :custom
-  (cider-show-error-buffer . t)
-  (cider-auto-select-error-buffer . t)
-  (cider-repl-result-prefix . ";; => ")
+  (cider-show-error-buffer t)
+  (cider-auto-select-error-buffer t)
+  (cider-repl-result-prefix ";; => ")
   ;; custom.el にだけ書かれていたのをこちらへ移した
-  (nrepl-sync-request-timeout . 40)
-  (nrepl-hide-special-buffers . t)
+  (nrepl-sync-request-timeout 40)
+  (nrepl-hide-special-buffers t)
   :config
   (add-to-list 'completion-category-defaults '(cider (styles basic))))
 
-(leaf cider-lein-command-on-windows
+;; 疑似パッケージなので use-package の名前は emacs にする。
+(use-package emacs
   :if (eq system-type 'windows-nt)
   :config
   ;; on Windows, use lein.bat instead of lein shell script.
@@ -103,24 +104,27 @@
 ;;
 ;; lisp
 ;;
-(leaf slime
+(use-package slime
   :straight t
   :commands slime-setup
   :custom
   ;; roswell が無い環境では (concat nil " run") がエラーにならず " run" という
   ;; 壊れた値になっていた (nil は空シーケンスとして concat に受理される)。
   ;; ros が見つかったときだけ "ros run" を使い、無ければ処理系を直接探す。
-  `(inferior-lisp-program . ,(let ((ros (executable-find "ros")))
-                               (cond (ros (concat ros " run"))
-                                     ((executable-find "sbcl") "sbcl")
-                                     ((executable-find "ccl") "ccl")
-                                     (t "sbcl"))))
+  ;; use-package の :custom は値の位置を式として評価するので、
+  ;; leaf のときのようなバッククォートは要らない。
+  (inferior-lisp-program (let ((ros (executable-find "ros")))
+                           (cond (ros (concat ros " run"))
+                                 ((executable-find "sbcl") "sbcl")
+                                 ((executable-find "ccl") "ccl")
+                                 (t "sbcl"))))
   :config
   ;; slime-company は corfu 移行にともない外した。slime-fancy が
   ;; slime-complete-symbol を capf として提供するので corfu から使える。
   (slime-setup '(slime-repl slime-fancy slime-banner)))
 
-(leaf pretty-print
+;; 疑似パッケージなので use-package の名前は emacs にする。
+(use-package emacs
   :hook
   (lisp-interaction-mode-hook . (lambda() (define-key lisp-interaction-mode-map (kbd "C-c RET") 'my:pp-macroexpand-last-sexp)))
   (emacs-lisp-mode-hook . (lambda() (define-key emacs-lisp-mode-map (kbd "C-c RET") 'my:pp-macroexpand-last-sexp)))

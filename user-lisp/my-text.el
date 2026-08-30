@@ -14,7 +14,7 @@
 
 ;;; [3] org-mode
 
-(leaf org
+(use-package org
   ;; Emacs 31.1 同梱の org (9.8.7) を使う。
   ;; 以前は :straight t で org 9.5.1 (2021年) を入れていたが、
   ;; init.org のタングルで組み込み org が先にロードされるため版が混在していた。
@@ -22,28 +22,28 @@
   :hook (org-mode-hook . turn-on-font-lock)
   :custom
   ;; org-mode内部のソースを色付けする
-  (org-src-fontify-natively . t)
+  (org-src-fontify-natively t)
   ;; org-modeの開始時に、行の折り返しを無効にする。
-  (org-startup-truncated . t)
+  (org-startup-truncated t)
   ;; follow-linkから戻ることを可能とする。
-  (org-return-follows-link . t)
-  (org-refile-use-outline-path . 'file)
-  (org-outline-path-complete-in-steps . nil)
-  (org-log-done . t)
-  ;; (org-todo-keywords . '((sequence "TODO(t)" "WAITING(w)" "|" "DONE(d)" "CANCELED(c)")))
-  (org-todo-keywords . '((sequence "TODO(t)" "IN PROGRESS(i)" "|" "DONE(d)")
-                         (sequence "WAITING(w@/!)" "HOLD(h@/!)" "|" "CANCELLED(c@/!)" "MEETING")))
-  (org-todo-keyword-faces . '(("TODO" :foreground "red" :weight bold)
-                              ("STARTED" :foreground "cornflower blue" :weight bold)
-                              ("DONE" :foreground "green" :weight bold)
-                              ("WAITING" :foreground "orange" :weight bold)
-                              ("HOLD" :foreground "magenta" :weight bold)
-                              ("CANCELLED" :foreground "green" :weight bold)
-                              ("MEETING" :foreground "green" :weight bold)))
-  (org-indent-indentation-per-level . 0)
-  (org-adapt-indentation . nil)
-  (org-clock-clocked-in-display . 'none)
-  (org-clock-out-remove-zero-time-clocks . t)
+  (org-return-follows-link t)
+  (org-refile-use-outline-path 'file)
+  (org-outline-path-complete-in-steps nil)
+  (org-log-done t)
+  ;; (org-todo-keywords '((sequence "TODO(t)" "WAITING(w)" "|" "DONE(d)" "CANCELED(c)")))
+  (org-todo-keywords '((sequence "TODO(t)" "IN PROGRESS(i)" "|" "DONE(d)")
+                       (sequence "WAITING(w@/!)" "HOLD(h@/!)" "|" "CANCELLED(c@/!)" "MEETING")))
+  (org-todo-keyword-faces '(("TODO" :foreground "red" :weight bold)
+                            ("STARTED" :foreground "cornflower blue" :weight bold)
+                            ("DONE" :foreground "green" :weight bold)
+                            ("WAITING" :foreground "orange" :weight bold)
+                            ("HOLD" :foreground "magenta" :weight bold)
+                            ("CANCELLED" :foreground "green" :weight bold)
+                            ("MEETING" :foreground "green" :weight bold)))
+  (org-indent-indentation-per-level 0)
+  (org-adapt-indentation nil)
+  (org-clock-clocked-in-display 'none)
+  (org-clock-out-remove-zero-time-clocks t)
   :config
   ;; 一時間に一回、org-modeの全てのバッファを保存する。
   (run-at-time "00:59" 3600 #'org-save-all-org-buffers)
@@ -125,24 +125,26 @@
       (goto-char saved-point))
     nil))
 
-(leaf ox-pandoc
+(use-package ox-pandoc
   ;; https://taipapamotohus.com/post/org-mode_paper_4/
   :straight t
   ;; 以前は org 側が :after ox-pandoc かつ :config で (org-pandoc-startup-check) を
   ;; 呼んで ox-pandoc を強制ロードしていたが、依存の向きが逆だった。
   ;; org のロード後に ox-pandoc を読む形に直す。
   :after org
-  :require t
+  :demand t
   :commands org-pandoc-startup-check
   :custom
-  `(;; default options for all output formats
-    (org-pandoc-options . '((standalone . t)))
-    ;; cancel above settings only for 'docx' format
-    (org-pandoc-options-for-docx . '((standalone . nil)
-                                     (reference-doc . ,(my:pandoc-data-file "custom-reference.docx"))))
-    ;; special settings for beamer-pdf and latex-pdf exporters
-    (org-pandoc-options-for-beamer-pdf . '((pdf-engine . "xelatex")))
-    (org-pandoc-options-for-latex-pdf . '((pdf-engine . "xelatex"))))
+  ;; use-package の :custom は値の位置を式として評価する。
+  ;; leaf のようにリスト全体をバッククォートする必要はない。
+  ;; default options for all output formats
+  (org-pandoc-options '((standalone . t)))
+  ;; cancel above settings only for 'docx' format
+  (org-pandoc-options-for-docx `((standalone . nil)
+                                 (reference-doc . ,(my:pandoc-data-file "custom-reference.docx"))))
+  ;; special settings for beamer-pdf and latex-pdf exporters
+  (org-pandoc-options-for-beamer-pdf '((pdf-engine . "xelatex")))
+  (org-pandoc-options-for-latex-pdf '((pdf-engine . "xelatex")))
   :config
   ;; pandoc の呼び出し中だけ出力側を cp932 にする。
   ;; setq での退避/復元は非局所脱出で復元されないため let 束縛にした。
@@ -151,24 +153,25 @@
       (apply orig args)))
   (advice-add 'org-pandoc-run :around #'my:org-pandoc-run-with-cp932))
 
-(leaf ob-mermaid
+(use-package ob-mermaid
   :straight t
   :commands org-babel-execute:mermaid)
 
-(leaf org-bullets
+(use-package org-bullets
   :straight t
   :if window-system
-  :custom (org-bullets-bullet-list . '("" "" "" "" "" "" ""))
+  :custom (org-bullets-bullet-list '("" "" "" "" "" "" ""))
   :hook (org-mode-hook . org-bullets-mode))
 
-(leaf org-download
+(use-package org-download
   :straight t
+  :defer t
   :custom
-  (org-download-image-dir . "./img"))
+  (org-download-image-dir "./img"))
 
 ;;; [3] markdown
 
-(leaf markdown-mode
+(use-package markdown-mode
   :straight t
   :mode ("\\.\\(markdown\\|md\\|mkd\\)\\'" . gfm-mode)
   :preface
@@ -177,30 +180,31 @@
     (setq truncate-lines nil)
     (electric-indent-local-mode -1))
   :bind
-  (:markdown-mode-map ("C-c ." . hydra-markdown/body))
+  (:map markdown-mode-map ("C-c ." . hydra-markdown/body))
   :hook
   (markdown-mode-hook . my:setup-markdown-mode)
   (gfm-mode-hook      . my:setup-markdown-mode)
   :custom
-  `(markdown-command . ,(let ((pandoc-options `("-F pandoc-crossref"
-                                                "--template=default.html"
-                                                "--self-contained"
-                                                "-s"
-                                                "--from=gfm+footnotes"
-                                                "--to=html"
-                                                "--metadata"
-                                                ,(my:pandoc-data-file "metadata.yml"))))
-                          (concat "pandoc " (s-join " " pandoc-options))))
+  (markdown-command (let ((pandoc-options `("-F pandoc-crossref"
+                                            "--template=default.html"
+                                            "--self-contained"
+                                            "-s"
+                                            "--from=gfm+footnotes"
+                                            "--to=html"
+                                            "--metadata"
+                                            ,(my:pandoc-data-file "metadata.yml"))))
+                      (concat "pandoc " (s-join " " pandoc-options))))
   ;; Typora は Windows のインストールパス直書きだったため、存在するときだけ設定する
-  `(markdown-open-command
-    . ,(seq-find #'file-executable-p
-                 (list "c:/Program Files/Typora/Typora.exe"
-                       "/Applications/Typora.app/Contents/MacOS/Typora"
-                       "/usr/bin/typora")))
-  (markdown-use-pandoc-style-yaml-metadata . t)
-  (markdown-header-scaling . nil)
-  :hydra
-  (hydra-markdown (:hint nil :exit t)
+  (markdown-open-command
+   (seq-find #'file-executable-p
+             (list "c:/Program Files/Typora/Typora.exe"
+                   "/Applications/Typora.app/Contents/MacOS/Typora"
+                   "/usr/bin/typora")))
+  (markdown-use-pandoc-style-yaml-metadata t)
+  (markdown-header-scaling nil)
+  ;; leaf の :hydra は init 時にインライン展開されるので :init に置く。
+  :init
+  (defhydra hydra-markdown (:hint nil :exit t)
                   "
 ^Format^      ^Insert^        ^Head.Foot^     ^Code.Link^      ^Move^           ^Pndoc
 ^^^^^^-----------------------------------------------------------------------------------
@@ -208,45 +212,45 @@ _s_torong     _b_lockquote    H1~H6:_a_uto    _c_ode block     _p_romote        
 italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         _P_DF
 リスト:_._    _t_able         _r_eference     _l_ink           _j_:move-up      _D_ocx
 取消線:_x_    hr:_-_          _i_mage         _u_ri            _k_:move-down    Pre_v_iew"
-                  ("s" markdown-insert-bold)
-                  ("/" markdown-insert-italic)
-                  ("-" markdown-insert-hr)
-                  ("x" markdown-insert-strike-through)
-                  ("b" markdown-insert-blockquote)
-                  (":" markdown-insert-pre)
-                  ("t" markdown-insert-table)
-                  ("c" markdown-insert-gfm-code-block)
-                  ("n" markdown-insert-code)
-                  ("K" markdown-insert-kbd)
-                  ("a" markdown-insert-header-dwim)
-                  ("1" markdown-insert-header-atx-1)
-                  ("2" markdown-insert-header-atx-2)
-                  ("3" markdown-insert-header-atx-3)
-                  ("4" markdown-insert-header-atx-4)
-                  ("5" markdown-insert-header-atx-5)
-                  ("6" markdown-insert-header-atx-6)
-                  ("." markdown-insert-list-item)
-                  ("i" markdown-insert-image)
-                  ("l" markdown-insert-link)
-                  ("u" markdown-insert-uri)
-                  ("f" markdown-insert-footnote)
-                  ("r" markdown-insert-reference-link-dwim)
-                  ("p" markdown-promote)
-                  ("d" markdown-demote)
-                  ("j" markdown-move-down)
-                  ("k" markdown-move-up)
+    ("s" markdown-insert-bold)
+    ("/" markdown-insert-italic)
+    ("-" markdown-insert-hr)
+    ("x" markdown-insert-strike-through)
+    ("b" markdown-insert-blockquote)
+    (":" markdown-insert-pre)
+    ("t" markdown-insert-table)
+    ("c" markdown-insert-gfm-code-block)
+    ("n" markdown-insert-code)
+    ("K" markdown-insert-kbd)
+    ("a" markdown-insert-header-dwim)
+    ("1" markdown-insert-header-atx-1)
+    ("2" markdown-insert-header-atx-2)
+    ("3" markdown-insert-header-atx-3)
+    ("4" markdown-insert-header-atx-4)
+    ("5" markdown-insert-header-atx-5)
+    ("6" markdown-insert-header-atx-6)
+    ("." markdown-insert-list-item)
+    ("i" markdown-insert-image)
+    ("l" markdown-insert-link)
+    ("u" markdown-insert-uri)
+    ("f" markdown-insert-footnote)
+    ("r" markdown-insert-reference-link-dwim)
+    ("p" markdown-promote)
+    ("d" markdown-demote)
+    ("j" markdown-move-down)
+    ("k" markdown-move-up)
                   ;; Pandoc (TODO)
-                  ("H" md2html :exit t)
-                  ("P" md2pdf :exit t)
-                  ("D" md2docx :exit t)
-                  ("v" markdown-preview :exit t)))
+    ("H" md2html :exit t)
+    ("P" md2pdf :exit t)
+    ("D" md2docx :exit t)
+    ("v" markdown-preview :exit t)))
 
 ;;; [3] ReST
 
-(leaf rst
+(use-package rst
   :mode ("\\.\\(rst|rest\\)$" . rst-mode)
   :bind
-  (:rst-mode-map
+  (:map rst-mode-map
    ;; remove rst-deprecated-* bindings
    ("C-c C-b" . nil)
    ("C-c C-d" . nil)
@@ -274,8 +278,9 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
 
 ;;; [3] asciidoc
 
-(leaf adoc-mode
-  :straight t)
+(use-package adoc-mode
+  :straight t
+  :defer t)
 
 (provide 'my-text)
 ;;; my-text.el ends here

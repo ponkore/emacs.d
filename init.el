@@ -48,35 +48,64 @@
 ;; になっていた。組み込みに一本化する。
 (straight-use-package '(transient :type built-in))
 
-;;; [3] leaf
+;;; [3] package.el のアーカイブ定義
 
-(eval-and-compile
-  ;; package.el のアーカイブ定義。
-  ;; marmalade は 2017 年に停止、orgmode.org/elpa も廃止済みで、
-  ;; 残しておくと package-refresh-contents が失敗/遅延するため削除した。
-  ;; パッケージ導入自体は straight に一本化しているが、elpa/ 配下に残っている
-  ;; 既存パッケージ (tr-ime / w32-ime など) は Emacs 27 以降の
-  ;; package-activate-all が init.el より前に有効化するので、その分は残す。
-  (customize-set-variable
-   'package-archives '(("gnu"    . "https://elpa.gnu.org/packages/")
-                       ("nongnu" . "https://elpa.nongnu.org/nongnu/")
-                       ("melpa"  . "https://melpa.org/packages/")))
-  ;; (package-initialize) は Emacs 27 以降 package-activate-all が
-  ;; init.el 読み込み前に実行するため不要。
-  ;; (package-refresh-contents) も leaf を straight で入れるので不要。
+;; パッケージ導入は straight に一本化しており、package.el 自体は
+;; early-init.el で無効化してある (package-enable-at-startup nil)。
+;; ここの定義は M-x list-packages などを手で使うときのためだけに残す。
+;; marmalade は 2017 年に停止、orgmode.org/elpa も廃止済みなので外してある。
+(customize-set-variable
+ 'package-archives '(("gnu"    . "https://elpa.gnu.org/packages/")
+                     ("nongnu" . "https://elpa.nongnu.org/nongnu/")
+                     ("melpa"  . "https://melpa.org/packages/")))
 
-  ;; leaf 本体と、:straight 等のキーワードを提供する leaf-keywords を導入する。
-  ;; leaf-keywords-init を呼ぶまでは :straight キーワードが使えないため、
-  ;; ここは straight-use-package を直接呼ぶ。
-  ;; 以前は leaf 本体だけ straight、leaf-keywords と hydra 等は :ensure t
-  ;; (package.el) という混在で、elpa/ 側に 2020 年の leaf 4.2.7 と
-  ;; straight 側の leaf 4.5.5 が同居する版ズレ状態だった。
-  (dolist (pkg '(leaf leaf-keywords
-                 ;; :hydra :el-get :blackout などを使うためのオプション
-                 hydra el-get blackout leaf-tree leaf-convert))
-    (straight-use-package pkg))
-  (require 'leaf-keywords)
-  (leaf-keywords-init))
+;;; [3] use-package
+
+;; 設定の記述は use-package で行う。2026-08 に leaf から移行した
+;; (leaf は 3 コミット/年まで開発が細っており、use-package は Emacs 29 以降
+;;  本体に同梱されている。31.1 では lisp/use-package/)。
+;; 同梱なので straight で入れる必要はない。
+;;
+;; パッケージ導入は :straight t を明示する。このキーワードは
+;; straight-use-package-mode が use-package-keywords に追加する
+;; (straight-use-package-version の既定値が 'straight のため)。
+;; :ensure は素の package.el (無効化済み) に流れてしまうので使わない。
+;; 組み込みパッケージは無記述のままでよい。
+;;
+;; leaf との差異でとくに効きやすいものは CLAUDE.md にまとめてある。要点:
+;;   - 遅延キーワード (:commands :bind :hook :mode :after など) が 1 つも
+;;     無いブロックは (require) が出る。leaf は出さないので :defer t を足す
+;;   - 疑似パッケージの名前には emacs を使う。実在しない feature 名だと
+;;     :config が with-eval-after-load に包まれて永久に実行されない
+;;   - :custom-face は使わない。テーマに負けるので custom-set-faces を直接呼ぶ
+;;   - require できないもの (modus-themes) には :no-require t が要る
+(require 'use-package)
+
+;; :hook にフック変数名そのものを書けるようにする。
+;; 既定値 "-hook" のままだと (foo-mode-hook . f) が foo-mode-hook-hook に
+;; なってしまう。移行元の leaf の記述はすべて完全なフック変数名なので、
+;; サフィックスの自動付与は無効にする。
+(setq use-package-hook-name-suffix nil)
+
+;; :straight を :if / :when / :unless より後に処理させる。
+;; straight-use-package-mode は :straight を use-package-keywords の先頭に
+;; push するため、既定では :if が偽でも straight-use-package が走り、
+;; そのプラットフォームで使わないパッケージまで clone / build されてしまう
+;; (Windows で exec-path-from-shell、Linux で w32-ime / tr-ime など)。
+;; leaf は :if が偽なら straight-use-package ごと実行しなかったので揃える。
+;; :custom / :bind / :config はこれより後なので、導入のタイミングは変わらない。
+(setq use-package-keywords
+      (let* ((ks (delq :straight (copy-sequence use-package-keywords)))
+             (pos (1+ (seq-position ks :unless))))
+        (append (seq-take ks pos) '(:straight) (seq-drop ks pos))))
+
+;; :custom を leaf と同じ customize-set-variable にする。
+;; 既定値 t のままだと :custom は custom-theme-set-variables 経由 (use-package
+;; という擬似テーマ) になり、custom.el が書き込む user テーマのほうが優先順位が
+;; 高くなる。つまり「custom.el と user-lisp/ で同じ変数を設定すると
+;; user-lisp/ 側が勝つ」という現在の前提が静かに逆転する。
+;; leaf の :custom は customize-set-variable なので、そちらに揃える。
+(setq use-package-use-theme nil)
 
 ;;; [3] site-lisp 以下を読み込む
 
@@ -91,16 +120,16 @@
 ;;; --------------------------------------------------
 
 ;; early-init.el で user-lisp-auto-scrape を nil にしてある。
-;; 既定では straight のブートストラップ前に prepare-user-lisp が走り、
-;; leaf マクロが未定義のままバイトコンパイルされて壊れた .elc ができるため。
-;; ここまでで straight と leaf が使える状態になっているので明示的に呼ぶ。
+;; 既定では straight のブートストラップ前に prepare-user-lisp が走ってしまい、
+;; その時点では straight も use-package も無いため、モジュールが壊れた .elc に
+;; コンパイルされる。ここまでで両方が使える状態になっているので明示的に呼ぶ。
 ;; user-lisp/ 配下は再帰的にバイトコンパイルされ load-path に追加される。
 ;; 第 1 引数 JUST-ACTIVATE を t にして、バイトコンパイルと autoload 走査を
 ;; 行わず load-path への追加だけをさせている。
 ;;
-;; バイトコンパイルすると、パッケージ由来のマクロを leaf の :config で
-;; 使っている箇所が壊れる。コンパイル時点では当該パッケージが未ロードで
-;; マクロが未定義のため、関数呼び出しとしてコンパイルされてしまうため。
+;; バイトコンパイルすると、パッケージ由来のマクロを use-package の
+;; :init / :config で使っている箇所が壊れる。コンパイル時点では当該パッケージが
+;; 未ロードでマクロが未定義のため、関数呼び出しとしてコンパイルされてしまうため。
 ;; 例: doom-modeline-def-segment が関数扱いになり、実行時に引数の
 ;;     my:buffer-encoding が変数として評価されて void エラーになる。
 ;; (defhydra や define-clojure-indent なども同じ問題を持つ)

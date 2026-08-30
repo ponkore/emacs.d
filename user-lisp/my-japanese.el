@@ -9,7 +9,8 @@
 
 ;;; [3] 日本語環境設定
 
-(leaf *japanese-env
+;; 疑似パッケージなので use-package の名前は emacs にする。
+(use-package emacs
   :config
   ;; 日本語環境
   (setenv "LANG" "ja_JP.UTF-8")
@@ -45,9 +46,9 @@
   (eaw-fullwidth)
 
   ;; 機種依存文字
-  (leaf cp5022x
+  (use-package cp5022x
     ;; site-lisp/cp5022x.el を使う (elpa 版は使われていなかった)
-    :require t
+    :demand t
     :config
     ;; charset と coding-system の優先度設定
     (set-charset-priority 'ascii 'japanese-jisx0208 'latin-jisx0201
@@ -99,15 +100,13 @@
 
 ;;; [3] encoding設定
 
-(leaf *encoding
+;; leaf では encoding-mac / encoding-windows という疑似パッケージの入れ子
+;; だったが、:if 1 つずつの薄いブロックなので when にまとめた。
+(use-package emacs
   :config
-  (leaf encoding-mac
-    :if (eq system-type 'darwin)
-    :config
+  (when (eq system-type 'darwin)
     (setq default-process-coding-system '(utf-8-unix . utf-8-unix)))
-  (leaf encoding-windows
-    :if (eq system-type 'windows-nt)
-    :config
+  (when (eq system-type 'windows-nt)
     (setq default-process-coding-system '(utf-8 . utf-8))))
 
 ;;; [3] 日本語入力サポート(Windows)
@@ -119,16 +118,18 @@
 ;; コミットが、それぞれ upstream の最新だった。より新しい版は存在しない。
 ;; 導入手順 (tr-ime-advanced-install -> default-input-method -> w32-ime-initialize)
 ;; も README の推奨どおりで、変更の必要はない。
-(leaf w32-ime
+(use-package w32-ime
   :if (eq system-type 'windows-nt)
-  :straight t)
+  :straight t
+  :defer t)
 
-(leaf tr-ime
+(use-package tr-ime
   :if (eq system-type 'windows-nt)
   :straight t
   :after w32-ime)
 
-(leaf windows-ime
+;; 疑似パッケージなので use-package の名前は emacs にする。
+(use-package emacs
   :if (eq window-system 'w32)
   ;; :after *encoding
   :config
@@ -202,24 +203,24 @@
 
 ;;; [3] migemo
 
-(leaf migemo
+(use-package migemo
   :straight t
   :if (executable-find "cmigemo")
   :commands migemo-init
   :custom
-  (migemo-command . "cmigemo")
-  (migemo-options . '("-q" "--emacs"))
+  (migemo-command "cmigemo")
+  (migemo-options '("-q" "--emacs"))
   ;; (migemo-options . '("-q" "--emacs" "-i" "\g"))
   ;; (migemo-options . '("-q" "--emacs" "-i" "\a"))
-  `((migemo-dictionary . ,(expand-file-name "migemo/utf-8/migemo-dict" user-emacs-directory)))
+  (migemo-dictionary (expand-file-name "migemo/utf-8/migemo-dict" user-emacs-directory))
   ;; (migemo-dictionary . "C~/.emacs.d/migemo-dict/utf-8")
-  (migemo-user-dictionary . nil)
-  (migemo-regex-dictionary . nil)
-  (migemo-coding-system . 'utf-8-unix)
+  (migemo-user-dictionary nil)
+  (migemo-regex-dictionary nil)
+  (migemo-coding-system 'utf-8-unix)
   ;; 遅いのを防ぐためにキャッシュする。
-  (migemo-use-pattern-alist . t)
-  (migemo-use-frequent-pattern-alist . t)
-  (migemo-pattern-alist-length . 1024)
+  (migemo-use-pattern-alist t)
+  (migemo-use-frequent-pattern-alist t)
+  (migemo-pattern-alist-length 1024)
   :config
   (migemo-init))
 

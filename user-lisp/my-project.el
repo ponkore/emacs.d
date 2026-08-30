@@ -9,25 +9,32 @@
 
 ;;; [3] projectile
 
-(leaf projectile-ripgrep
-  :straight t)
+;; :defer t は必須。leaf は :require t が無い限り (require) を出さないが、
+;; use-package は遅延キーワードが 1 つも無いと (require) を出してしまう。
+;; ここで eager load すると projectile と ripgrep が起動時に読まれる。
+;; 実際に使う projectile-ripgrep コマンドは straight の autoload で引ける。
+(use-package projectile-ripgrep
+  :straight t
+  :defer t)
 
-(leaf projectile
+(use-package projectile
   :straight t
   :commands projectile-register-project-type projectile-toggle-between-implementation-and-test
   :hook
   (emacs-startup-hook . projectile-mode)
+  ;; use-package の :bind は 1 つのリストにまとめる。:map より前に書いたものが
+  ;; グローバル、後に書いたものがそのマップへのバインドになる。
   :bind
-  (:projectile-command-map
+  (("C-c p" . projectile-command-map)
+   :map projectile-command-map
    ("s" . my:projectile-search-dwim)
    ("<f12>" . projectile-toggle-between-implementation-and-test))
-  ("C-c p" . projectile-command-map)
   :custom
   ;; projectile-enable-idle-timer は upstream から削除された
   ;; (アイドル時のキャッシュ更新の仕組み自体が無くなった)。
-  (projectile-enable-caching . t)
-  (projectile-mode-line-prefix . " P")
-  ;; (projectile-completion-system . 'ivy)
+  (projectile-enable-caching t)
+  (projectile-mode-line-prefix " P")
+  ;; (projectile-completion-system 'ivy)
   ;; :preface で (require 'ripgrep) しており起動時に eager load していた。
   ;; ripgrep は projectile-ripgrep の依存として入るので、使用時に読めば足りる。
   :preface

@@ -29,7 +29,7 @@ C:/Windows/System32/bash.exe は WSL の bash なので除外する
 
 ;;; [3] exec-path-from-shell
 
-(leaf exec-path-from-shell
+(use-package exec-path-from-shell
   :straight t
   ;; macOS 限定だったが、Linux でも GUI 起動時はログインシェルの
   ;; 環境変数を引き継がないため必要になる。
@@ -39,12 +39,10 @@ C:/Windows/System32/bash.exe は WSL の bash なので除外する
 
 ;;; [3] Windows環境用 Shell
 
-(leaf shell-windows
-  ;; leaf は :hook / :bind / :mode などがあると :config を
-  ;; (eval-after-load '<leaf名>) で包んで遅延させる。この leaf 名は
-  ;; 実在する feature ではないため、:config が永久に実行されなかった。
-  ;; :leaf-defer nil で遅延を無効化する。
-  :leaf-defer nil
+;; 疑似パッケージなので use-package の名前は emacs にする。
+;; 実在しない feature 名にすると :config が with-eval-after-load に包まれて
+;; 永久に実行されない (leaf で :leaf-defer nil を付けていたのと同じ理由)。
+(use-package emacs
   :if (eq system-type 'windows-nt)
   :hook
   (shell-mode-hook . (lambda ()
@@ -81,7 +79,7 @@ C:/Windows/System32/bash.exe は WSL の bash なので除外する
 
 ;;; [3] Shell
 
-(leaf shell
+(use-package shell
   :hook
   ;; https://stackoverflow.com/questions/25819034/colors-in-emacs-shell-prompt
   (shell-mode-hook . (lambda ()
