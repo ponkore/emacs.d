@@ -229,6 +229,35 @@ Emacs は `cc` → `gcc` → `c99` の順に探すので `gcc` があれば足�
   `(straight-use-package '(NAME :type built-in))` を宣言する（`org`、`transient` が該当）。
   これをしないと依存解決で straight が古い版をビルドして `load-path` に載せてしまう
 
+### 更新状況の棚卸し
+
+`straight/repos/*` を一括で fetch して、手元と upstream の差を見る:
+
+```sh
+cd ~/.emacs.d/straight/repos
+for d in */; do r="${d%/}"
+  case " melpa gnu-elpa-mirror nongnu-elpa emacsmirror-mirror el-get straight.el " in
+    *" $r "*) continue;; esac
+  ( cd "$r" && git fetch -q origin && git remote set-head origin -a >/dev/null
+    up=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD)
+    printf '%-24s behind=%s
+' "$r" "$(git rev-list --count HEAD..$up)" )
+done
+```
+
+更新したあとは **`straight/build` をまるごと消してから起動する**。
+straight の変更検知は当てにならない（corfu / doom-modeline で取りこぼした実績あり）。
+再ビルドは GUI 起動で数分かかる。
+
+2026-08 の棚卸しでは 93 個中 50 個が遅れていた。うち 35 個を更新済み。
+
+### org のクローンは使っていない
+
+`init.el` で `(org :type built-in)` と宣言しているので Emacs 同梱の org を使う。
+`straight/repos/org` と `straight/build/org` があっても `load-path` には載らない。
+recipe cache には残るため `straight-prune-build` では消えないので、手で消す。
+（2026-08 に削除。合わせて 120 MB あった）
+
 ### 不要になったパッケージの掃除
 
 ```elisp
@@ -459,8 +488,14 @@ emacs --batch --debug-init -l early-init.el -l init.el --eval '(message "OK")'
 
 ## 既知の課題（未対応）
 
-- `straight/repos/` のパッケージ本体の多くが 2021 年のまま。必要になった順に
-  `git pull` していく方針 (corfu と git-gutter は対応済み)
+- `straight/repos/` のうち次の 14 個がまだ 2021〜2022 年のまま。
+  補完スタック（vertico / consult / marginalia / orderless / embark）と
+  言語ツール（cider / clojure-mode / parseclj / parseedn / sesman / slime /
+  rust-mode / cargo / projectile）。個別に確認しながら更新する方針。
+  **vertico は更新すると設定が壊れる**: `my-completion.el` が advice している
+  `vertico--format-candidate` は vertico 2.x に存在しない（手元 0.17 → 上流 2.13）。
+  `projectile` も `projectile--read-search-string-with-default` という内部関数を
+  `my-project.el` から呼んでいる
 - `w32-symlinks` ブロックは `:disabled t`。6 年間タイポで無効だったため、
   グローバル advice を無検証で有効化するのを避けている
 - org 9.8 で削除された `org-extract-archive-file` への advice をコメントアウト中
