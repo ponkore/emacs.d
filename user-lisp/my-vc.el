@@ -1,4 +1,4 @@
-;;; my-vc.el --- 構成管理 (magit / git-gutter / SVN)  -*- lexical-binding: t -*-
+;;; my-vc.el --- 構成管理 (magit / diff-hl / SVN)  -*- lexical-binding: t -*-
 ;;; Commentary:
 ;; init.el から機械的に分割したもの。読み込み順は init.el を参照。
 ;;; Code:
@@ -32,44 +32,53 @@
     ;; diff用のfaceを設定する
     (my:diff-mode-setup-faces)))
 
-;;; [3] git-gutter
+;;; [3] diff-hl (差分表示)
 
-(leaf git-gutter
+;; git-gutter と dired-k を diff-hl に統一した。
+;;   git-gutter -> バッファの fringe に差分マーカー
+;;   dired-k    -> dired の VC 状態マーカー
+;; どちらも diff-hl が担う。diff-hl は vc 経由なので git / svn / hg を
+;; 同じ仕組みで扱える (git-gutter の git-gutter:handled-backends は既定 '(git)
+;; で、このリポジトリでは SVN 対応も入れているのに効いていなかった)。
+;;
+;; なお dired-k が持っていたファイルサイズ・更新日時の色分けは diff-hl には
+;; 無いので失われる。VC 状態の表示だけになる。
+;;
+;; git-gutter は行頭に "~ + -" の文字を出していたが、diff-hl は fringe に
+;; ビットマップを描く。色は face の foreground で決まるので、
+;; git-gutter で背景色に使っていた色をそのまま foreground に移した。
+
+(leaf diff-hl
   :straight t
-  ;; :bind があるため leaf が :config を (eval-after-load 'git-gutter ...) で
-  ;; 包む。git-gutter を読み込む他のパッケージが無く、:config の
-  ;; (global-git-gutter-mode +1) が一度も実行されていなかった。
+  ;; :bind / :hook があると leaf が :config を eval-after-load で包む。
+  ;; diff-hl を読み込む他のパッケージが無いので明示的にロードする
+  ;; (git-gutter で同じ理由で :require t を付けていたのと同様)。
   :require t
   :bind
-  ;; hydra-git-gutter起動のキーバインド
-  ("C-c g" . hydra-git-gutter/body)
+  ;; hydra 起動のキーバインド (git-gutter 時代と同じ C-c g)
+  ("C-c g" . hydra-diff-hl/body)
   :custom
-  (git-gutter:modified-sign . "~")
-  (git-gutter:added-sign    . "+")
-  (git-gutter:deleted-sign  . "-")
-  (git-gutter:window-width  . 0)
+  ;; 保存前のバッファでも差分を追う (git-gutter と同じ感覚にする)
+  (diff-hl-flydiff-delay . 0.5)
   :custom-face
-  (git-gutter:modified . '((t (:background "#f1fa8c"))))
-  (git-gutter:added    . '((t (:background "#50fa7b"))))
-  (git-gutter:deleted  . '((t (:background "#ff79c6"))))
+  (diff-hl-insert . '((t (:foreground "#50fa7b"))))
+  (diff-hl-change . '((t (:foreground "#f1fa8c"))))
+  (diff-hl-delete . '((t (:foreground "#ff79c6"))))
+  :hook
+  (dired-mode-hook . diff-hl-dired-mode)
+  ;; magit の操作後にマーカーを更新する
+  (magit-post-refresh-hook . diff-hl-magit-post-refresh)
   :config
-  (global-git-gutter-mode +1)
-  ;; git-gutter:popup-hunkをそのまま割り当てるとdiffウィンドウを閉じれないので
-  ;; トグルできる関数を定義
-  (defun git-gutter:toggle-popup-hunk ()
-    "Toggle git-gutter hunk window."
-    (interactive)
-    (if (window-live-p (git-gutter:popup-buffer-window))
-        (delete-window (git-gutter:popup-buffer-window))
-      (git-gutter:popup-hunk)))
+  (global-diff-hl-mode +1)
+  (diff-hl-flydiff-mode +1)
   :hydra
-  (hydra-git-gutter nil
-                    "git hunk"
-                    ("p" git-gutter:previous-hunk "previous")
-                    ("n" git-gutter:next-hunk "next")
-                    ("s" git-gutter:stage-hunk "stage")
-                    ("r" git-gutter:revert-hunk "revert")
-                    ("SPC" git-gutter:toggle-popup-hunk "toggle diffinfo")))
+  (hydra-diff-hl nil
+                 "diff hunk"
+                 ("p" diff-hl-previous-hunk "previous")
+                 ("n" diff-hl-next-hunk "next")
+                 ("s" diff-hl-stage-dwim "stage")
+                 ("r" diff-hl-revert-hunk "revert")
+                 ("SPC" diff-hl-show-hunk "show diff")))
 
 ;;; [3] Windows 環境でのSVN support
 

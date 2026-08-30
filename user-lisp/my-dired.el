@@ -9,34 +9,21 @@
 
 ;;; [3] dired
 
-(leaf dired-k
-  :straight t
-  :commands dired-k dired-k-no-revert)
+;; dired-k は diff-hl に統合した (my-vc.el の diff-hl-dired-mode)。
+;; dired-k は 2021 年から更新が止まり emacsorphanage に移されていた。
+;; ファイルサイズ・更新日時の色分けは diff-hl には無いので失われる。
 
 (leaf dired
   :commands dired-vc-status
   :bind
   (:dired-mode-map
    ("V" . dired-vc-status)
-   ("K" . dired-k)
    ;; 本家 ripgrep-regexp は検索ディレクトリも聞いてくる。dired では
    ;; そのバッファのディレクトリで検索したいので my:ripgrep-regexp を使う
    ;; (my-utils.el で定義)。従来ここが本家に割り当たっていたため、
    ;; せっかく定義した my:ripgrep-regexp が使われていなかった。
    ("G" . my:ripgrep-regexp)
    ("." . hydra-dired/body))
-  :hook
-  ;; 以前は dired-mode-hook と dired-initial-position-hook の両方に
-  ;; dired-k を付けていた。dired バッファを開くと両方が発火し、
-  ;; dired-k--start-git-status が 2 回走る。2 回目は 1 回目のプロセスを
-  ;; interrupt-process するため、1 回目のセンチネルが非 0 終了を見て
-  ;;   Failed: (git status --porcelain --ignored --untracked-files=normal .)
-  ;; を出していた (ハイライト自体は 2 回目が成功するので効いていた)。
-  ;; upstream の README どおり 1 つに絞る。dired-after-readin-hook なら
-  ;; 初回表示と g での再読み込みの両方で 1 回だけ走る。
-  ;; dired-k は先頭で revert-buffer を呼ぶのでこのフックでは使えない
-  ;; (再帰する)。revert しない dired-k-no-revert を使う。
-  (dired-after-readin-hook . dired-k-no-revert)
   :custom
   ;;
   ;; http://qiita.com/l3msh0@github/items/8665122e01f6f5ef502f
