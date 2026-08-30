@@ -115,7 +115,15 @@
     ;; フォントが一切設定されなかった。
     (pcase window-system
       ('ns  (emacs-font-setting "HackGen" 16))   ;; previous: "Ricty"
-      ('w32 (emacs-font-setting "HackGen" 12))   ;; previous: ("HackGenNerd" 11)
+      ;; 11.6 -> :height 116。12 (=120) だと HackGen の全角の送り幅が 17px、
+      ;; 半角 8px の 2 倍 (16px) と 1px ずれて桁が揃わない。実測:
+      ;;   height 110/113/116 -> 半角 8 / 全角 16  (一致)
+      ;;   height 120/124     -> 半角 8 / 全角 17  (ずれ)
+      ;;   height 128/130     -> 半角 9 / 全角 18  (一致)
+      ;; 116 なら半角幅を変えずにずれだけ解消できる。
+      ;; なお ASCII と日本語が同じフォントなので face-font-rescale-alist では
+      ;; 直せない (両方が同じ比率で縮むため)。
+      ('w32 (emacs-font-setting "HackGen" 11.6)) ;; previous: ("HackGenNerd" 11)
       ((or 'x 'pgtk)
        ;; Linux では入っているものを順に探す
        (let ((family (seq-find (lambda (f) (member f (font-family-list)))
@@ -268,10 +276,18 @@
   :custom
   (modus-themes-italic-constructs . t)
   (modus-themes-bold-constructs . nil)
-  ;; 旧 modus-themes-region '(bg-only no-extend) の置き換え。
-  ;; bg-only は「前景色は変えず背景だけ変える」なので fg-region を外す。
-  ;; no-extend (行末まで伸ばさない) は v4 で廃止されており移行先が無い。
-  (modus-themes-common-palette-overrides . '((fg-region unspecified)))
+  (modus-themes-common-palette-overrides
+   . '(;; 旧 modus-themes-region '(bg-only no-extend) の置き換え。
+       ;; bg-only は「前景色は変えず背景だけ変える」なので fg-region を外す。
+       ;; no-extend (行末まで伸ばさない) は v4 で廃止されており移行先が無い。
+       (fg-region unspecified)
+       ;; アクティブなモードラインを青一色にする。
+       ;; Emacs 29 以降 mode-line とは別に mode-line-active があり、
+       ;; テーマはそちらを塗るので custom-face で mode-line だけ変えても効かない。
+       ;; パレット側を差し替えるのが確実。
+       (bg-mode-line-active "medium blue")
+       (fg-mode-line-active "snow")
+       (border-mode-line-active "medium blue")))
   :config
   (load-theme 'modus-vivendi :no-confirm))
 
@@ -314,7 +330,9 @@
   (doom-modeline-buffer-encoding . t)
   `(doom-modeline-icon . ,(display-graphic-p))
   :custom-face
-  (mode-line                       . '((t (:background "medium blue" :foreground "snow" :box nil)))) ;; firebrick3
+  ;; 背景色は modus のパレット上書き (bg-mode-line-active) で指定している。
+  ;; ここでは左端のバーだけ同じ色に揃える (既定はテーマのアクセント色)。
+  (doom-modeline-bar               . '((t (:background "medium blue"))))
   (doom-modeline-buffer-minor-mode . '((t (:inherit mode-line :slant normal))))
   :hook (emacs-startup-hook . doom-modeline-mode)
   :config
@@ -351,7 +369,11 @@
     'main
     ;; '(workspace-number bar window-number evil-state ryo-modal xah-fly-keys matches buffer-info remote-host buffer-position parrot selection-info)
     '(bar my:buffer-encoding matches buffer-info buffer-position selection-info major-mode vcs)
-    '(misc-info debug minor-modes "-" input-method process checker)))
+    ;; doom-modeline 4.x で checker セグメントは check に改名された。
+    ;; 古い名前のままだと doom-modeline--prepare-segments が
+    ;; "checker is not a defined segment" で落ち、モードライン自体が有効に
+    ;; ならない。
+    '(misc-info debug minor-modes "-" input-method process check)))
 
 ;;; [4] doom-modeline の eglot セグメントの修正
 

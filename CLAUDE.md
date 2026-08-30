@@ -94,6 +94,24 @@ eglot が使う言語サーバは自分で入れる。2026-08 時点の導入状
 | Rust | rust-analyzer 1.97.1 | `rustup component add rust-analyzer` |
 | Python | basedpyright 1.39.10 | `uv tool install basedpyright` |
 
+### 日本語フォントの全角/半角ピッチ
+
+HackGen は「全角＝半角×2」で設計されているが、**サイズによっては 1px ずれる**。
+Windows で実測した結果:
+
+| `:height` | 半角 | 全角 | |
+|---|---|---|---|
+| 110 / 113 / 116 | 8 | 16 | 一致 |
+| **120 / 124** | 8 | **17** | **ずれる** |
+| 128 / 130 | 9 | 18 | 一致 |
+| 140 | 10 | 20 | 一致 |
+
+以前は 120 を使っていて桁が揃っていなかった。11.6（= 116）にしてある。
+
+**`face-font-rescale-alist` では直せない。** ASCII と日本語が同じフォント
+なので、スケールすると両方が同じ比率で縮むだけ。サイズを変えるしかない。
+確認は `(string-pixel-width "あ")` と `(string-pixel-width "aa")` の比較で。
+
 ### TypeScript は 5.x に固定すること
 
 **`npm i -g typescript` で入る 7.x（Go 実装のネイティブ版）は使えない。**
@@ -337,6 +355,29 @@ v2 世代の API（`modus-themes-load-themes` / `modus-themes-load-vivendi` /
 色の調整はパレットの上書きで行う。パレット名は
 `etc/themes/modus-themes.el` の `modus-vivendi-palette` を見る。
 `:custom` は `:config` より先に走るので、上書きは `load-theme` に間に合う。
+
+## モードライン (doom-modeline)
+
+背景色は **modus のパレット上書き**で指定する。Emacs 29 以降 `mode-line` とは
+別に `mode-line-active` があり、テーマはそちらを塗るため、`custom-face` で
+`mode-line` だけ変えても効かない。
+
+```elisp
+(modus-themes-common-palette-overrides
+ '((bg-mode-line-active "medium blue")
+   (fg-mode-line-active "snow")
+   (border-mode-line-active "medium blue")))
+```
+
+左端のバー (`doom-modeline-bar`) だけはテーマのアクセント色なので
+`:custom-face` で別途揃える。`mode-line-inactive` はテーマのまま（灰色）にして、
+どのウィンドウが選択中か分かるようにしてある。
+
+**セグメント名はバージョンで変わる。** 4.x で `checker` は `check` に改名された。
+古い名前が残っていると `doom-modeline--prepare-segments` が
+`"checker is not a defined segment"` で落ち、**モードライン自体が有効にならない**。
+利用できるセグメントは `doom-modeline-segments.el` の
+`doom-modeline-def-segment` を grep すれば分かる。
 
 ## lexical-binding
 
