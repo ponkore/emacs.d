@@ -156,8 +156,9 @@
   (global-set-key (kbd "M-`") 'toggle-input-method)
 
   ;; minibuffer に入った時、IME を OFF にする
-  (add-hook 'minibuffer-setup-hook (lambda () (deactivate-input-method)))
-  (add-hook 'helm-minibuffer-set-up-hook (lambda () (deactivate-input-method))))
+  ;; helm-minibuffer-set-up-hook にも同じものを足していたが、helm は
+  ;; 導入していないので何も起きないデッドコードだった。
+  (add-hook 'minibuffer-setup-hook (lambda () (deactivate-input-method))))
 
 ;;; [3] migemo
 

@@ -215,9 +215,10 @@
 (leaf backup
   :config
   ;; バックアップファイルを作らない (bavckup-inhibited のタイポで無効だった)
-  (setq backup-inhibited t)
-  ;; 編集中ファイルのバックアップ
-  (setq auto-save-list-file-name nil))
+  ;; auto-save-list-file-name はここにあったが、関連する
+  ;; auto-save-list-file-prefix が global-configuraions 側にあり
+  ;; 2 ブロックに分かれていた。まとめてそちらへ移した。
+  (setq backup-inhibited t))
 
 ;;; [3] 保存時バッファ内容が空であればファイルを削除
 
@@ -247,8 +248,8 @@
   :custom
   ;; 起動メッセージの非表示
   (inhibit-startup-message . t)
-  ;; スタートアップ時のエコー領域メッセージの非表示
-  (inhibit-startup-echo-area-message . -1)
+  ;; スタートアップ時のエコー領域メッセージの非表示は下の :config で行う。
+  ;; (inhibit-startup-echo-area-message . -1) は値が誤りで効いていなかった
   ;; バッファ画面外文字の切り詰め表示
   (truncate-lines . nil)
   ;; ウィンドウ縦分割時のバッファ画面外文字の切り詰め表示
@@ -283,8 +284,7 @@
   (show-paren-mode . t)
   ;; ウィンドウ内に収まらないときだけ括弧内も光らせる。
   (show-paren-style . 'mixed)
-  ;; startup message を表示しない
-  (inhibit-startup-message . t)
+  ;; (inhibit-startup-message . t) は上で設定済みなので削除した
   ;; 行の先頭でC-kを一回押すだけで行全体を消去する
   (kill-whole-line . t)
   ;; 最終行に必ず一行挿入する
@@ -324,7 +324,9 @@
   (make-backup-files . nil)
   ;; 変更ファイルの番号つきバックアップ
   (version-control . nil)
+  ;; 自動保存リストのファイルを作らない (prefix と name の両方を無効化)
   (auto-save-list-file-prefix . nil)
+  (auto-save-list-file-name . nil)
   ;; 編集中ファイルのバックアップ先(TODO)
   ;; `((auto-save-file-name-transforms . ((".*" ,temporary-file-directory t))))
   ;; 編集中ファイルのバックアップ間隔（秒）
@@ -352,7 +354,18 @@
   ;; C-x C-u -- upcase
   ;; C-x C-l -- downcase
   (put 'upcase-region 'disabled nil)
-  (put 'downcase-region 'disabled nil))
+  (put 'downcase-region 'disabled nil)
+  ;; 起動時のエコー領域メッセージ
+  ;; ("For information about GNU Emacs ...") を出さない。
+  ;; この変数は startup.el 側で意図的に抑止しにくくしてあり、
+  ;;   - customize で保存した (saved-value プロパティがある) 値がログイン名と一致
+  ;;   - もしくは user-init-file に (setq ... "ユーザー名") が literal で書いてある
+  ;; のどちらかでないと効かない。leaf の :custom は customize-set-variable
+  ;; (theme-value) なので前者を満たさず、値も -1 で誤っていた。
+  ;; ユーザー名を直書きしたくないので saved-value を立てて前者を満たす。
+  (setq inhibit-startup-echo-area-message (user-login-name))
+  (put 'inhibit-startup-echo-area-message 'saved-value
+       (list (custom-quote (user-login-name)))))
 
 ;;; [3] which-key
 

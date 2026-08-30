@@ -19,7 +19,11 @@
   (:dired-mode-map
    ("V" . dired-vc-status)
    ("K" . dired-k)
-   ("G" . ripgrep-regexp)
+   ;; 本家 ripgrep-regexp は検索ディレクトリも聞いてくる。dired では
+   ;; そのバッファのディレクトリで検索したいので my:ripgrep-regexp を使う
+   ;; (my-utils.el で定義)。従来ここが本家に割り当たっていたため、
+   ;; せっかく定義した my:ripgrep-regexp が使われていなかった。
+   ("G" . my:ripgrep-regexp)
    ("." . hydra-dired/body))
   :hook
   ;; 以前は dired-mode-hook と dired-initial-position-hook の両方に

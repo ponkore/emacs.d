@@ -250,8 +250,15 @@
   :config
   ;; フレームタイトルの設定
   (setq frame-title-format "%b")
-  ;; 背景の透明度
-  (set-frame-parameter nil 'alpha 85)
+  ;; 背景の透明度。
+  ;; 旧: (set-frame-parameter nil 'alpha 85)
+  ;;   - alpha は文字も含めてフレーム全体を透過させる
+  ;;   - set-frame-parameter nil は「そのときのフレーム」だけなので、
+  ;;     あとから作ったフレームには効かない
+  ;; alpha-background (Emacs 29+) なら背景だけ透過し文字は不透明のまま。
+  ;; default-frame-alist に入れて以降のフレームすべてに効かせる。
+  (add-to-list 'default-frame-alist '(alpha-background . 85))
+  (set-frame-parameter nil 'alpha-background 85)
   ;; scroll bar を表示しない
   (when (fboundp 'scroll-bar-mode) (scroll-bar-mode 0))
   ;; 行番号のface
