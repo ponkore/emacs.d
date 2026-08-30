@@ -1,7 +1,6 @@
-;;; my-lang-misc.el --- その他の言語 (SQL / bat / Swift / Lua / VB)  -*- lexical-binding: nil -*-
+;;; my-lang-misc.el --- その他の言語 (SQL / bat / Swift / Lua / VB)  -*- lexical-binding: t -*-
 ;;; Commentary:
 ;; init.el から機械的に分割したもの。読み込み順は init.el を参照。
-;; lexical-binding は分割前と同じ意味論を保つため nil のまま。
 ;;; Code:
 
 ;;; [3] SQL

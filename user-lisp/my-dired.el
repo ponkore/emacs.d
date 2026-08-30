@@ -1,7 +1,6 @@
-;;; my-dired.el --- dired と neotree  -*- lexical-binding: nil -*-
+;;; my-dired.el --- dired と neotree  -*- lexical-binding: t -*-
 ;;; Commentary:
 ;; init.el から機械的に分割したもの。読み込み順は init.el を参照。
-;; lexical-binding は分割前と同じ意味論を保つため nil のまま。
 ;;; Code:
 
 ;;; --------------------------------------------------
@@ -52,7 +51,7 @@
           (let ((parent-directory (substring directory 0 -1)))
             (find-path-in-parents parent-directory base-names)))))
   ;;
-  (defun dired-vc-status (&rest args)
+  (defun dired-vc-status (&rest _args)
     (interactive)
     (let ((path (find-path-in-parents (dired-current-directory) '(".git" ".svn"))))
       (cond ((null path)

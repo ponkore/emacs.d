@@ -1,7 +1,6 @@
-;;; my-utils.el --- ユーティリティ  -*- lexical-binding: nil -*-
+;;; my-utils.el --- ユーティリティ  -*- lexical-binding: t -*-
 ;;; Commentary:
 ;; init.el から機械的に分割したもの。読み込み順は init.el を参照。
-;; lexical-binding は分割前と同じ意味論を保つため nil のまま。
 ;;; Code:
 
 ;;; --------------------------------------------------
@@ -223,7 +222,6 @@ thumbnail = \"/img/%Y-%m/%d/{{shortname}}.png\"
     (interactive)
     (let* ((draft-filename (format-time-string "%Y-%m-%d-%H%M%S.md" (current-time)))
            (filename (concat myblog-hugo/draft-directory draft-filename))
-           (directory (file-name-directory filename))
            (draft-content myblog-hugo/draft-template)
            (buf (set-buffer (find-file-noselect filename t))))
       (with-current-buffer buf

@@ -1,7 +1,6 @@
-;;; my-editor.el --- エディタ全般の設定  -*- lexical-binding: nil -*-
+;;; my-editor.el --- エディタ全般の設定  -*- lexical-binding: t -*-
 ;;; Commentary:
 ;; init.el から機械的に分割したもの。読み込み順は init.el を参照。
-;; lexical-binding は分割前と同じ意味論を保つため nil のまま。
 ;;; Code:
 
 ;;; --------------------------------------------------

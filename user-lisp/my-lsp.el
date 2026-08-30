@@ -1,7 +1,6 @@
-;;; my-lsp.el --- LSP (eglot) と flymake  -*- lexical-binding: nil -*-
+;;; my-lsp.el --- LSP (eglot) と flymake  -*- lexical-binding: t -*-
 ;;; Commentary:
 ;; init.el から機械的に分割したもの。読み込み順は init.el を参照。
-;; lexical-binding は分割前と同じ意味論を保つため nil のまま。
 ;;; Code:
 
 ;;; [3] LSP (eglot)

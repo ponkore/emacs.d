@@ -1,7 +1,6 @@
-;;; my-text.el --- テキストモード (org / markdown / rst / adoc)  -*- lexical-binding: nil -*-
+;;; my-text.el --- テキストモード (org / markdown / rst / adoc)  -*- lexical-binding: t -*-
 ;;; Commentary:
 ;; init.el から機械的に分割したもの。読み込み順は init.el を参照。
-;; lexical-binding は分割前と同じ意味論を保つため nil のまま。
 ;;; Code:
 
 ;; ox-pandoc / markdown-mode の :custom で my:pandoc-data-file と s-join を使う。

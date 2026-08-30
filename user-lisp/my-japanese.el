@@ -1,7 +1,6 @@
-;;; my-japanese.el --- 日本語環境 (encoding / IME / migemo)  -*- lexical-binding: nil -*-
+;;; my-japanese.el --- 日本語環境 (encoding / IME / migemo)  -*- lexical-binding: t -*-
 ;;; Commentary:
 ;; init.el から機械的に分割したもの。読み込み順は init.el を参照。
-;; lexical-binding は分割前と同じ意味論を保つため nil のまま。
 ;;; Code:
 
 ;;; --------------------------------------------------

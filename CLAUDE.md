@@ -179,6 +179,19 @@ Emacs は `cc` → `gcc` → `c99` の順に探すので `gcc` があれば足�
   `(straight-use-package '(NAME :type built-in))` を宣言する（`org`、`transient` が該当）。
   これをしないと依存解決で straight が古い版をビルドして `load-path` に載せてしまう
 
+### 不要になったパッケージの掃除
+
+```elisp
+(straight-prune-build)             ; 今のセッションで使われていない build/ を消す
+(straight-remove-unused-repos t)   ; どのビルドからも参照されない repos/ を消す
+```
+
+**GUI で起動してから実行すること。** batch では `:if window-system` の
+パッケージ（doom-modeline、org-bullets など）が登録されず、
+使用中のものまで削除対象になる。
+OS 判定で外れるもの（`exec-path-from-shell` は macOS / Linux 専用）も同様に
+消えるが、`straight/` は git 管理外なので他マシンには影響しない。
+
 ### 更新の手順
 
 straight は自動更新しない。追従が必要なときは：
@@ -281,6 +294,21 @@ corfu へ移行したら削除してよい。
 - OS 判定は `(eq system-type 'windows-nt)` / `'darwin` / `'gnu/linux`。
   ウィンドウシステム判定は `window-system` の `'w32` / `'ns` / `'x` / `'pgtk`
 
+## lexical-binding
+
+`early-init.el` / `init.el` / `user-lisp/` すべて `t`。新しいモジュールも `t` で書く。
+
+バイトコンパイルはしない方針（前述）なので、lexical 化の検証は
+**一時ディレクトリにコピーしてコンパイルし、`*Compile-Log*` を読む**
+という手順で行う。GUI 起動して全パッケージがロードされた状態でやらないと、
+パッケージ由来のマクロが未定義で偽の警告が大量に出る。
+
+`reference to free variable` / `assignment to free variable` の大半は
+「そのパッケージがコンパイル時に未ロード」というだけで実害はない
+（実行時には `defvar` 済みなので special 変数として扱われる）。
+注意すべきは `Unused lexical variable` と、
+呼び出し元の `let` 束縛を読んでいたクロージャがある場合。
+
 ## 設定変更の反映方法
 
 1. `user-lisp/` 配下の該当モジュールを編集する
@@ -307,12 +335,8 @@ emacs --batch --debug-init -l early-init.el -l init.el --eval '(message "OK")'
   `git pull` していく方針 (corfu と git-gutter は対応済み)
 - `fonts/` の all-the-icons 用 6 フォントは設定から参照されなくなった。
   Windows にインストール済みのものと合わせて削除してよい
-- `straight/build/` に lsp-mode / lsp-ui / lsp-sourcekit / company 系 /
-  flycheck 系 / tide / js2-mode / elpy など、
-  設定から参照されなくなったパッケージが残っている
 - `w32-symlinks` ブロックは `:disabled t`。6 年間タイポで無効だったため、
   グローバル advice を無検証で有効化するのを避けている
 - org 9.8 で削除された `org-extract-archive-file` への advice をコメントアウト中
   （アーカイブ先ファイル名の `#YM` 置換が効かない）
-- `lexical-binding` は全モジュール `nil`。分割の等価性を優先したため
 - `custom.el` に `user-lisp/` 側と重複する設定が多数残っている

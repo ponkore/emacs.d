@@ -1,12 +1,11 @@
-;;; init.el --- Emacs 初期化ファイル -*- lexical-binding: nil -*-
+;;; init.el --- Emacs 初期化ファイル -*- lexical-binding: t -*-
 ;;; Commentary:
 ;; 個人 Emacs 設定の本体。
 ;;
 ;; 以前は my-config/init.org を org-babel-load-file で init.el に展開していたが、
 ;; Org-mode の恩恵が薄い割にコストが大きいため素の Emacs Lisp に戻した。
 ;; 展開元は docs/archive-init.org に退避してある（抽出手順は docs/extract.el）。
-;;
-;; lexical-binding は等価変換を保つため一旦 nil のまま。lexical 化は別タスク。
+
 ;;; Code:
 
 ;;; ==================================================

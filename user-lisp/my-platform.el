@@ -1,7 +1,6 @@
-;;; my-platform.el --- OS 固有設定 (Windows / macOS)  -*- lexical-binding: nil -*-
+;;; my-platform.el --- OS 固有設定 (Windows / macOS)  -*- lexical-binding: t -*-
 ;;; Commentary:
 ;; init.el から機械的に分割したもの。読み込み順は init.el を参照。
-;; lexical-binding は分割前と同じ意味論を保つため nil のまま。
 ;;; Code:
 
 ;;; --------------------------------------------------
