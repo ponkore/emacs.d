@@ -53,11 +53,21 @@
   :config
   (defun vertico-after-init-hook ()
     (marginalia-mode))
-  ;; dirty hack...
-  (define-key vertico-map (kbd "C-l") 'vertico-directory-delete-char))
+  ;; C-l の define-key ("dirty hack" とコメントされていた) は削除した。
+  ;; vertico-directory 側の :bind が効くようになったので不要。
+  )
 
 (leaf vertico-directory
   :straight t
+  ;; :after vertico + :bind だけだと、キー割り当ての実体化が
+  ;; vertico-directory のロード待ちになる。ところがロードの契機は
+  ;; そのキーしか無いので、永久に有効にならない。実際 RET / DEL / M-DEL は
+  ;; 未割り当てのままで、:hook の rfn-eshadow-update-overlay も
+  ;; :config の file-name-shadow-mode も走っていなかった
+  ;; (vertico 側の :config にあった C-l の define-key は、これに気づいた
+  ;;  誰かが「dirty hack」として足したものと思われる)。
+  ;; 明示的にロードする。
+  :require t
   :after vertico
   :commands
   vertico-directory-delete-char
@@ -87,7 +97,10 @@
    ("C-x l" . consult-goto-line)
    ("C-x b" . consult-buffer))
   :custom
-  `((consult-preview-raw-size . 1024000)
+  ;; consult-preview-raw-size は廃止され、consult-preview-partial-size に
+  ;; なった (大きいファイルを部分的にプレビューする閾値)。
+  ;; 現行の既定値は 1MB で、ここで設定していた 1024000 とほぼ同じ。
+  `((consult-preview-partial-size . 1024000)
     (consult-narrow-key . "<"))
   :init
   ;; C-uを付けるとカーソル位置の文字列を使うmy-consult-lineコマンドを定義する

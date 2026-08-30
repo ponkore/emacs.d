@@ -41,15 +41,20 @@
         (delete-region (line-beginning-position) (line-end-position))
         (insert (w32-symlinks-parse-symlink file))))))
 
-;;; [3] cygwin
+;;; [3] cygwin (削除済み)
 
-(leaf cygwin
-  :if (eq system-type 'windows-nt)
-  :config
-  (setq cygwin-mount-cygwin-bin-directory (concat (getenv "CYGWIN_DIR") "\\bin"))
-  ;; (require 'setup-cygwin)
-  ;; (load "config/builtins/setup-cygwin")
-  (file-name-shadow-mode -1))
+;; cygwin ブロックは完全に死んでいたので削除した:
+;;   - CYGWIN_DIR が未設定で、cygwin-mount-cygwin-bin-directory は
+;;     バックスラッシュ + bin という壊れた値になっていた
+;;   - cygwin-mount パッケージは導入されていない (関数も未定義)
+;;   - (require 'setup-cygwin) と load はコメントアウト済みで、
+;;     setup-cygwin というファイル自体が存在しない
+;;   - Cygwin 自体が入っていない (シェルは Git 付属の bash)
+;;
+;; 唯一生きていたのが (file-name-shadow-mode -1) で、これが
+;; my-completion.el の vertico-directory 側の (file-name-shadow-mode +1) を
+;; 打ち消していた (my-platform は init.el の最後に読まれるため後勝ち)。
+;; 削除により、ミニバッファでファイル名の重複部分が隠れるようになる。
 
 ;;; --------------------------------------------------
 ;;; Mac環境固有

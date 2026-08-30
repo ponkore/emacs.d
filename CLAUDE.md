@@ -488,14 +488,11 @@ emacs --batch --debug-init -l early-init.el -l init.el --eval '(message "OK")'
 
 ## 既知の課題（未対応）
 
-- `straight/repos/` のうち次の 14 個がまだ 2021〜2022 年のまま。
-  補完スタック（vertico / consult / marginalia / orderless / embark）と
-  言語ツール（cider / clojure-mode / parseclj / parseedn / sesman / slime /
-  rust-mode / cargo / projectile）。個別に確認しながら更新する方針。
-  **vertico は更新すると設定が壊れる**: `my-completion.el` が advice している
-  `vertico--format-candidate` は vertico 2.x に存在しない（手元 0.17 → 上流 2.13）。
-  `projectile` も `projectile--read-search-string-with-default` という内部関数を
-  `my-project.el` から呼んでいる
+- `straight/repos/` のうち次の 9 個がまだ 2021〜2022 年のまま。
+  cider / clojure-mode / parseclj / parseedn / sesman / slime /
+  rust-mode / cargo / projectile。個別に確認しながら更新する方針。
+  `projectile` は `projectile--read-search-string-with-default` という内部関数を
+  `my-project.el` から呼んでいるので要注意
 - `w32-symlinks` ブロックは `:disabled t`。6 年間タイポで無効だったため、
   グローバル advice を無検証で有効化するのを避けている
 - org 9.8 で削除された `org-extract-archive-file` への advice をコメントアウト中
