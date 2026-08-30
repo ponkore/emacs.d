@@ -125,9 +125,10 @@ _R_ename    ch_M_od        _t_oggle       _e_dit    _[_ hide detail     _._toggg
     ("a" . dired-omit-mode)
     ;; neotree の <left> (親ノードへ) 相当。既定では ^ と - にもある。
     ("<left>" . dired-sidebar-up-directory)
-    ;; neotree の <right> (そこをルートにする) 相当。
-    ;; dired-sidebar-find-file はディレクトリ上ではそこを新しいルートにする。
-    ("<right>" . dired-sidebar-find-file)))
+    ;; ディレクトリ行でその場にサブツリーを展開する (もう一度押すと畳む)。
+    ;; 既定では TAB にも割り当てられている。
+    ;; ルートごと移動したいときは RET (dired-sidebar-find-file)。
+    ("<right>" . dired-sidebar-subtree-toggle)))
   :custom
   ;; nerd-icons-dired を使ってアイコンを出す (他の箇所と同じ体系)
   (dired-sidebar-theme . 'nerd-icons)
@@ -142,6 +143,39 @@ _R_ename    ch_M_od        _t_oggle       _e_dit    _[_ hide detail     _._toggg
   ;; 選択中のバッファのファイルをサイドバー上で追いかける
   (dired-sidebar-should-follow-file . t)
   :config
+  ;; --- clone-buffer 経由でサイドバーを作ると dired-mode-hook が壊れる件 ---
+  ;;
+  ;; そのディレクトリの dired バッファを表示している状態で F8 を押すと、
+  ;; dired-sidebar-get-or-create-buffer は既存の dired バッファを乗っ取らない
+  ;; ように clone-buffer でコピーを作る (bin -> bin<2>)。
+  ;; ところが clone-buffer は major-mode を設定してからバッファローカル変数を
+  ;; コピーするので、dired-mode-hook が走る時点では dired-subdir-alist が
+  ;; まだ空のまま、しかしバッファには一覧のテキストが入っている、という
+  ;; 中途半端な状態になる。
+  ;;
+  ;; nerd-icons-dired-mode は有効化時に nerd-icons-dired--refresh を呼び、
+  ;; そこから dired-get-filename -> dired-current-directory と辿るので
+  ;;   No subdir-alist in bin<2>
+  ;; で失敗する (通常の dired ではフックが走る時点でバッファが空なので
+  ;;  refresh が空振りし、問題が表面化しない)。
+  ;;
+  ;; クローン中はフックを走らせず、subdir-alist を作ってから改めて走らせる。
+  ;; 上流が直したらこの advice は削除してよい。
+  (defun my:dired-sidebar-clone-hook-fix (orig root)
+    "clone-buffer 経由のときだけ dired-mode-hook を後回しにする。"
+    (if (or (get-buffer (dired-sidebar-buffer-name root))
+            (not (eq (current-buffer) (dired-noselect root))))
+        ;; 既存バッファを返すだけ、もしくはリネームで済む経路はそのまま
+        (funcall orig root)
+      (let ((buffer (let ((dired-mode-hook nil)) (funcall orig root))))
+        (when (buffer-live-p buffer)
+          (with-current-buffer buffer
+            (unless dired-subdir-alist (dired-build-subdir-alist))
+            (run-hooks 'dired-mode-hook)))
+        buffer)))
+  (advice-add 'dired-sidebar-get-or-create-buffer
+              :around #'my:dired-sidebar-clone-hook-fix)
+
   ;; dired-sidebar-face は defface だが、dired-sidebar-set-font は
   ;;   (when (bound-and-true-p dired-sidebar-face)
   ;;     (setq-local buffer-face-mode-face dired-sidebar-face) ...)
@@ -151,6 +185,23 @@ _R_ename    ch_M_od        _t_oggle       _e_dit    _[_ hide detail     _._toggg
   (setq dired-sidebar-face '(:height 0.9))
   ;; dired-omit-mode のため
   (require 'dired-x))
+
+;;; [4] dired-subtree
+
+;; dired-sidebar のサブツリー展開 (dired-sidebar-want-subtree) は
+;; dired-subtree が入っているときだけ有効になる。入れていないと
+;; TAB や <right> はディレクトリへ移動するだけで、ツリーとして
+;; その場に展開できない。
+(leaf dired-subtree
+  :straight t
+  :after dired
+  :custom
+  ;; 階層ごとの背景色の差を付けない (modus のテーマに任せる)
+  (dired-subtree-use-backgrounds . nil)
+  :bind
+  (:dired-mode-map
+   ("<tab>" . dired-subtree-toggle)
+   ("<backtab>" . dired-subtree-cycle)))
 
 (provide 'my-dired)
 ;;; my-dired.el ends here
