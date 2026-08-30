@@ -227,6 +227,14 @@ upstream がデフォルトブランチを `master` → `main` に変えてい�
 - `warning-suppress-log-types` / `warning-suppress-types` … leaf / straight の警告抑制
 - `yas-new-snippet-default` … スニペットのテンプレート
 
+face は `rst-level-1`〜`6` の 6 面だけ残した（modus も同じ face を定義するが、
+`rst.el` はテーマより後にロードされるため `user` テーマ側が勝ち、実際に効いている）。
+
+**face がテーマに勝つかどうかはロード順で決まる**。テーマより先に定義済みの
+face（`font-lock-*` など）はテーマが勝ち、`custom.el` に書いても効かない。
+テーマより後にロードされるパッケージの face は `custom.el` 側が勝つ。
+確実に当てたいときは `load-theme` のあとに設定する。
+
 `customize` を使うと `custom.el` に書き戻されるので、モジュール側と
 重複していないか時々確認する。重複の検出は、`custom.el` の
 `custom-set-variables` から変数名を集め、`user-lisp/` の leaf を
@@ -311,6 +319,25 @@ dired のディレクトリアイコンが `U+E6AD` なので、HackGen 系だ�
 - OS 判定は `(eq system-type 'windows-nt)` / `'darwin` / `'gnu/linux`。
   ウィンドウシステム判定は `window-system` の `'w32` / `'ns` / `'x` / `'pgtk`
 
+## テーマ
+
+Emacs 31.1 同梱の **modus-themes 5.2.0** を `load-theme` で使う。
+`:straight` は付けない（組み込み優先。`org` / `transient` と同じ扱い）。
+
+かつて straight に 2021 年の 1.7.0 が入っていて、そちらが読まれていた。
+v2 世代の API（`modus-themes-load-themes` / `modus-themes-load-vivendi` /
+`modus-themes-region`）は 5.x には存在しないので、書き換えが要る。
+
+| 旧 (v1/v2) | 新 (v4/v5) |
+|---|---|
+| `(modus-themes-load-themes)` + `(modus-themes-load-vivendi)` | `(load-theme 'modus-vivendi :no-confirm)` |
+| `modus-themes-region '(bg-only …)` | `modus-themes-common-palette-overrides '((fg-region unspecified))` |
+| `modus-themes-region '(… no-extend)` | 廃止（移行先なし） |
+
+色の調整はパレットの上書きで行う。パレット名は
+`etc/themes/modus-themes.el` の `modus-vivendi-palette` を見る。
+`:custom` は `:config` より先に走るので、上書きは `load-theme` に間に合う。
+
 ## lexical-binding
 
 `early-init.el` / `init.el` / `user-lisp/` すべて `t`。新しいモジュールも `t` で書く。
@@ -352,7 +379,3 @@ emacs --batch --debug-init -l early-init.el -l init.el --eval '(message "OK")'
   グローバル advice を無検証で有効化するのを避けている
 - org 9.8 で削除された `org-extract-archive-file` への advice をコメントアウト中
   （アーカイブ先ファイル名の `#YM` 置換が効かない）
-- `custom.el` に残る face 設定（`font-lock-*` / `rst-level-*` /
-  `markdown-code-face`）は modus-vivendi のロードで上書きされて効いていない。
-  例: `font-lock-function-name-face` は "DodgerBlue1" ではなくテーマの色になる。
-  残したいならテーマ適用後に当てる形へ直す必要がある

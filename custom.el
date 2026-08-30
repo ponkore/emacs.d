@@ -7,22 +7,13 @@
  ;; If you edit it by hand, you could mess it up, so be careful.
  ;; Your init file should contain only one such instance.
  ;; If there is more than one, they won't work right.
- '(font-lock-function-name-face ((t (:foreground "DodgerBlue1"))))
- '(font-lock-preprocessor-face ((t (:foreground "steel blue"))))
- '(font-lock-variable-name-face ((t (:foreground "DodgerBlue1"))))
- '(markdown-code-face ((t (:inherit nil))))
  '(rst-level-1 ((t (:foreground "gray10" :background "gray80" :height 1.4 :weight bold))))
- '(rst-level-1-face ((t (:foreground "LightSkyBlue"))) t)
  '(rst-level-2 ((t (:foreground "gray10" :background "gray80" :height 1.2 :weight bold))))
- '(rst-level-2-face ((t (:foreground "LightGoldenrod"))) t)
  '(rst-level-3 ((t (:background "grey15" :height 1.1))))
- '(rst-level-3-face ((t (:foreground "Cyan1"))) t)
  '(rst-level-4 ((t (:background "grey15" :height 1.1))))
- '(rst-level-4-face ((t (:foreground "chocolate1"))) t)
  '(rst-level-5 ((t (:background "grey15" :height 1.1))))
- '(rst-level-5-face ((t (:foreground "PaleGreen"))) t)
  '(rst-level-6 ((t (:background "grey15" :height 1.1))))
- '(rst-level-6-face ((t (:foreground "Aquamarine"))) t))
+)
  ;; (rst-level-7-face ((t (:foreground "LightSteelBlue"))) t)  ;; メモ
  ;; (rst-level-8-face ((t (:foreground "LightSalmon"))) t)
 (put 'narrow-to-region 'disabled nil)

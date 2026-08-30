@@ -255,14 +255,25 @@
 ;;; [3] テーマ
 
 ;; https://zenn.dev/lambdagonbei/articles/1b2bce27673078
+;;
+;; Emacs 31.1 同梱の modus-themes (5.2.0) を使う。
+;; straight 側に 2021 年の 1.7.0 が残っていて、そちらが読まれていた。
+;; modus-themes-load-themes / modus-themes-load-vivendi / modus-themes-region
+;; はいずれも v2 世代の API で 5.x には存在しない。
+;;
+;; :custom は :config より先に走るので、パレットの上書きは load-theme の前に
+;; 反映される。defcustom は既に値が入っている変数を上書きしないため、
+;; パッケージ未ロードの状態で customize-set-variable しておいて問題ない。
 (leaf modus-themes
-  :straight t
+  :custom
+  (modus-themes-italic-constructs . t)
+  (modus-themes-bold-constructs . nil)
+  ;; 旧 modus-themes-region '(bg-only no-extend) の置き換え。
+  ;; bg-only は「前景色は変えず背景だけ変える」なので fg-region を外す。
+  ;; no-extend (行末まで伸ばさない) は v4 で廃止されており移行先が無い。
+  (modus-themes-common-palette-overrides . '((fg-region unspecified)))
   :config
-  (setq modus-themes-italic-constructs t
-        modus-themes-bold-constructs nil
-        modus-themes-region '(bg-only no-extend))
-  (modus-themes-load-themes)
-  (modus-themes-load-vivendi))
+  (load-theme 'modus-vivendi :no-confirm))
 
 ;; (leaf color-theme-sanityinc-tomorrow
 ;;   :straight t
