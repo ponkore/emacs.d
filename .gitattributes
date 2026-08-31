@@ -1,0 +1,7 @@
+# 改行コードは LF に統一する。
+# text=auto … テキストと判定したファイルをリポジトリには LF で格納する
+# eol=lf    … チェックアウト時も LF のまま取り出す（core.autocrlf の設定に依らない）
+* text=auto eol=lf
+
+# バイナリは自動判定に任せず明示しておく
+*.ttf binary
