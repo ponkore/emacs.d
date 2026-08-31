@@ -478,9 +478,23 @@ v2 世代のパッチ済みフォントはこの面をまるごと持ってい�
 | `Symbols Nerd Font Mono` (`fonts/NFM.ttf`) | v3 | ○ | ○ | ○ |
 
 dired のディレクトリアイコンが `U+E6AD` なので、HackGen 系だけでは豆腐になる。
-`fonts/NFM.ttf` を入れてあり、これを使う。Windows へのユーザー単位インストールは
-`%LOCALAPPDATA%\Microsoft\Windows\Fonts` へのコピーと
-`HKCU\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts` へのレジストリ登録。
+`fonts/NFM.ttf` を入れてあり、これを使う。
+
+**リポジトリに置いてあるだけでは効かない。OS 側にインストールすること。**
+`my:nerd-font-family` はシステムに登録されたフォントの中から選ぶため、
+`fonts/NFM.ttf` が未インストールの環境では HackGen 系（v2）にフォールバックし、
+dired のディレクトリアイコンだけが豆腐になる（2026-08、macOS で実際に踏んだ）。
+clone しただけの新しいマシンでは必ず必要になる手順。
+
+| OS | 導入方法 |
+|---|---|
+| Windows | `%LOCALAPPDATA%\Microsoft\Windows\Fonts` へコピーし、`HKCU\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts` にレジストリ登録（ユーザー単位） |
+| macOS | `cp fonts/NFM.ttf ~/Library/Fonts/` のみ。登録作業は不要で、OS が自動で拾う |
+
+どちらもインストール後に **Emacs の再起動が要る**（`font-get-glyphs` の判定は
+起動時に済んでいるため）。フォントのファミリ名は `Symbols Nerd Font Mono`
+（PostScript 名 `SymbolsNFM`）。macOS には `fc-list` が無いので、入っているかの
+確認は `ls ~/Library/Fonts` で足りる。
 
 `my:nerd-font-family`（`user-lisp/my-appearance.el`）が `font-get-glyphs` で
 実際のグリフ有無を見て選ぶので、**フォント名を決め打ちしないこと**。
