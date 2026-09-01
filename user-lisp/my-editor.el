@@ -42,10 +42,10 @@
 ;; 他のオーバーレイと干渉することがあった。組み込みは表示エンジン側で
 ;; 描画する。列は display-fill-column-indicator-column が既定 t なので
 ;; fill-column に従う (fci-mode と同じ)。
+;; markdown-mode では邪魔になるので外した (git-commit は 50/72 桁の目安として残す)。
 (use-package display-fill-column-indicator
   :hook
-  ((markdown-mode-hook git-commit-mode-hook)
-   . display-fill-column-indicator-mode))
+  (git-commit-mode-hook . display-fill-column-indicator-mode))
 
 ;;; [3] expand-region
 
