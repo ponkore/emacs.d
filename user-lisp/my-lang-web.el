@@ -27,12 +27,13 @@
                      ;; (ac-php-core-eldoc-setup)
                      ;; (add-to-list 'company-backends 'company-ac-php-backend)
                      ;; (make-local-variable 'company-backends)
-                     ;; intelephense の files.associations。lsp-mode の
-                     ;; lsp-intelephense-files-associations に相当する。
-                     ;; eglot はサーバ設定を eglot-workspace-configuration で渡す。
-                     (setq-local eglot-workspace-configuration
-                                 '(:intelephense
-                                   (:files (:associations ["*.php" "*.phpm" "*.inc"]))))))
+                     ;; intelephense の files.associations (*.phpm / *.inc を
+                     ;; PHP として扱わせる設定) は my-lsp.el の
+                     ;; eglot-workspace-configuration グローバル値で渡す。
+                     ;; eglot はこの変数を一時バッファの中で読む
+                     ;; (eglot--workspace-configuration-plist) ため、
+                     ;; ここで setq-local してもサーバには届かなかった。
+                     ))
   ;; 診断は eglot が flymake 経由で出すので flycheck の設定は要らなくなった。
   (php-mode-hook . eglot-ensure)
   :bind

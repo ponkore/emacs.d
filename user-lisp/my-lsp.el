@@ -22,6 +22,31 @@
   (eglot-events-buffer-config '(:size 0 :format full))
   ;; プロジェクト外のファイルへ飛んだ先でも eglot を効かせる
   (eglot-extend-to-xref t)
+  ;; サーバに渡すワークスペース設定。eglot はこの変数を一時バッファの中で
+  ;; 読む (eglot--workspace-configuration-plist) ので、メジャーモードフックで
+  ;; setq-local しても届かない。ディレクトリローカル変数かグローバル値で
+  ;; 渡す必要がある (変数の docstring にもそう書かれている)。
+  ;; 自分のセクション以外は各サーバが無視するので、まとめてここに置く。
+  ;;
+  ;; intelephense:
+  ;;   files.associations - 既定は *.php のみ。*.phpm / *.inc をインデックス
+  ;;     対象にしないと、そこで定義したクラスが undefined type になる
+  ;;     (intelephense は require_once のパスを辿らず、ワークスペース全体の
+  ;;     インデックスだけでシンボルを解決するため)。
+  ;;   files.exclude - 設定すると既定値を置き換えてしまうので、既定値を
+  ;;     並べたうえでプロジェクト側の重複ソースを足してある。同じクラスが
+  ;;     二重定義になると補完もジャンプも濁る。_oldver は旧版のコピー、
+  ;;     env.pisc は別環境向けの複製で、どちらも同名クラスを持つ。
+  (eglot-workspace-configuration
+   '(:intelephense
+     (:files (:associations ["*.php" "*.phpm" "*.inc"]
+              :exclude ["**/.git/**" "**/.svn/**" "**/.hg/**" "**/CVS/**"
+                        "**/.DS_Store/**" "**/node_modules/**"
+                        "**/bower_components/**"
+                        "**/vendor/**/{Tests,tests}/**"
+                        "**/.history/**" "**/vendor/**/vendor/**"
+                        "**/_oldver/**"
+                        "**/env.pisc/**"]))))
   :bind
   ;; lsp-mode の lsp-keymap-prefix "C-c l" に相当するものを自前で用意する。
   ;; eglot にはプレフィックスキーの仕組みが無い。
