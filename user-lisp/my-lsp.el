@@ -12,8 +12,12 @@
 
 (use-package eglot
   :custom
-  ;; 最後のバッファを閉じたらサーバを落とす
-  (eglot-autoshutdown t)
+  ;; サーバは自動では落とさない。t にすると最後の管理バッファを kill した
+  ;; ときに eglot-shutdown が走り、:shutdown の同期リクエスト (timeout 1.5s) と
+  ;; jsonrpc-shutdown のプロセス終了待ち (最低 0.3s) で C-x k がブロックする。
+  ;; intelephense は特に応答が遅く、php ファイルは閉じるのも開き直すのも遅かった。
+  ;; 落としたくなったら C-c l q (eglot-shutdown) で明示的に落とす。
+  (eglot-autoshutdown nil)
   ;; イベントログはメモリを食うだけなので無効にする
   (eglot-events-buffer-config '(:size 0 :format full))
   ;; プロジェクト外のファイルへ飛んだ先でも eglot を効かせる
