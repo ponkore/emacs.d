@@ -87,10 +87,20 @@
       (unless (file-exists-p (file-name-directory filename))
         (make-directory (file-name-directory filename)))
       ;; take screenshot
-      (if (eq system-type 'darwin)
-          (call-process "screencapture" nil nil nil "-i" filename))
-      (if (eq system-type 'gnu/linux)
-          (call-process "import" nil nil nil filename))
+      (cond
+       ((eq system-type 'darwin)
+        (call-process "screencapture" nil nil nil "-i" filename))
+       ((eq system-type 'gnu/linux)
+        (call-process "import" nil nil nil filename))
+       ((eq system-type 'windows-nt)
+        ;; Win+Shift+S と同じオーバーレイで範囲選択させ、クリップボード経由で保存する。
+        ;; pwsh ではなく powershell.exe (5.1) を使うこと: Get-Clipboard -Format が要る。
+        (call-process "powershell.exe" nil nil nil
+                      "-NoProfile" "-Sta" "-ExecutionPolicy" "Bypass"
+                      "-File" (convert-standard-filename
+                               (expand-file-name "etc/screenclip.ps1" user-emacs-directory))
+                      "-Path" (convert-standard-filename
+                               (expand-file-name filename)))))
       ;; insert into file if correctly taken
       (if (file-exists-p filename)
           (insert (concat "[[file:" filename "]]")))))
