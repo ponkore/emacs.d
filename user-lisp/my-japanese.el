@@ -98,6 +98,40 @@
          (coding-system-plist 'utf-8))
   (set-terminal-coding-system 'utf-8-for-putty))
 
+;;; [3] Windows コンソール (emacs -nw) の出力コードページ
+
+;; WezTerm 上の emacs -nw で dired を開くと、nerd-icons のアイコンが一部だけ
+;; U+F401 のような 16 進表記 (Emacs の glyphless 表示) になっていた。
+;;
+;; 原因は terminal-coding-system。Windows のコンソール端末
+;; (tty-type "w32console") ではコンソールの出力コードページに縛られるため、
+;; 上の (set-terminal-coding-system 'utf-8-for-putty) は効かず cp932 のまま
+;; になる。cp932 の charset-list は (ascii katakana-sjis cp932-2-byte) しか
+;; なく、符号化できない文字は glyphless-char-display によって 16 進表記へ
+;; 落ちる。
+;;
+;; Nerd Font のアイコンは私用領域にあり、U+E5FF 付近は cp932 の外字領域に
+;; 収まるので偶然表示できていた。一方 U+F000 台 (Font Awesome, octicons) や
+;; U+F0000 台 (Material Design) は収まらないので落ちる。dired で普通の
+;; フォルダだけアイコンが出て Documents や .emacs.d が化けていたのはこのため。
+;;
+;; 出力コードページを UTF-8 (65001) にすれば charset-list が (unicode) に
+;; なり、すべて表示できる。入力コードページには触れないので
+;; keyboard-coding-system は japanese-cp932-unix のまま。
+;; GUI フレームはコンソールを使わないので影響しない。
+(when (and (eq system-type 'windows-nt)
+           (not (display-graphic-p))
+           (fboundp 'w32-set-console-output-codepage))
+  (let ((original (w32-get-console-output-codepage)))
+    (w32-set-console-output-codepage 65001)
+    (set-terminal-coding-system 'utf-8)
+    ;; Emacs を起動したシェルはコンソールを共有したまま残るので、
+    ;; 終了時に元のコードページへ戻す。
+    (add-hook 'kill-emacs-hook
+              (lambda ()
+                (ignore-errors
+                  (w32-set-console-output-codepage original))))))
+
 ;;; [3] encoding設定
 
 ;; leaf では encoding-mac / encoding-windows という疑似パッケージの入れ子
