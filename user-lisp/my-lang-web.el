@@ -133,10 +133,15 @@
 
 (use-package web-mode
   :straight t
+  ;; .cshtml (ASP.NET の Razor テンプレート) は web-mode が
+  ;; web-mode-engine-file-regexps で razor エンジンと判定するので、
+  ;; auto-mode-alist に載せるだけで @model / @{ } のパースと
+  ;; C# キーワードのフォント化まで効く。
   :mode (("\\.tsx\\'" . web-mode)
          ("\\.html\\'" . web-mode)
          ("\\.htm\\'" . web-mode)
-         ("\\.njk\\'" . web-mode))
+         ("\\.njk\\'" . web-mode)
+         ("\\.cshtml\\'" . web-mode))
   :custom
   (web-mode-code-indent-offset 2)
   (web-mode-markup-indent-offset 2)
