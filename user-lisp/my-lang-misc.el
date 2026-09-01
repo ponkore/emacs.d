@@ -1,4 +1,4 @@
-;;; my-lang-misc.el --- その他の言語 (SQL / bat / Swift / Lua / VB)  -*- lexical-binding: t -*-
+;;; my-lang-misc.el --- その他の言語 (SQL / bat / Swift / Lua / VB / PowerShell)  -*- lexical-binding: t -*-
 ;;; Commentary:
 ;; init.el から機械的に分割したもの。読み込み順は init.el を参照。
 ;;; Code:
@@ -154,6 +154,14 @@ set pagesize 1000
   :hook (visual-basic-mode-hook . (lambda () (setq mode-name "vb")))
   :config
   (setq visual-basic-mode-indent 4))
+
+;;; [3] PowerShell
+
+(use-package powershell
+  ;; Emacs に組み込みの PowerShell モードは無く、tree-sitter 版も MELPA に
+  ;; 出ていないので jschaf/powershell.el を使う。font-lock とインデント目当て。
+  :straight t
+  :mode ("\\.ps[dm]?1\\'" . powershell-mode))
 
 (provide 'my-lang-misc)
 ;;; my-lang-misc.el ends here
