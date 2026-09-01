@@ -368,7 +368,11 @@
       (propertize
        (concat
         (let ((sys (coding-system-plist buffer-file-coding-system)))
-          (cond ((memq (plist-get sys :category)
+          (cond ((eq (plist-get sys :category) 'coding-category-utf-8-sig)
+                 ;; BOM 付き UTF-8。coding-category-utf-8 とは別カテゴリなので、
+                 ;; 明示しないと下の (t " =") に落ちて他の未分類と区別が付かない。
+                 " B")
+                ((memq (plist-get sys :category)
                        '(coding-category-undecided coding-category-utf-8))
                  " U")
                 ((memq (plist-get sys :name)

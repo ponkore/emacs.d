@@ -90,6 +90,12 @@
   (coding-system-put 'cp932-unix :mnemonic ?P)
   (coding-system-put 'cp932-mac :mnemonic ?P)
 
+  ;; BOM 付き UTF-8 の表示を「B」とする。
+  ;; BOM の有無で coding system は utf-8-with-signature / utf-8 に分かれて
+  ;; いるが、:mnemonic がどちらも ?U なのでモードラインでは判別できない。
+  ;; ベースに put すれば -unix / -dos / -mac にも伝播する (属性を共有する)。
+  (coding-system-put 'utf-8-with-signature :mnemonic ?B)
+
   ;; PuTTY 用の terminal-coding-system の設定
   (apply 'define-coding-system 'utf-8-for-putty
          "UTF-8 (translate jis to cp932)"
