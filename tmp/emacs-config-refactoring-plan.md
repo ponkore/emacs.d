@@ -179,7 +179,7 @@
 | ~~G-1~~ | ~~Windows shell~~ | ~~`"C:/Users/masao/scoop/shims"` — ユーザー名直書き~~ |
 | ~~G-2~~ | ~~site-lisp~~ | ~~`(expand-file-name "~/.emacs.d/site-lisp")` — `user-emacs-directory` を使うべき（他に recentf, migemo 辞書, config-sqlplus.el, elpy rpc-venv も同様）~~ |
 | ~~G-3~~ | ~~markdown~~ | ~~`markdown-command` が `~/AppData/Roaming/pandoc/metadata.yml` 固定、`markdown-open-command` が `c:/Program Files/Typora/Typora.exe` 固定 → mac/Linux で壊れる。加えて `--self-contained` は pandoc 3 で非推奨（→ `--embed-resources --standalone`）~~（追加で判明: `--metadata` にファイルパスを渡しており metadata.yml は読まれていなかった → `--metadata-file`。`--template=default.html` が見つからず **pandoc プレビューは exit 97 で動作していなかった** → 参照先が在るときだけ付ける形に変更） |
-| ~~G-4~~ | ~~ox-pandoc~~ | ~~`reference-doc` が `~/AppData/Roaming/pandoc/custom-reference.docx` 固定~~ |
+| ~~G-4~~ | ~~ox-pandoc~~ | ~~`reference-doc` が `~/AppData/Roaming/pandoc/custom-reference.docx` 固定~~（いったん完了扱いにしたが未修正だった。パスは `my:pandoc-data-file` 化されていただけで無条件に渡しており、ファイルが無いと pandoc が exit 1 で docx エクスポートごと失敗する。在るときだけ渡す形にして解消） |
 | ~~G-5~~ | ~~open-junk-file~~ | ~~`"~/Library/CloudStorage/Dropbox-個人用/junk/..."` — **macOS 専用パス**。Windows で `C-x j` が壊れる~~ |
 | G-6 | SQL | `"c:/Apps/Oracle/sqlplus.exe"` / `~/Applications/Oracle/instantclient_10_2` |
 | ~~G-7~~ | ~~swift~~ | ~~`lsp-sourcekit-executable` が Xcode 固定パス~~ |

@@ -150,8 +150,17 @@
   ;; default options for all output formats
   (org-pandoc-options '((standalone . t)))
   ;; cancel above settings only for 'docx' format
-  (org-pandoc-options-for-docx `((standalone . nil)
-                                 (reference-doc . ,(my:pandoc-data-file "custom-reference.docx"))))
+  ;;
+  ;; 計画書の G-4。custom-reference.docx を無条件に reference-doc へ渡していた。
+  ;; pandoc は指定されたファイルが無いと
+  ;;   custom-reference.docx: withBinaryFile: does not exist
+  ;; で exit 1 になり、docx エクスポートがまるごと失敗する。実際この環境には
+  ;; pandoc のユーザーデータディレクトリ自体が無い。markdown-command と同じく、
+  ;; 在るときだけ渡す。省略すれば pandoc 内蔵の既定スタイルで出力される。
+  (org-pandoc-options-for-docx
+   (let ((ref (my:pandoc-data-file "custom-reference.docx")))
+     (append '((standalone . nil))
+             (when (file-readable-p ref) `((reference-doc . ,ref))))))
   ;; special settings for beamer-pdf and latex-pdf exporters
   (org-pandoc-options-for-beamer-pdf '((pdf-engine . "xelatex")))
   (org-pandoc-options-for-latex-pdf '((pdf-engine . "xelatex")))
