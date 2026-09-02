@@ -20,7 +20,12 @@
    ;; コマンド版に割り当てる。
    ("C-z" . scroll-down-command)
    ("ESC ?" . apropos)
-   ("C-x C-e" . compile)
+   ;; compile は C-x C-e から C-c c へ移した (計画書の J-9)。
+   ;; C-x C-e は Emacs 既定の eval-last-sexp に戻る。以前は全バッファで
+   ;; compile に潰されており、emacs-lisp-mode / lisp-interaction-mode でも
+   ;; eval-last-sexp がどのキーからも呼べなかった。
+   ;; C-c c は主要なメジャーモード 20 個で未使用であることを確認済み。
+   ("C-c c" . compile)
    ("C-x C-n" . next-error)
    ("C-x C-v" . find-file-other-window)
    ;; ("C-x l" . goto-line)

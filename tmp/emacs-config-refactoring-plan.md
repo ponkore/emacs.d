@@ -231,7 +231,7 @@
 | ~~J-6~~ | ~~`leaf ripgrep*` の `my:ripgrep-regexp` は定義のみで、dired は `ripgrep-regexp`（本家）にバインドしている。デッドコード~~ |
 | ~~J-7~~ | ~~`find-npm-command.el` / `powerline.el` がどこからも読まれていない~~ |
 | ~~J-8~~ | ~~`.gitignore` に `eln-cache/` `init.el~` `tmp/` が無い~~ |
-| J-9 | `("C-x n" . myblog-hugo/create-draft)` が narrowing プレフィックス `C-x n` を潰している。`("C-x C-e" . compile)` が `eval-last-sexp` を潰している（意図的なら維持） |
+| ~~J-9~~ | ~~`("C-x n" . myblog-hugo/create-draft)` が narrowing プレフィックス `C-x n` を潰している。`("C-x C-e" . compile)` が `eval-last-sexp` を潰している（意図的なら維持）~~（`C-x n` は削除し myblog-hugo/* 一式も削除。`compile` は `C-c c` へ移し `C-x C-e` を Emacs 既定に戻した） |
 | ~~J-10~~ | ~~`inhibit-startup-echo-area-message . -1` — 本来はログイン名の文字列を渡す必要がある~~ |
 | ~~J-11~~ | ~~`auto-save-list-file-name` / `auto-save-list-file-prefix` の設定が 2 ブロックに重複~~ |
 | ~~J-12~~ | ~~`shell-file-name` を Windows で `bash.exe` に変更 — `call-process-shell-command` を使う一部パッケージが壊れる可能性あり。`explicit-shell-file-name` のみに留める案~~ |
