@@ -10,7 +10,7 @@
   ;; (ライブラリは sql.el)。leaf / use-package は :bind / :config を
   ;; (eval-after-load '<パッケージ名>) で遅延させるため、存在しない feature を
   ;; 待ち続けて :config も :bind も永久に適用されていなかった。
-  ;; その結果 oracle-settings 等が未定義で、C-c " / C-c , も未バインドだった。
+  ;; その結果 :config の関数定義が行われず、C-c " / C-c , も未バインドだった。
   ;; 実在する feature 名 sql に直すことで正しく遅延適用される。
   :mode ("\\.ddl$" . sql-mode)
   :custom
@@ -24,46 +24,21 @@
                      (yas-minor-mode-on)
                      (setq indent-tabs-mode nil)))
   :config
-  (defun oracle-settings ()
-    "setup oracle sql environment"
-    ;; for SQL mode (My Office PC Oracle setting)
-    (when (eq system-type 'windows-nt)
-      (setq sql-oracle-program "c:/Apps/Oracle/sqlplus.exe")
-      ;; 新規作成のときだけ cp932 にする
-      (add-hook 'sql-mode-hook (lambda ()
-                                 (unless (file-exists-p (buffer-file-name (current-buffer)))
-                                   (set-buffer-file-coding-system 'cp932)
-                                   (set-buffer-modified-p nil)))))
-    ;; on Mac, set environment variables
-    (when (or (eq system-type 'berkeley-unix) (eq system-type 'darwin))
-      (let ((oracle-home (expand-file-name "~/Applications/Oracle/instantclient_10_2")))
-        (setenv "NLS_LANG" "JAPANESE_JAPAN.UTF8")
-        (setenv "DYLD_LIBRARY_PATH" oracle-home)
-        (setenv "LD_LIBRARY_PATH" oracle-home)
-        (setq sql-oracle-program (concat oracle-home "/sqlplus"))))
-    ;; set Oracle as default SQL product.
-    (setq sql-product 'oracle)
-    (add-hook 'sql-interactive-mode-hook
-              (lambda ()
-                (setq comint-output-filter-functions 'comint-truncate-buffer)
-                (toggle-truncate-lines t)
-                (when (eq system-type 'windows-nt)
-                  (set-buffer-process-coding-system 'cp932 'cp932))
-                (comint-send-string (get-buffer-process (current-buffer)) "
-ALTER SESSION SET NLS_DATE_FORMAT='YYYY/MM/DD'
-/
-set linesize 1000
-set trimspool on
-set timing on
-set pagesize 1000
-")))
-    ;; only for my office environment
-    (load (expand-file-name "config-sqlplus.el" user-emacs-directory) t)
-    ;; customize font-lock
-    (font-lock-add-keywords 'sql-mode
-                            '(("\"\\([^\"]*\\)\"" . 'font-lock-constant-face)
-                              ("\\<Hgs\\w+\\>\.\\<\\w+\\>" . 'font-lock-builtin-face)
-                              ("\\<R[LSC][0-9][A-Z]\\w+\\>\.\\<\\w+\\>" . 'font-lock-builtin-face))))
+  ;; SQL*Plus 関連は一式削除した (計画書の G-6)。
+  ;;
+  ;; M-x oracle-settings という手動実行用の関数があり、その中で
+  ;;   - sql-oracle-program を "c:/Apps/Oracle/sqlplus.exe" /
+  ;;     "~/Applications/Oracle/instantclient_10_2/sqlplus" に決め打ち
+  ;;   - NLS_LANG / DYLD_LIBRARY_PATH / LD_LIBRARY_PATH の setenv
+  ;;   - sql-product を oracle に変更
+  ;;   - sql-interactive-mode-hook で SQL*Plus に ALTER SESSION や set linesize
+  ;;     などを流し込む
+  ;;   - config-sqlplus.el (この環境には存在しない) の load
+  ;;   - 勤務先スキーマ向けの font-lock-add-keywords
+  ;; をまとめて行っていた。SQL*Plus を使わなくなったため丸ごと落とす。
+  ;; どこからも呼ばれていない関数だったので、他への影響はない。
+  ;; sql-product は :custom の postgres のままになる。
+
   (defun wrap-double-quote-thing-at-symbol ()
     (interactive)
     (let* ((bounds (bounds-of-thing-at-point 'symbol))
