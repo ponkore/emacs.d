@@ -23,7 +23,6 @@
    ("C-x C-e" . compile)
    ("C-x C-n" . next-error)
    ("C-x C-v" . find-file-other-window)
-   ("C-x n" . myblog-hugo/create-draft)
    ;; ("C-x l" . goto-line)
    ("C-x =" . my:count-lines-buffer)
    ("C-x g" . grep)
