@@ -126,7 +126,8 @@
                           ))
   ;; from http://qiita.com/itiut@github/items/d917eafd6ab255629346
   (defmacro with-suppressed-message (&rest body)
-    "Suppress new messages temporarily in the echo area and the `*Messages*' buffer while BODY is evaluated."
+    "Suppress new messages temporarily while BODY is evaluated.
+This affects both the echo area and the `*Messages*' buffer."
     (declare (indent 0))
     (let ((message-log-max nil))
       `(with-temp-message (or (current-message) "") ,@body)))

@@ -16,7 +16,7 @@
 ;; そこで実際にグリフを持っているかを見て選ぶ。
 
 (defvar my:nerd-font-family--cache 'unset
-  "Nerd Font のファミリ名。未判定なら 'unset、見つからなければ nil。")
+  "Nerd Font のファミリ名。未判定なら `unset'、見つからなければ nil。")
 
 (defun my:nerd-font-family ()
   "Nerd Fonts v3 のグリフを実際に持っているフォントファミリを返す。"

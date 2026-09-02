@@ -39,9 +39,9 @@
   ;; ripgrep は projectile-ripgrep の依存として入るので、使用時に読めば足りる。
   :preface
   (defun my:projectile-search-dwim (search-term)
-    "Merge version to search document via grep/ag/rg.
-      Use fast alternative if it exists, fallback grep if no alternatives in system.
-      "
+    "Search documents with rg, ag or grep.
+Use the fastest alternative available on the system, falling back to
+grep when none is installed."
     (interactive (list (projectile--read-search-string-with-default
                         "Dwim search for")))
     (cond
