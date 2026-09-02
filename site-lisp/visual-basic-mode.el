@@ -1,4 +1,4 @@
-;;; visual-basic-mode.el --- A mode for editing Visual Basic programs.
+;;; visual-basic-mode.el --- A mode for editing Visual Basic programs.  -*- lexical-binding: t -*-
 
 ;; This is free software.
 ;; Modified version of Fred White's visual-basic-mode.el
@@ -1558,10 +1558,14 @@ processed."
 
 
 
-(defun visual-basic-load-file-ifnotloaded (file default-directory)
+(defun visual-basic-load-file-ifnotloaded (file dir)
   "Load file if not already loaded.
-If FILE is relative then DEFAULT-DIRECTORY provides the path."
-  (let((file-absolute (expand-file-name file default-directory)))
+If FILE is relative then DIR provides the path."
+  ;; 引数名は default-directory だった。lexical binding では動的変数
+  ;; default-directory を隠す (Lexical argument shadows the dynamic variable)。
+  ;; 使い道は expand-file-name の第 2 引数に渡すことだけで、find-file-noselect に
+  ;; 渡すのは絶対パスなので意味は変わらないが、紛らわしいので改名した。
+  (let((file-absolute (expand-file-name file dir)))
     (if (get-file-buffer file-absolute); don't do anything if the buffer is already loaded
         ()
       (find-file-noselect file-absolute ))))

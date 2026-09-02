@@ -1,4 +1,4 @@
-;;; mayu-mode.el --- mayu setting editing commands for Emacs
+;;; mayu-mode.el --- mayu setting editing commands for Emacs  -*- lexical-binding: t -*-
 
 ;;; Copyright (C) 2000-2005 TAGA Nayuta <nayuta@ganaware.org>
 
