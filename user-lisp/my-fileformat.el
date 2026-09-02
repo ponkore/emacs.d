@@ -17,8 +17,7 @@
 
 (use-package diff-mode
   :hook
-  ((diff-mode-hook . my:diff-mode-setup-faces)
-   (diff-mode-hook . my:diff-mode-refine-automatically))
+  (diff-mode-hook . my:diff-mode-setup-faces)
   :config
   (defun my:diff-mode-setup-faces ()
     ;; 追加された行は緑で表示
@@ -29,8 +28,11 @@
     ;; ;; 2012-04-02 // 2018-05-30 emacs 26.1 でエラーになるのでコメントアウト
     ;; (set-face-attribute 'diff-refine-change nil :foreground nil :background nil :weight 'bold :inverse-video t)
     )
-  (defun my:diff-mode-refine-automatically ()
-    (diff-auto-refine-mode t)))
+  ;; my:diff-mode-refine-automatically (diff-auto-refine-mode を呼ぶだけの関数)
+  ;; は削除した。diff-auto-refine-mode は Emacs 27.1 で obsolete になり、
+  ;; 「set `diff-refine' instead」と言われる。その diff-refine は既定値が
+  ;; font-lock で、文字単位の強調は最初から有効。つまりこの関数は不要だった。
+  )
 
 ;;; [3] log4j
 

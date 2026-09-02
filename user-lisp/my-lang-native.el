@@ -97,7 +97,10 @@
     ))
 
 ;; csharp-mode の :config も同じ理由でトップレベルに出す。
-(setq csharp-ts-mode-indent-offset 4)
+;; csharp-ts-mode-indent-offset は Emacs 31 で csharp-ts-indent-offset に
+;; 改名された (obsolete variable alias)。別名なので代入自体は通っていたが、
+;; コンパイル時に警告が出るので新しい名前を使う。
+(setq csharp-ts-indent-offset 4)
 (my:treesit-remap 'csharp-mode 'csharp-ts-mode 'c-sharp)
 
 (provide 'my-lang-native)

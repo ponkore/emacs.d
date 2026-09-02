@@ -76,7 +76,9 @@
     "Take a screenshot into a time stamped unique-named file in the
   same directory as the org-buffer and insert a link to this file."
     (interactive)
-    (org-display-inline-images)
+    ;; org-display-inline-images は Org 9.8 で org-link-preview-region に
+    ;; 改名された。引数リストは同じ (&optional include-linked refresh beg end)。
+    (org-link-preview-region)
     ;; filename はグローバル変数に代入されていた (let 束縛が無かった)
     (let ((filename
            (concat

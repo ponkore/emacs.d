@@ -236,6 +236,26 @@
 | ~~J-11~~ | ~~`auto-save-list-file-name` / `auto-save-list-file-prefix` の設定が 2 ブロックに重複~~ |
 | ~~J-12~~ | ~~`shell-file-name` を Windows で `bash.exe` に変更 — `call-process-shell-command` を使う一部パッケージが壊れる可能性あり。`explicit-shell-file-name` のみに留める案~~ |
 
+### 2.11 バイトコンパイル検証で新たに検出したもの（2026-09-02）
+
+`user-lisp/` 自体はバイトコンパイルしない方針だが（4 章 3-5 参照）、警告の検出
+だけを目的に `byte-compile-dest-file-function` で `.elc` を作業ディレクトリへ
+逃がしてコンパイルすると、57 件の警告が出た。うち 38 件（`not known to be
+defined` 26 件、`might not be defined at runtime` 12 件）は遅延ロードする
+パッケージの関数をコンパイル時に知らないだけで、消すには全関数に
+`declare-function` を書き並べる必要があり割に合わない。**この 38 件は許容する。**
+
+残りのうち obsolete な API の 3 件（`diff-auto-refine-mode` /
+`csharp-ts-mode-indent-offset` / `org-display-inline-images`）は対処済み。
+以下が残件。
+
+| # | 深刻度 | 箇所 | 内容 |
+|---|---|---|---|
+| K-1 | 中 | my-appearance.el / my-platform.el | 自由変数 5 件。`my:buffer-encoding`（390 行）、`doom-modeline-buffer-encoding`（392 行）、`doom-modeline--eglot`（453 行）、`mac-option-modifier` / `mac-command-modifier`（my-platform.el 83-84 行）→ `defvar` 宣言か `with-suppressed-warnings` |
+| K-2 | 低 | 5 ファイル | docstring 80 桁超 6 件（my-dired.el:67 / my-editor.el:131 / my-lsp.el:108 / my-project.el:20 / my-text.el:246）と、docstring 内の未エスケープのシングルクォート 1 件（my-appearance.el:18） |
+| K-3 | 中 | my-lang-misc.el:126 | `Package cl is deprecated`。`(require 'cl)` を `cl-lib` へ |
+| K-4 | 低 | site-lisp | `mayu-mode.el` / `visual-basic-mode.el` に `lexical-binding` cookie が無い。`visual-basic-mode.el` は `case`（27.1 で obsolete）も使用。ベンダコードなので上流待ちか、こちらで手当てするかの判断が要る |
+
 ---
 
 ## 3. 意思決定ポイント（実装前に確認したいこと）
@@ -359,7 +379,7 @@
 | ~~3-2~~ | ~~`user-lisp/` を作成し、**1 ファイルずつ**切り出す。各ファイル先頭に `;;; -*- lexical-binding: t -*-` とファイルヘッダ、末尾に `(provide 'my-xxx)`~~ | ~~各ファイルが単体でバイトコンパイル可能~~ |
 | ~~3-3~~ | ~~`init.el` に `(require 'my-xxx)` を**依存順**に並べる（core → platform → japanese → appearance → editor → …）~~ | ~~起動する~~ |
 | ~~3-4~~ | ~~1 ファイル切り出すごとに起動確認 + 警告比較~~ | ~~退行なし~~ |
-| 3-5 | 全モジュールで `C-u M-x prepare-user-lisp` を実行し、**バイトコンパイル警告をゼロにする** | 警告ゼロ |
+| 3-5 | ~~全モジュールで `C-u M-x prepare-user-lisp` を実行し、**バイトコンパイル警告をゼロにする**~~ **検証目的でコンパイルし、実害のある警告をゼロにする**（`user-lisp/` はバイトコンパイルしない方針を採ったため、当初の条件は達成不能。`byte-compile-dest-file-function` で `.elc` を作業ディレクトリへ逃がして警告だけ採る） | ~~警告ゼロ~~ 遅延ロード由来の 38 件は許容。obsolete 3 件は解消済み、残りは 2.11 の K-1〜K-4 |
 | ~~3-6~~ | ~~相互依存が発生した箇所を整理（`with-eval-after-load` / `:after` で解決し、`require` の循環を作らない）~~ | ~~循環なし~~ |
 | 3-7 | 起動時間を再計測しフェーズ 0 と比較 | 悪化していない（改善が期待される） |
 | ~~3-8~~ | ~~`CLAUDE.md` を新構成に合わせて更新~~ | ~~ドキュメント整合~~ |
