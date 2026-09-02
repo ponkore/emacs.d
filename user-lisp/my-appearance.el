@@ -192,11 +192,35 @@
   (nerd-icons-completion-mode)
   (add-hook 'marginalia-mode-hook #'nerd-icons-completion-marginalia-setup))
 
-;;; [3] Mac用
+;;; [3] フレームの位置とサイズ
 
 ;; 注意: default-frame-alist は early-init.el でも設定している
 ;; (ツールバー等の非表示)。setq で丸ごと上書きするとそれが消えるため、
 ;; 以下ではいずれも append で既存の値を残している。
+
+;; 計画書の G-8。固定ピクセル値・固定桁数だとモニタ構成に依存する。
+;; 作業領域 (タスクバーなどを除いた実際に使える領域) に対する割合から求める。
+;;
+;; display-monitor-attributes-list の先頭がプライマリモニタ (docstring に
+;; "The first element corresponds to the primary monitor" とある)。
+;; frame-char-width / -height は setup-font でフォントを設定したあとに
+;; 評価する必要があるが、この節はフォント設定より後ろにあるので満たしている。
+;;
+;; tty では initial-frame-alist が使われないうえ workarea も当てにならないので
+;; nil を返す。呼び出し側は従来の固定値にフォールバックする。
+(defun my:frame-geometry-by-ratio (left-ratio width-ratio height-ratio top)
+  "プライマリモニタの作業領域から initial-frame-alist 用の位置とサイズを返す。
+LEFT-RATIO / WIDTH-RATIO は作業領域の横幅に対する割合、HEIGHT-RATIO は
+縦幅に対する割合。TOP だけは画面サイズによらず一定でよいので値をそのまま使う。"
+  (when (display-graphic-p)
+    (pcase-let ((`(,_ ,_ ,area-width ,area-height)
+                 (alist-get 'workarea (car (display-monitor-attributes-list)))))
+      `((top . ,top)
+        (left . ,(round (* area-width left-ratio)))
+        (width . ,(/ (round (* area-width width-ratio)) (frame-char-width)))
+        (height . ,(/ (round (* area-height height-ratio)) (frame-char-height)))))))
+
+;;; [3] Mac用
 
 ;; 疑似パッケージなので use-package の名前は emacs にする。
 (use-package emacs
@@ -220,16 +244,16 @@
 (use-package emacs
   :if (eq system-type 'windows-nt)
   :config
+  ;; 割合は従来の見た目に合わせてある。作業領域 2560x1392 のとき
+  ;;   left 666 / width 144 桁 / height 51 行 (従来 670 / 136 / 50)。
   (setq initial-frame-alist
         (append
          ;; ns-transparent-titlebar は macOS 専用パラメータなので削除した
          '((vertical-scroll-bars . nil) ;; スクロールバーを消す
-           (internal-border-width . 0)
-           ;; position
-           (top . 40)
-           (left . 670)
-           (width . 136)
-           (height . 50))
+           (internal-border-width . 0))
+         ;; position / size
+         (or (my:frame-geometry-by-ratio 0.26 0.45 0.70 40)
+             '((top . 40) (left . 670) (width . 136) (height . 50)))
          initial-frame-alist))
   (setq default-frame-alist (append initial-frame-alist default-frame-alist)))
 

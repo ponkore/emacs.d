@@ -183,7 +183,7 @@
 | ~~G-5~~ | ~~open-junk-file~~ | ~~`"~/Library/CloudStorage/Dropbox-個人用/junk/..."` — **macOS 専用パス**。Windows で `C-x j` が壊れる~~ |
 | ~~G-6~~ | ~~SQL~~ | ~~`"c:/Apps/Oracle/sqlplus.exe"` / `~/Applications/Oracle/instantclient_10_2`~~（SQL\*Plus を使わなくなったため、パスの解消ではなく `oracle-settings` ごと削除。`sql-product` は `postgres` のまま） |
 | ~~G-7~~ | ~~swift~~ | ~~`lsp-sourcekit-executable` が Xcode 固定パス~~ |
-| G-8 | フレーム | `initial-frame-alist` の `(left . 670)` `(width . 136)` — モニタ構成依存 |
+| ~~G-8~~ | ~~フレーム~~ | ~~`initial-frame-alist` の `(left . 670)` `(width . 136)` — モニタ構成依存~~（Windows 分を作業領域に対する割合で算出する `my:frame-geometry-by-ratio` に置き換え。macOS / Linux ブロックは固定値のまま — 実機で確認できないため未着手） |
 
 ### 2.8 Linux 未対応
 
