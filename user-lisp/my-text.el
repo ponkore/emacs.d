@@ -89,6 +89,8 @@
       (unless (file-exists-p (file-name-directory filename))
         (make-directory (file-name-directory filename)))
       ;; take screenshot
+      ;; 対象は windows-nt / darwin / gnu/linux の 3 つ (計画書の L-2)。
+      ;; berkeley-unix などはこの設定の対象外なので t の節は置かない。
       (cond
        ((eq system-type 'darwin)
         (call-process "screencapture" nil nil nil "-i" filename))

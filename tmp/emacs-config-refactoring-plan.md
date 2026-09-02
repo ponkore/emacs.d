@@ -258,6 +258,35 @@ defined` 26 件、`might not be defined at runtime` 12 件）は遅延ロード�
 | ~~K-5~~ | ~~低~~ | ~~site-lisp/mayu-mode.el~~ | ~~`font-lock-function-name-face` / `font-lock-preprocessor-face` が Emacs 31.1 で obsolete な変数になっている（16 / 20 / 24 行）。ただし `(boundp 'font-lock-warning-face)` が偽のときにしか通らない旧 Emacs 向けフォールバック分岐で、実行時には到達しない。クォートしたシンボルに置き換えれば解消する~~（Emacs 31.1 では `font-lock-*-face` 変数はすべて obsolete かつ `boundp` が t で、値は自分自身のシンボル名。フォールバックごと削ってクォートしたシンボルを直接書く形にした） |
 | ~~K-6~~ | ~~低~~ | ~~site-lisp/mayu-mode.el:130~~ | ~~`"Default font-lock-keywords for mayu mode."` が defvar の docstring ではなくバッククォートリストの 7 番目の要素になっている（閉じ括弧の位置が 1 つずれている）。結果として変数に docstring が無く、この文字列が font-lock のマッチャ（正規表現）として登録されている。実害はほぼ無いが誤り~~（閉じ括弧を直して docstring 位置に戻した。要素数 7 → 6、docstring nil → 本文。1〜6 番目の要素は不変） |
 
+### 2.12 他 OS 向けの静的洗い出し（2026-09-02、3-9 の代替）
+
+macOS / Linux の実機が無いため 3-9 の起動確認は行えない。`system-type` を偽装した
+起動も試したが、straight がビルド情報を `system-type` 込みで持つため全パッケージの
+再ビルドが走ってしまい成立しなかった（実際に一度壊して復旧させた）。そこで
+`system-type` / `window-system` の全分岐、直書きパス、外部コマンド依存を静的に
+洗い出した。
+
+対象プラットフォームは **`windows-nt` / `darwin` / `gnu/linux` の 3 つ**に確定させる。
+
+| # | 深刻度 | 箇所 | 内容 |
+|---|---|---|---|
+| L-1 | 中 | my-japanese.el:145-150 | `default-process-coding-system` の分岐が `darwin` と `windows-nt` のみで Linux 分岐が無い。外部プロセスとの日本語受け渡しが既定任せになる。**Linux 実機で確認しながら対応するため当面保留** |
+| ~~L-2~~ | ~~低~~ | ~~my-text.el:92-105~~ | ~~`my:org-screenshot` の `cond` に `t` のフォールバックが無く、`berkeley-unix` では何も起きない~~（対象を 3 プラットフォームに確定させ、その旨をコメントで明示。`t` の節は置かない） |
+| ~~L-3~~ | ~~中~~ | ~~my-appearance.el:113-144~~ | ~~`setup-font` の macOS 分岐が `HackGen` 決め打ちで存在チェック無し。Linux 分岐は代替フォントを探すが見つからなければ無警告でフォント未設定~~（全環境 HackGen 前提に統一し、`font-family-list` に無ければ `display-warning` で `*Warnings*` に残すようにした。`set-face-attribute` / `set-fontset-font` は存在しないファミリでもエラーにならないため、警告が無いと気付けない） |
+| ~~L-4~~ | ~~低~~ | ~~my-appearance.el:265 / my-shell.el:64~~ | ~~`berkeley-unix` の扱いが不統一。フレーム設定と `exec-path-from-shell` の 2 箇所だけで、他は考慮外~~（`berkeley-unix` の分岐を削除。対象を 3 プラットフォームに揃えた） |
+
+以下は洗い出しの結果「問題なし」と判断したもの。
+
+- 実害なし（他 OS では単にマッチしない）: `my-editor.el:120-122` の `recentf-exclude` の
+  `r:/` `s:/` `p:/`、`my-text.el:241-243` の Typora のパス一覧（`file-executable-p` で
+  存在チェック済み）、`my-lsp.el:71-74` の sourcekit-lsp（`darwin` のときだけ Xcode 内を
+  見て、他は PATH 検索にフォールバック）
+- 外部コマンドは `cmigemo` / `rg` / `ag` / `pandoc-crossref` / `eslint` / `sbcl` / `ccl` /
+  `git` / `bash` / `pwsh` がいずれも `executable-find` でガード済み
+- プラットフォーム固有シンボル（`w32-*` / `mac-*`）は `system-type` ガード、`fboundp`
+  チェック、値なし `defvar` 宣言のいずれかの中にある
+- `lein.bat` は `windows-nt` 限定。他 OS は cider 既定の `lein`
+
 ---
 
 ## 3. 意思決定ポイント（実装前に確認したいこと）
@@ -385,7 +414,7 @@ defined` 26 件、`might not be defined at runtime` 12 件）は遅延ロード�
 | ~~3-6~~ | ~~相互依存が発生した箇所を整理（`with-eval-after-load` / `:after` で解決し、`require` の循環を作らない）~~ | ~~循環なし~~ |
 | ~~3-7~~ | ~~起動時間を再計測しフェーズ 0 と比較~~ | ~~悪化していない（改善が期待される）~~（2026-09-02 実測: 中央値 0.967 秒。暫定基準 1250ms に対し約 280ms 改善） |
 | ~~3-8~~ | ~~`CLAUDE.md` を新構成に合わせて更新~~ | ~~ドキュメント整合~~ |
-| 3-9 | macOS / Linux での起動確認（可能なら） | 各 OS で起動 |
+| 3-9 | macOS / Linux での起動確認（可能なら） | 各 OS で起動（実機が無いため未実施。代替として 2.12 に静的な洗い出しを行い L-2 / L-3 / L-4 を解消、L-1 は Linux 実機で対応する方針） |
 | ~~3-10~~ | ~~`master` へマージ~~ | — |
 
 ---

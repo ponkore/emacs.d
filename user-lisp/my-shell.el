@@ -61,7 +61,8 @@ UTF-8 固定・starship・OSC 7 の設定が入っている。")
   :straight t
   ;; macOS 限定だったが、Linux でも GUI 起動時はログインシェルの
   ;; 環境変数を引き継がないため必要になる。
-  :if (memq system-type '(darwin gnu/linux berkeley-unix))
+  ;; berkeley-unix (FreeBSD) は対象外にした (計画書の L-4)
+  :if (memq system-type '(darwin gnu/linux))
   :config
   (exec-path-from-shell-initialize))
 

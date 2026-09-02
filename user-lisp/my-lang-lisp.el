@@ -114,7 +114,33 @@
 ;; lisp
 ;;
 (use-package slime
-  :straight t
+  ;; MELPA の既定レシピに contrib/slime-xterm-color.el の除外を足したもの。
+  ;;
+  ;; あのファイルはトップレベルで
+  ;;   (if (< emacs-major-version 29)
+  ;;       (require 'xterm-color)
+  ;;     (use-package xterm-color :ensure t))
+  ;; と書いている。use-package はマクロなのでバイトコンパイル時に展開され、
+  ;; :ensure t がその場で package-install を走らせる。この設定は package.el を
+  ;; 無効化していてアーカイブ情報も無いため、ELPA への接続待ちで固まり、
+  ;; slime のビルドが終わらなくなる (contrib の .elc が 1 つだけ生成されない)。
+  ;;
+  ;; slime-xterm-color は slime-fancy にも slime.el にも参照が無いオプトインの
+  ;; contrib で、下の slime-setup でも使っていないため除外して問題ない。
+  :straight (slime
+             :type git :host github :repo "slime/slime"
+             :files ("*.el"
+                     ("lib" "lib/hyperspec.el")
+                     "swank"
+                     "*.lisp"
+                     "*.asd"
+                     "doc/slime.texi"
+                     "doc/slime.info"
+                     "doc/dir"
+                     "ChangeLog"
+                     ("contrib" "contrib/*")
+                     (:exclude "contrib/test" "contrib/Makefile"
+                               "contrib/slime-xterm-color.el")))
   :commands slime-setup
   :custom
   ;; roswell が無い環境では (concat nil " run") がエラーにならず " run" という

@@ -112,25 +112,35 @@
 
   (defun setup-font ()
     (interactive)
-    ;; 以前は ns / w32 しか分岐が無く、Linux (x / pgtk) では
-    ;; フォントが一切設定されなかった。
-    (pcase window-system
-      ('ns  (emacs-font-setting "HackGen" 16))   ;; previous: "Ricty"
-      ;; 11.6 -> :height 116。12 (=120) だと HackGen の全角の送り幅が 17px、
-      ;; 半角 8px の 2 倍 (16px) と 1px ずれて桁が揃わない。実測:
-      ;;   height 110/113/116 -> 半角 8 / 全角 16  (一致)
-      ;;   height 120/124     -> 半角 8 / 全角 17  (ずれ)
-      ;;   height 128/130     -> 半角 9 / 全角 18  (一致)
-      ;; 116 なら半角幅を変えずにずれだけ解消できる。
-      ;; なお ASCII と日本語が同じフォントなので face-font-rescale-alist では
-      ;; 直せない (両方が同じ比率で縮むため)。
-      ('w32 (emacs-font-setting "HackGen" 11.6)) ;; previous: ("HackGenNerd" 11)
-      ((or 'x 'pgtk)
-       ;; Linux では入っているものを順に探す
-       (let ((family (seq-find (lambda (f) (member f (font-family-list)))
-                               '("HackGen" "HackGenNerd" "Ricty"
-                                 "Noto Sans Mono CJK JP" "DejaVu Sans Mono"))))
-         (when family (emacs-font-setting family 12))))))
+    ;; 以前は ns / w32 しか分岐が無く、Linux (x / pgtk) ではフォントが一切
+    ;; 設定されなかった。さらに Linux だけ HackGen が無ければ HackGenNerd /
+    ;; Ricty / Noto / DejaVu と順に探す作りだったが、全環境に HackGen を入れる
+    ;; 前提に揃えた (計画書の L-3)。プラットフォームで変えるのはサイズだけ。
+    ;;
+    ;; 11.6 -> :height 116。12 (=120) だと HackGen の全角の送り幅が 17px、
+    ;; 半角 8px の 2 倍 (16px) と 1px ずれて桁が揃わない。実測:
+    ;;   height 110/113/116 -> 半角 8 / 全角 16  (一致)
+    ;;   height 120/124     -> 半角 8 / 全角 17  (ずれ)
+    ;;   height 128/130     -> 半角 9 / 全角 18  (一致)
+    ;; 116 なら半角幅を変えずにずれだけ解消できる。
+    ;; なお ASCII と日本語が同じフォントなので face-font-rescale-alist では
+    ;; 直せない (両方が同じ比率で縮むため)。
+    (let ((family "HackGen")
+          (size (pcase window-system
+                  ('ns  16)     ;; previous: "Ricty"
+                  ('w32 11.6)   ;; previous: ("HackGenNerd" 11)
+                  ((or 'x 'pgtk) 12))))
+      (when size
+        ;; set-face-attribute も set-fontset-font も、存在しないファミリを
+        ;; 渡してもエラーにならず黙って既定フォントに落ちる (実測で確認)。
+        ;; 気付けるように *Warnings* に残す。
+        (unless (member family (font-family-list))
+          (display-warning
+           'my:font
+           (format "%s が見つかりません。日本語の桁揃えが崩れます。 https://github.com/yuru7/HackGen"
+                   family)
+           :warning))
+        (emacs-font-setting family size))))
   (setup-font))
 
 ;;; [3] text-scale
@@ -261,8 +271,11 @@ LEFT-RATIO / WIDTH-RATIO は作業領域の横幅に対する割合、HEIGHT-RAT
 
 ;; 疑似パッケージなので use-package の名前は emacs にする。
 (use-package emacs
-  ;; これまで Linux の分岐が無く default-frame-alist が未設定だった
-  :if (memq system-type '(gnu/linux berkeley-unix))
+  ;; これまで Linux の分岐が無く default-frame-alist が未設定だった。
+  ;; berkeley-unix (FreeBSD) は対象外にした (計画書の L-4)。実機が無く
+  ;; 検証できないものを片手間に足しても意味が無いため、対象は
+  ;; windows-nt / darwin / gnu/linux の 3 つに揃える。
+  :if (eq system-type 'gnu/linux)
   :config
   (setq initial-frame-alist
         (append
