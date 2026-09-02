@@ -34,3 +34,6 @@
 /user-lisp-autoloads.el
 /tree-sitter/
 /intelephense/
+
+# --- magit-gitd (2026-09) ---
+/gitd/target/

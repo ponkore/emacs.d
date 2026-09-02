@@ -1,0 +1,18 @@
+[package]
+name = "magit-gitd"
+version = "0.1.0"
+edition = "2021"
+description = "Emacs の magit から git の実行を肩代わりする常駐プロセス"
+publish = false
+
+[[bin]]
+name = "magit-gitd"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = 2
+strip = true

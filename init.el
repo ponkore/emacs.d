@@ -167,6 +167,7 @@
 (require 'my-fileformat)   ; 特定ファイルフォーマット
 (require 'my-project)   ; プロジェクト管理 (projectile)
 (require 'my-vc)   ; 構成管理 (magit / git-gutter / SVN)
+(require 'my-gitd)   ; magit の git 実行を常駐プロセスに肩代わりさせる
 (require 'my-shell)   ; Shell 関連
 (require 'my-utils)   ; ユーティリティ
 (require 'my-platform)   ; OS 固有設定 (Windows / macOS)
