@@ -25,9 +25,11 @@ Windows（主）、macOS、Linux 向けの個人 Emacs 設定リポジトリ。E
   5. `(prepare-user-lisp ...)`
   6. `custom.el` の読み込み
   7. `user-lisp/` 各モジュールの `require`（順序は分割前の記述順のまま）
-- `user-lisp/` — 設定本体。20 モジュールに分割（下記）
+- `user-lisp/` — 設定本体。21 モジュールに分割（下記）
 - `custom.el` — `customize` が自動生成するファイル
 - `site-lisp/` — パッケージマネージャで入手できないローカルベンダの Emacs Lisp
+- `gitd/` — magit の git 実行を肩代わりする常駐プロセス（Rust）。
+  ソースは管理下、`gitd/target/` は git 管理外で各マシンでビルドする（後述）
 - `docs/archive-init.org` — Org 方式だった頃の設定（履歴として保存）
 - `docs/extract.el`, `docs/verify.el`, `docs/split.py`, `docs/verify-split.el` —
   Org からの抽出・分割に使った検証スクリプト（等価性の証跡）
@@ -87,6 +89,7 @@ Emacs 31.1 の `user-lisp/` は、既定では `package-activate-all` の直後�
 | `my-fileformat` | yaml、diff、log4j、Dockerfile、vimrc、mayu |
 | `my-project` | projectile（プレフィックス: `C-c p`） |
 | `my-vc` | magit、diff-hl（`C-c g` の hydra）、Windows の SVN 対応 |
+| `my-gitd` | magit の同期 git 実行を常駐プロセス（`gitd/`）に肩代わりさせる。Windows のみ |
 | `my-shell` | exec-path-from-shell、Windows 用 shell 設定 |
 | `my-utils` | calendar、open-junk-file、grep/ripgrep、blog 用ヘルパ |
 | `my-platform` | Windows / macOS 固有設定 |
@@ -654,6 +657,125 @@ org バッファを保存すると（`after-save-hook`）、`_assets/` がある
 `my:org-assets-inhibit-check` を束縛し、その間はチェックごと飛ばす。
 手で `M-x org-save-all-org-buffers` したときも同じく黙って保存する。
 
+## magit の高速化 (`gitd/` + `my-gitd.el`)
+
+magit のリフレッシュが遅い原因は **git ではなく Emacs のプロセス生成コスト**。
+`user-lisp/my-gitd.el` が `magit-process-file` に `:around` を張り、
+Rust の常駐プロセス（`gitd/`）に git の実行を肩代わりさせる。
+
+計画と実測は `tmp/magit-auto-refresh-plan.md` と `tmp/magit-gitd-2a-design.md`。
+
+### 遅さの原因（2026-09 実測）
+
+**同じ `cmd.exe` を起動するのに PowerShell が約 20 ms、Emacs の
+`call-process` は 59〜76 ms**（3 回反復して再現を確認）。約 40 ms が
+Emacs 側のプロセス生成経路のコストで、git にも Defender にも由来しない。
+
+| | |
+|---|---|
+| `magit-refresh-buffer` 1 回 | 1669 ms / **git 呼び出し 29 回** |
+| → 1 回あたり | 56〜58 ms |
+
+**時間は呼び出し回数に完全に線形。** リポジトリの規模にほぼ依存しない固定コスト。
+
+効かなかった対策（試して確認済み。もう一度試さないこと）:
+
+- Defender 除外 — git 固有のコストではないので効かない
+- `core.fsmonitor` — 走査時間は減るがプロセス生成コストは変わらない
+- `cmd/git.exe` ラッパの回避 — **magit は既に回避済み**。
+  `magit-git-executable` の defcustom が Windows では cygpath 経由で
+  `mingw64/libexec/git-core/git.exe` を解決する。PowerShell では 47→39 ms と
+  効くが、Emacs の 55 ms に埋もれて有意差なし
+- `magit-status-sections-hook` の削減 — 16→6 で 1669→1001 ms。表示を
+  犠牲にする割に効かない
+
+### 効果
+
+| `magit-refresh-buffer` | 時間 | Emacs からの git 起動 |
+|---|---|---|
+| デーモン無効 | 1455 / 1469 ms | 29 回 |
+| デーモン有効 | 748 / 557 / 639 ms | **0 回** |
+
+Rust の `Command` からの spawn は 28.9 ms（`git status -z --porcelain`）で
+Emacs の約半分。stdio の往復は **0.13 ms** で無視できる。
+
+### ビルド
+
+`tree-sitter/` の文法と同じ扱い。**ソースは git 管理下、`gitd/target/` は
+`.gitignore`** して各マシンで作る。
+
+```
+M-x my:gitd-build     ; cargo build --release
+M-x my:gitd-stats     ; 経由回数 / フォールバック数 / 累計短縮時間
+M-x my:gitd-restart   ; サーキットブレーカが落ちたときの復帰
+(setq my:gitd-verify t)  ; シャドウモード (下記)
+```
+
+**バイナリが無ければ `my:gitd-mode` は何もしない**ので、まだビルドしていない
+マシンでは自動的に従来動作になる。対象は Windows のみ。
+
+### 文字コードの地雷（3 つとも実際に踏んだ）
+
+`my:gitd--to-text` が処理する。**`args` / `cwd` / `program` / `env` の
+全部に適用すること。**
+
+1. **`process-environment` に JSON に載らない項目がある。**
+   `PSModulePath` が OneDrive の「ドキュメント」を ANSI の生バイトのまま
+   含んでおり `json-serialize` が `wrong-type-argument json-value-p` で落ちる。
+   **PowerShell から Emacs を起動したときだけ再現する**（bash 経由では出ない）
+2. **復号に `locale-coding-system` を使うと直らない。**
+   あれは**コンソールの**コードページで、PowerShell 7 では `cp65001`（UTF-8）。
+   環境変数ブロックは **ANSI コードページ**（`w32-ansi-code-page` = 932）で別物。
+   UTF-8 として復号すると生バイトが eight-bit 文字のまま残り、やはり載らない
+3. **引数も ANSI に encode されている。**
+   `magit-process-git-arguments` が意図的にやっている（Emacs の `call-process`
+   が ANSI API を使うため。magit issue #3250）。デーモン境界で復号し直す。
+   Rust はワイド API で起動するので、cp932 に無い文字ではむしろ改善になる
+
+### `magit-process-file` を横取りするときの注意
+
+同期読み取りは全部この関数を通るので差し込みは 1 箇所で足りる。ただし:
+
+- **`BUFFER` に整数（`0`）が来る。** `magit-run-gitk` が使う
+  「非同期・出力破棄」の意味。同期実行すると **gitk のウィンドウを閉じるまで
+  Emacs が固まる**。必ず弾くこと
+- `magit-run-gitk*` は `magit-gitk-executable`、`magit-patch-id` は
+  `shell-file-name` を渡してくる。`(equal program (magit-git-executable))` で弾く
+- 実際に来る `BUFFER` は `nil` / `(t nil)` / `(t "FILE")` / バッファ の 4 形態。
+  それ以外は素通し（default deny）
+- デコードは `(car (magit--process-coding-system))`（実測で `utf-8-unix`）。
+  **値を決め打ちせず必ずこの関数から取る**
+- `magit-run-git-with-input` は `call-process-region` を使うので通らない。
+  `magit-start-process`（非同期）も無関係
+
+### 安全側の作り
+
+- **タイムアウトを設けない。** 素の `process-file` にも無いので、挙動を
+  変えないことが最も安全。`jsonrpc-request` は `:timeout nil` でタイマーが
+  完全に無効になり、待ちは `accept-process-output` なので `C-g` で抜けられる
+- **フォールバック。** バイナリが無い / デーモンが死んだ / 形態が未知なら
+  黙って素の `process-file` に戻る。3 回続けて失敗したらそのセッションでは使わない
+- **二重実行の防止。** デーモンが応答前に死ぬと git が既に走ったかは分からない。
+  読み取り専用なら再実行してよいが、それ以外は再実行せずエラーを返す
+  （`git add` を 2 回走らせない）
+
+### 検証はシャドウモードで
+
+`(setq my:gitd-verify t)` にすると、読み取り専用コマンドを**デーモン経由と
+素の `process-file` の両方で実行してバイト単位で比較**する。差異は
+`*gitd verify*` に記録される。この設計で唯一こわいのは「静かに壊れる」ことなので、
+**壊れていないことを実使用で証明する**のがこの機能の役目。遅くなるので常用はしない。
+
+### 次の段階
+
+現状は**段階 2a（素通しプロキシ）**。キャッシュも先読みもファイル監視もしない。
+
+- 段階 1: 自動リフレッシュ。`w32notify-add-watch` は `subtree` フラグで
+  再帰監視できる（**`filenotify.el` の `file-notify-add-watch` はこれを
+  渡していない**ので、汎用 API 経由では非再帰になる）
+- 段階 2b: キャッシュ + 並列先読み。Rust で 8 並列にすると 29 コマンドが
+  180 ms で終わるので、監視と組み合わせれば体感を数十 ms にできる
+
 ## モードライン (doom-modeline)
 
 背景色は **modus のパレット上書き**で指定する。Emacs 29 以降 `mode-line` とは
@@ -712,6 +834,26 @@ emacs --batch --debug-init -l early-init.el -l init.el --eval '(message "OK")'
 
 ## 既知の課題（未対応）
 
-現在なし。2026-08 の一連の整理で、棚卸し時に挙げた課題はすべて解消した。
-
 新しく気づいたことはこの節に追記する。
+
+### `my-gitd` 経由だと `C-g` で git が止まらない（2026-09、優先度低）
+
+素の `call-process` は `C-g` で子プロセスを kill するが、デーモン経由では
+git が走り切る。書き込みの途中で `C-g` すると「中断したのに実行されている」
+ことになる。対処するなら `$/cancel` 通知を足してデーモン側で子を kill する。
+
+半端に kill された `.git/index` より安全とも言えるので、優先度は低いと判断した。
+
+### `my-gitd` の書き込み経路が実使用でしか検証できていない（2026-09）
+
+シャドウモード（両方実行してバイト比較）は読み取り専用コマンドにしか使えない。
+書き込みを 2 回走らせるわけにはいかないため。stage / unstage / discard は
+実際に操作して確認するしかない。
+
+### Emacs の `call-process` が Windows で遅い（2026-09、未調査）
+
+同じ `cmd.exe` を起動するのに PowerShell が約 20 ms、Emacs は 59〜76 ms。
+原因は未調査。`my-gitd` はこれを迂回するだけで、直してはいない。
+magit 以外（`vc` / `grep` / `projectile`）にも効いているはずなので、
+原因が分かれば影響範囲は広い。ただし Emacs 本体の問題である可能性が高く、
+手元で解消できる見込みは薄いと考えている。
