@@ -133,7 +133,7 @@
 | ~~C-6~~ | ~~中~~ | ~~scss-mode~~ | ~~`(previous-line)` を Lisp コード中で使用 → コンパイラ警告。`(forward-line -1)` へ~~ |
 | ~~C-7~~ | ~~中~~ | ~~全般~~ | ~~`linum-format` / `linum` face — `linum.el` は Emacs 29 で obsolete。`display-line-numbers` 移行済みなのでデッド設定~~ |
 | ~~C-8~~ | ~~中~~ | ~~dired~~ | ~~`magit-status-internal` — 現行 magit では非公開/変更あり → `magit-status-setup-buffer`~~ |
-| C-9 | 中 | clojure | `define-clojure-indent` は clojure-mode 5.18+ で非推奨 → `put-clojure-indent` / `.dir-locals.el` |
+| ~~C-9~~ | ~~中~~ | ~~clojure~~ | ~~`define-clojure-indent` は clojure-mode 5.18+ で非推奨 → `put-clojure-indent` / `.dir-locals.el`~~（訂正: 5.23.0 でも非推奨ではない。非推奨なのは spec のレガシー形式（整数 / `:defn` / 位置リスト）で clojure-mode 6 で削除予定。`put-clojure-indent` + tuple 形式へ移行） |
 | ~~C-10~~ | ~~中~~ | ~~w32-symlinks~~ | ~~`custom-set-variables` を `:config` 内で使用 → `custom-file` を汚す。`setopt` へ~~ |
 | ~~C-11~~ | ~~低~~ | ~~org-screenshot~~ | ~~`(setq filename ...)` — 未宣言のフリー変数。`let` へ~~ |
 

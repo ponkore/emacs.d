@@ -29,7 +29,6 @@
 ;;
 (use-package clojure-mode
   :straight t
-  :commands define-clojure-indent
   :mode ("\\(default\\|user\\|emacs\\)\\.\\(behaviors\\|keymap\\)" . clojure-mode)
   :hook
   (clojure-mode-hook . yas-minor-mode)
@@ -45,28 +44,36 @@
   ;; 使いたい場合は明示的なレシピ (:straight (cljstyle-format :type git
   ;; :host github :repo "...")) を書いて導入すること。
   :config
-  (define-clojure-indent
-   (defroutes 'defun)
-   (tabular 'defun)
-   (GET 2)
-   (POST 2)
-   (PUT 2)
-   (DELETE 2)
-   (HEAD 2)
-   (ANY 2)
-   (context 2)
-   (componentWillMount 'defun)
-   (componentDidMount 'defun)
-   (componentWillUnmount 'defun)
-   ;; for om.next
-   (ident 'defun)
-   (query 'defun)
-   (params 'defun)
-   (render 'defun)
-   ;;
-   (fact 'defun)
-   (do-transaction 'defun))
-  (eldoc-mode +1)
+  ;; インデント指定 (計画書の C-9)。
+  ;;
+  ;; define-clojure-indent は clojure-mode 5.23.0 でも obsolete ではない
+  ;; (clojure-mode 自身が今も使っている)。ただし put-clojure-indent への薄い
+  ;; ラッパでしかないので、公開 API のほうを直接呼ぶ形にした。
+  ;;
+  ;; 本題は spec の書式のほう。整数・:defn・位置リストというレガシー形式は
+  ;; clojure-mode 6 で削除される予定なので、clojure-ts-mode / cljfmt と共通の
+  ;; tuple 形式に書き換える。(defroutes 'defun) -> ((:inner 0))、
+  ;; (GET 2) -> ((:block 2))。
+  ;;
+  ;; とくに 'defun (クォートしたシンボル) は :defn と違って
+  ;; clojure--indent-spec-to-modern が変換できず、clojure-get-indent-spec が
+  ;; モダン形式として不正な defun をそのまま返していた。インデント自体は
+  ;; レガシーのバックトラックエンジンが defun を :defn と同じに扱うので
+  ;; 動いていたが、その経路が消えれば壊れる。
+  (dolist (sym '(defroutes tabular
+                 componentWillMount componentDidMount componentWillUnmount
+                 ;; for om.next
+                 ident query params render
+                 ;;
+                 fact do-transaction))
+    (put-clojure-indent sym '((:inner 0))))
+  (dolist (sym '(GET POST PUT DELETE HEAD ANY context))
+    (put-clojure-indent sym '((:block 2))))
+  ;; (eldoc-mode +1) は削除した (計画書 F-5 の取りこぼし)。
+  ;; :config のトップレベルなので、clojure-mode がロードされた瞬間の
+  ;; カレントバッファ (Clojure ファイルとは限らない) で eldoc-mode が
+  ;; 有効になっていた。そのうえ global-eldoc-mode が既定で t なので、
+  ;; Clojure バッファの eldoc はもともと有効で効果もない。
   )
 
 (use-package flymake-kondor
