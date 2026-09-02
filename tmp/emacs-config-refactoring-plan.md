@@ -165,7 +165,7 @@
 |---|---|---|
 | ~~F-1~~ | ~~高~~ | ~~`(before-save-hook . prettier-js)` を **グローバル**に登録（tide ブロック内）。全ファイルの保存時に prettier が走る~~ |
 | ~~F-2~~ | ~~高~~ | ~~`(before-save-hook . py-isort-before-save)` も**グローバル**登録~~ |
-| F-3 | 高 | `delete-file-if-no-contents` を `after-save-hook` に**グローバル**登録 — 空で保存したファイルを**問答無用で削除**する。事故リスク |
+| ~~F-3~~ | ~~高~~ | ~~`delete-file-if-no-contents` を `after-save-hook` に**グローバル**登録 — 空で保存したファイルを**問答無用で削除**する。事故リスク~~（グローバル登録は維持し、`y-or-n-p` の確認・ごみ箱経由・narrowing バグ修正で安全化） |
 | F-4 | 中 | `smartparens-global-strict-mode` — strict モードのグローバル適用は強すぎる。Emacs 30+ の `electric-pair-mode` で足りる可能性 |
 | ~~F-5~~ | ~~中~~ | ~~web-mode / scss-mode の `:config` トップレベルで `(prettier-js-mode)` / `(yas-minor-mode)` を呼んでいる → **ロード時のカレントバッファ**に対して実行されてしまう~~ |
 | ~~F-6~~ | ~~中~~ | ~~`elpy-enable` を `:init` で実行 → 起動時に elpy 一式を eager load~~ |

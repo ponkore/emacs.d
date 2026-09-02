@@ -265,12 +265,27 @@
 
 ;;; [3] 保存時バッファ内容が空であればファイルを削除
 
-;; いちいち消すのも面倒なので、内容が 0 ならファイルごと削除する (after-save-hook に以下の関数を追加)
+;; いちいち消すのも面倒なので、内容が 0 ならファイルごと削除する
+;; (after-save-hook に以下の関数を追加)
+;;
+;; 計画書の F-3。対象は全ファイルのままにしたが、3 点を安全側に倒した。
+;;
+;;   - 判定を (= (point-min) (point-max)) から (zerop (buffer-size)) に変えた。
+;;     前者は narrowing の影響を受けるため、中身のあるファイルでも可視領域が
+;;     空になっている状態で保存すると、ファイルごと消えていた。
+;;   - delete-by-moving-to-trash は既定が nil で、その場合 delete-file は
+;;     ゴミ箱を経由せず完全削除になる。この関数の中だけ t に束縛して
+;;     ごみ箱へ送る (Windows では system-move-file-to-trash が使われる)。
+;;   - 削除前に y-or-n-p で確認する。
+;;   - buffer-file-name の nil ガードを足した。
 (defun delete-file-if-no-contents ()
-  (let ((file (buffer-file-name (current-buffer))))
-    (when (= (point-min) (point-max))
-      (delete-file file)
-      (message (concat "File: " file " deleted.")))))
+  (let ((file (buffer-file-name)))
+    (when (and file
+               (zerop (buffer-size))
+               (y-or-n-p (format "空です。%s を削除しますか? " file)))
+      (let ((delete-by-moving-to-trash t))
+        (delete-file file t))
+      (message "Deleted (trash): %s" file))))
 
 ;;; [3] autorevert
 
