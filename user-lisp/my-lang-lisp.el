@@ -32,7 +32,9 @@
   :mode ("\\(default\\|user\\|emacs\\)\\.\\(behaviors\\|keymap\\)" . clojure-mode)
   :hook
   (clojure-mode-hook . yas-minor-mode)
-  (clojure-mode-hook . smartparens-strict-mode)
+  ;; (clojure-mode-hook . smartparens-strict-mode) は my-editor.el の
+  ;; smartparens ブロックへ移した (計画書の F-4)。Lisp 系の strict 指定を
+  ;; 1 箇所にまとめてある。
   ;; (clojure-mode-hook . cljstyle-format-on-save-mode) は削除した。
   ;; cljstyle-format はどのレシピリポジトリにも無く導入されていないのに
   ;; フックに残っていたため、Clojure ファイルを開くたびに

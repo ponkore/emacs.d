@@ -24,13 +24,39 @@
 
 ;;; [3] smartparens
 
+;; 計画書の F-4。以前は emacs-startup-hook で smartparens-global-strict-mode を
+;; 有効にしていた。strict モードは 11 個の編集コマンドを remap する:
+;;   delete-backward-char / backward-delete-char / backward-delete-char-untabify
+;;                                            -> sp-backward-delete-char
+;;   delete-char / delete-forward-char        -> sp-delete-char
+;;   kill-line                                -> sp-kill-hybrid-sexp
+;;   kill-whole-line                          -> sp-kill-whole-line
+;;   kill-region / delete-region              -> sp-kill-region / sp-delete-region
+;;   kill-word / backward-kill-word           -> sp-kill-word / sp-backward-kill-word
+;; これがグローバルにかかるため、org や markdown や shell のバッファでも
+;; C-h / C-d / C-k / C-w / M-d / M-DEL が「括弧の対応を壊す削除を拒否する」版に
+;; 置き換わっていた。括弧の釣り合いが意味を持つのは Lisp 系だけなので、
+;; ペアの自動挿入 (smartparens-global-mode) は全体に残し、strict は Lisp 系の
+;; メジャーモードだけに絞る。
 (use-package smartparens
   :straight t
   :diminish
   ;; leaf の :require smartparens-config 相当。smartparens-config は
   ;; 既定のペア定義を入れるもので、smartparens をロードしてから読む。
   :demand t
-  :hook (emacs-startup-hook . smartparens-global-strict-mode)
+  :hook
+  (emacs-startup-hook . smartparens-global-mode)
+  ;; Lisp 系の strict はここに集約する (clojure-mode の指定も my-lang-lisp.el
+  ;; から移した)。REPL 側も対象にしないと、以前グローバルで効いていたぶんが
+  ;; 落ちてしまうので含める。
+  ((emacs-lisp-mode-hook
+    lisp-interaction-mode-hook
+    lisp-mode-hook
+    inferior-emacs-lisp-mode-hook
+    clojure-mode-hook
+    cider-repl-mode-hook
+    slime-repl-mode-hook)
+   . smartparens-strict-mode)
   :config
   (require 'smartparens-config))
 
