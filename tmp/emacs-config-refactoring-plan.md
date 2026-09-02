@@ -251,8 +251,8 @@ defined` 26 件、`might not be defined at runtime` 12 件）は遅延ロード�
 
 | # | 深刻度 | 箇所 | 内容 |
 |---|---|---|---|
-| K-1 | 中 | my-appearance.el / my-platform.el | 自由変数 5 件。`my:buffer-encoding`（390 行）、`doom-modeline-buffer-encoding`（392 行）、`doom-modeline--eglot`（453 行）、`mac-option-modifier` / `mac-command-modifier`（my-platform.el 83-84 行）→ `defvar` 宣言か `with-suppressed-warnings` |
-| K-2 | 低 | 5 ファイル | docstring 80 桁超 6 件（my-dired.el:67 / my-editor.el:131 / my-lsp.el:108 / my-project.el:20 / my-text.el:246）と、docstring 内の未エスケープのシングルクォート 1 件（my-appearance.el:18） |
+| ~~K-1~~ | ~~中~~ | ~~my-appearance.el / my-platform.el~~ | ~~自由変数 5 件。`my:buffer-encoding`（390 行）、`doom-modeline-buffer-encoding`（392 行）、`doom-modeline--eglot`（453 行）、`mac-option-modifier` / `mac-command-modifier`（my-platform.el 83-84 行）→ `defvar` 宣言か `with-suppressed-warnings`~~（うち doom-modeline の 3 件は batch 検証の副産物だった。doom-modeline は `:if window-system` のため batch では straight に登録されず load-path にも無く、`doom-modeline-def-segment` がマクロとして認識されないためで、GUI で計測すると出ない。残る macOS 専用の 2 件を値なし `defvar` の宣言で解消） |
+| K-2 | 低 | 5 ファイル | docstring 80 桁超 6 件（my-dired.el:67 / my-editor.el:131 / my-lsp.el:108（2 件）/ my-project.el:20 / my-text.el:248）と、docstring 内の未エスケープのシングルクォート 1 件（my-appearance.el:18） |
 | ~~K-3~~ | ~~中~~ | ~~my-lang-misc.el:126~~ | ~~`Package cl is deprecated`。`(require 'cl)` を `cl-lib` へ~~（真の出所は `site-lisp/visual-basic-mode.el:200`。use-package がコンパイル時に require するため行番号が `my-lang-misc.el:126` に出ていた。`cl-lib` + `cl-case` に変更して解消。残った 1 件は `adoc-mode`（`straight/build/` 配下・上流のコード）由来だったが、ほとんど使わなくなっていたため adoc-mode ごと削除して解消） |
 | K-4 | 低 | site-lisp | `mayu-mode.el` / `visual-basic-mode.el` に `lexical-binding` cookie が無い。~~`visual-basic-mode.el` は `case`（27.1 で obsolete）も使用。~~（`case` は K-3 で `cl-case` に解消済み）ベンダコードだが `site-lisp/` は既にローカル改変している（`c54b21f` で `flet`→`cl-flet`）ので手当ては可能。ただし 1990 年代のコードを lexical binding にするのは動的束縛の見直しが要る |
 
@@ -379,7 +379,7 @@ defined` 26 件、`might not be defined at runtime` 12 件）は遅延ロード�
 | ~~3-2~~ | ~~`user-lisp/` を作成し、**1 ファイルずつ**切り出す。各ファイル先頭に `;;; -*- lexical-binding: t -*-` とファイルヘッダ、末尾に `(provide 'my-xxx)`~~ | ~~各ファイルが単体でバイトコンパイル可能~~ |
 | ~~3-3~~ | ~~`init.el` に `(require 'my-xxx)` を**依存順**に並べる（core → platform → japanese → appearance → editor → …）~~ | ~~起動する~~ |
 | ~~3-4~~ | ~~1 ファイル切り出すごとに起動確認 + 警告比較~~ | ~~退行なし~~ |
-| 3-5 | ~~全モジュールで `C-u M-x prepare-user-lisp` を実行し、**バイトコンパイル警告をゼロにする**~~ **検証目的でコンパイルし、実害のある警告をゼロにする**（`user-lisp/` はバイトコンパイルしない方針を採ったため、当初の条件は達成不能。`byte-compile-dest-file-function` で `.elc` を作業ディレクトリへ逃がして警告だけ採る） | ~~警告ゼロ~~ 遅延ロード由来の 38 件は許容。obsolete 3 件は解消済み、残りは 2.11 の K-1〜K-4 |
+| 3-5 | ~~全モジュールで `C-u M-x prepare-user-lisp` を実行し、**バイトコンパイル警告をゼロにする**~~ **検証目的でコンパイルし、実害のある警告をゼロにする**（`user-lisp/` はバイトコンパイルしない方針を採ったため、当初の条件は達成不能。`byte-compile-dest-file-function` で `.elc` を作業ディレクトリへ逃がして警告だけ採る。**計測は GUI で行うこと** — batch では `:if window-system` のパッケージが straight に登録されず load-path にも無いため、それらのマクロが未定義になって実在しない警告が大量に出る。実測で batch 52 件 / GUI 43 件） | ~~警告ゼロ~~ 遅延ロード由来の 38 件は許容。obsolete 3 件は解消済み、残りは 2.11 の K-1〜K-4 |
 | ~~3-6~~ | ~~相互依存が発生した箇所を整理（`with-eval-after-load` / `:after` で解決し、`require` の循環を作らない）~~ | ~~循環なし~~ |
 | ~~3-7~~ | ~~起動時間を再計測しフェーズ 0 と比較~~ | ~~悪化していない（改善が期待される）~~（2026-09-02 実測: 中央値 0.967 秒。暫定基準 1250ms に対し約 280ms 改善） |
 | ~~3-8~~ | ~~`CLAUDE.md` を新構成に合わせて更新~~ | ~~ドキュメント整合~~ |

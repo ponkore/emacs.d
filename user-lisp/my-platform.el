@@ -77,6 +77,14 @@
 
 ;; leaf では *modifier / *modifier-macos の二重の疑似パッケージだったが、
 ;; 外側は :config を持つだけで何もしていなかったので 1 つにまとめた。
+
+;; どちらも macOS の Emacs が C 側で定義する変数で、他のプラットフォームには
+;; 存在しない。値を持たない defvar は「この変数は他所で定義されている」という
+;; 宣言だけを行い、束縛は作らない。これが無いと Windows / Linux での
+;; バイトコンパイルで "assignment to free variable" になる (計画書の K-1)。
+(defvar mac-option-modifier)
+(defvar mac-command-modifier)
+
 (use-package emacs
   :if (eq system-type 'darwin)
   :config
