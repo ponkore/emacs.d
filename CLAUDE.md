@@ -580,6 +580,48 @@ v2 世代の API（`modus-themes-load-themes` / `modus-themes-load-vivendi` /
 この関数に渡すので、`#+ARCHIVE:` / `ARCHIVE` プロパティ / 変数のどれで
 指定しても効く（`org-archive-all-*` からの呼び出しも同様）。
 
+## org でクリップボードの画像を貼る（`M-v`）
+
+org バッファで `M-v` を押すと、クリップボードの画像を
+`<buffer-file-name>_assets/`（例: `note.org_assets/`）に保存し、
+リンクを挿入してその場でプレビューする（`my:org-yank-image`）。
+
+Emacs 30 で MS-Windows も `yank-media` に対応し、org 9.7 以降が
+`image/.*` のハンドラを登録しているので、自前で書くのは保存先と
+プレビューだけでよい。**外部プロセスは要らない**。
+
+これで用が足りるため、`powershell.exe` から `ms-screenclip:` を起動して
+範囲選択させていた `my:org-screenshot` は削除した（Win+Shift+S で撮ってから
+`M-v` で貼れば同じことができる）。`etc/screenclip.ps1` はその名残。
+
+| 変数 | 設定値 |
+|---|---|
+| `org-yank-image-save-method` | `my:org-image-save-directory`。関数を渡せるのは org 9.8 から |
+| `org-yank-image-file-name-function` | `my:org-yank-image-filename` |
+
+- ディレクトリは `org--image-yank-media-handler` が `make-directory` で作るので、
+  設定側は名前を返すだけでよい
+- リンクが相対パスになるのは `org-link-file-path-type` が既定の `adaptive` で、
+  保存先がバッファの下位ディレクトリだから
+- ドラッグ&ドロップ（`org--dnd-*`）の保存先も同じ変数を見るので一緒に変わる
+- 既定の `org-yank-image-autogen-filename` は **マイクロ秒がファイル名に残らない**。
+  `clipboard-…T…%6N` とドットで繋ぐため、`file-name-with-extension` が
+  それを拡張子とみなして落とす。結果として秒単位の名前になり、同じ秒に
+  2 回貼ると 1 枚目が上書きされる。ハイフンで繋ぐ関数に差し替えてある
+- `M-v`（`scroll-down-command`）は org バッファでだけ潰れる。スクロールは
+  `C-z`（`my-keybind.el`）が使える。`cua-mode` も `M-v` を
+  `delete-selection-repeat-replace-region` に割り当てるが、それが載る
+  `cua--cua-keys-keymap` は `cua-enable-cua-keys` が nil なら有効にならない。
+  **batch では有効に見える**（`cua--select-keymaps` は `pre-command-hook` で
+  走るため、`cua-mode` を有効にした時点の値のまま止まる）ので、
+  `key-binding` を batch で確認するときは `(cua--select-keymaps)` を先に呼ぶこと
+
+クリップボードに画像が載っているかは batch でも確認できる:
+
+```sh
+emacs --batch --eval '(message "%S" (gui-get-selection (quote CLIPBOARD) (quote TARGETS)))'
+```
+
 ## モードライン (doom-modeline)
 
 背景色は **modus のパレット上書き**で指定する。Emacs 29 以降 `mode-line` とは

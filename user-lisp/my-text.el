@@ -19,8 +19,49 @@
   ;; 以前は :straight t で org 9.5.1 (2021年) を入れていたが、
   ;; init.org のタングルで組み込み org が先にロードされるため版が混在していた。
   ;; :mode 指定も組み込みの auto-mode-alist で足りるので外した。
+  :preface
+  ;; クリップボードの画像を <buffer-file-name>_assets/ に保存する。
+  ;; 保存先ディレクトリは org--image-yank-media-handler 側が make-directory
+  ;; するので、ここでは名前を返すだけでよい。
+  (defun my:org-image-save-directory ()
+    "クリップボードから貼り付ける画像の保存先ディレクトリ名を返す。
+訪問中のファイル名に \"_assets\" を付けたもの (例: note.org_assets)。"
+    (let ((file (buffer-file-name (buffer-base-buffer))))
+      (unless file
+        (user-error "ファイルを訪問していないバッファには画像を保存できません"))
+      (concat file "_assets")))
+  (defun my:org-yank-image-filename ()
+    "クリップボードから貼り付ける画像のファイル名 (拡張子なし) を返す。
+既定の `org-yank-image-autogen-filename' は \"clipboard-...T...%6N\" と
+マイクロ秒をドットで繋ぐが、org--image-yank-media-handler が呼ぶ
+`file-name-with-extension' はそれを拡張子とみなして落とすため、実際には
+秒単位の名前になり、同じ秒に 2 回貼ると 1 枚目が上書きされる。
+ドットの代わりにハイフンで繋いでマイクロ秒を残す。"
+    (format-time-string "clipboard-%Y%m%dT%H%M%S-%6N"))
+  (defun my:org-yank-image (&optional noselect)
+    "クリップボードの画像を保存し、リンクを挿入してその場でプレビューする。
+保存先は `org-yank-image-save-method' 経由で `my:org-image-save-directory'、
+ファイル名は `org-yank-image-file-name-function' が付ける
+clipboard-YYYYMMDDTHHMMSS-NNNNNN.png。リンクは
+`org-link-file-path-type' が \='adaptive なので相対パスになる。
+
+NOSELECT (前置引数) を付けると MIME 型を選ばせる (`yank-media' と同じ)。"
+    (interactive "P")
+    (let ((beg (point)))
+      (yank-media noselect)
+      ;; 挿入されたときだけプレビューする。クリップボードに画像が無ければ
+      ;; yank-media はエラーかメッセージだけで戻り、point は動かない。
+      (when (> (point) beg)
+        (org-link-preview-region nil t beg (point)))))
   :hook (org-mode-hook . turn-on-font-lock)
+  ;; M-v (scroll-down-command) を org-mode でだけ潰す。
+  ;; スクロールは my-keybind.el の C-z が使える。
+  :bind (:map org-mode-map ("M-v" . my:org-yank-image))
   :custom
+  ;; クリップボード画像 (と D&D した画像) の保存先。
+  ;; 既定の attach (org-attach 管理下) ではなくバッファの隣に置く。
+  (org-yank-image-save-method #'my:org-image-save-directory)
+  (org-yank-image-file-name-function #'my:org-yank-image-filename)
   ;; org-mode内部のソースを色付けする
   (org-src-fontify-natively t)
   ;; org-modeの開始時に、行の折り返しを無効にする。
@@ -71,43 +112,6 @@
   (with-eval-after-load 'org-archive
     (advice-add 'org-archive--compute-location
                 :filter-args #'my:org-archive-expand-ym))
-  ;; screenshot: https://ladicle.com/post/config/
-  (defun my:org-screenshot ()
-    "Take a screenshot into a time stamped unique-named file in the
-  same directory as the org-buffer and insert a link to this file."
-    (interactive)
-    ;; org-display-inline-images は Org 9.8 で org-link-preview-region に
-    ;; 改名された。引数リストは同じ (&optional include-linked refresh beg end)。
-    (org-link-preview-region)
-    ;; filename はグローバル変数に代入されていた (let 束縛が無かった)
-    (let ((filename
-           (concat
-            (make-temp-name
-             (concat (file-name-nondirectory (buffer-file-name))
-                     "_imgs/"
-                     (format-time-string "%Y%m%d_%H%M%S_"))) ".png")))
-      (unless (file-exists-p (file-name-directory filename))
-        (make-directory (file-name-directory filename)))
-      ;; take screenshot
-      ;; 対象は windows-nt / darwin / gnu/linux の 3 つ (計画書の L-2)。
-      ;; berkeley-unix などはこの設定の対象外なので t の節は置かない。
-      (cond
-       ((eq system-type 'darwin)
-        (call-process "screencapture" nil nil nil "-i" filename))
-       ((eq system-type 'gnu/linux)
-        (call-process "import" nil nil nil filename))
-       ((eq system-type 'windows-nt)
-        ;; Win+Shift+S と同じオーバーレイで範囲選択させ、クリップボード経由で保存する。
-        ;; pwsh ではなく powershell.exe (5.1) を使うこと: Get-Clipboard -Format が要る。
-        (call-process "powershell.exe" nil nil nil
-                      "-NoProfile" "-Sta" "-ExecutionPolicy" "Bypass"
-                      "-File" (convert-standard-filename
-                               (expand-file-name "etc/screenclip.ps1" user-emacs-directory))
-                      "-Path" (convert-standard-filename
-                               (expand-file-name filename)))))
-      ;; insert into file if correctly taken
-      (if (file-exists-p filename)
-          (insert (concat "[[file:" filename "]]")))))
   ;; update todo summary
   (defun my:org-buffer-calc-summary ()
     (save-excursion
