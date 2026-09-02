@@ -10,18 +10,16 @@
 
 (defvar
   mayu-font-lock-keywords
-  (let* ((warning-face
-          (if (boundp 'font-lock-warning-face)
-              font-lock-warning-face
-            font-lock-function-name-face))
-         (preprocessor-face
-          (if (boundp 'font-lock-builtin-face)
-              font-lock-builtin-face
-            font-lock-preprocessor-face))
-         (function-name-face
-          (if (boundp 'font-lock-builtin-face)
-              font-lock-builtin-face
-            font-lock-function-name-face)))
+  ;; 以前は (if (boundp 'font-lock-warning-face) font-lock-warning-face
+  ;; font-lock-function-name-face) のように、face 変数が無い古い Emacs 向けの
+  ;; フォールバックを持っていた。Emacs 31.1 では font-lock-*-face 変数はすべて
+  ;; boundp が t なので偽の分岐には到達せず、しかもその分岐が obsolete な変数を
+  ;; 参照するため警告になっていた (計画書の K-5)。
+  ;; これらの変数は値が自分自身のシンボル名なので、クォートしたシンボルを
+  ;; 直接書けば同じ値になる。
+  (let* ((warning-face 'font-lock-warning-face)
+         (preprocessor-face 'font-lock-builtin-face)
+         (function-name-face 'font-lock-builtin-face))
     `((,(concat
          "\\<\\("
          "[AMCWS]-"
@@ -126,8 +124,10 @@
          "\\|SetImeStatus"
          "\\|SetImeString"
          "\\)\\>"
-         ) . ,function-name-face)
-      "Default font-lock-keywords for mayu mode.")))
+         ) . ,function-name-face)))
+  ;; 閉じ括弧の位置がずれており、この docstring がバッククォートリストの
+  ;; 7 番目の要素 (= font-lock のマッチャ) になっていた (計画書の K-6)。
+  "Default font-lock-keywords for mayu mode.")
 
 (defvar mayu-mode-syntax-table nil
   "syntax table used in mayu mode")
