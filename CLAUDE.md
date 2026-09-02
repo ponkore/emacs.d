@@ -508,7 +508,13 @@ clone しただけの新しいマシンでは必ず必要になる手順。
 - メインは **Windows 11**、パッケージ管理に **Scoop**（`USERPROFILE/scoop/shims` を `exec-path` に追加）
 - **`HOME` はユーザー環境変数として `C:\Users\<user>` に設定してある。**
   未設定だと Windows の Emacs は `%APPDATA%` を `~` とみなすため、
-  Explorer やスタートメニューから起動したときに `init.el` が見つからない
+  Explorer やスタートメニューから起動したときに `init.el` が見つからない。
+  **設定側で `(setenv "HOME" ...)` してはいけない。** `init.el` が読まれる
+  時点で `.emacs.d` の探索は終わっているので手遅れであり（`early-init.el`
+  でも同じ）、`user-emacs-directory` は展開前の `"~/.emacs.d/"` という文字列の
+  ままで Windows の Emacs は `expand-file-name` のたびに `HOME` を読み直すため、
+  途中で差し替えると `recentf` / `custom.el` / `straight` の保存先が
+  実際に動いている設定とは別のディレクトリになる
 - Windows のシェルは Git 付属の `bash.exe`（存在するときだけ設定）、エンコーディングは cp932/UTF-8 混在
 - Windows IME 統合には `tr-ime` + `w32-ime`（どちらも straight で導入）。
   2026-08 時点で tr-ime 0.5.0（2022-06）、w32-ime は 2020-11 のコミットが

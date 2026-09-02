@@ -224,7 +224,7 @@
 | # | 内容 |
 |---|---|
 | ~~J-1~~ | ~~`early-init.el` が存在しない。GC チューニング / パッケージ初期化抑制 / フレーム設定前倒しができていない。**`user-lisp-*` の設定にも必須**~~ |
-| J-2 | `(setenv "HOME" (getenv "USERPROFILE"))` を init.el 内で実行 — HOME は `.emacs.d` の探索に既に使われた後なので手遅れ |
+| ~~J-2~~ | ~~`(setenv "HOME" (getenv "USERPROFILE"))` を init.el 内で実行 — HOME は `.emacs.d` の探索に既に使われた後なので手遅れ~~（early-init.el へ移すのではなく削除。移しても探索には間に合わず、かつ `user-emacs-directory` が未展開の `"~/.emacs.d/"` のままなので途中で HOME を変えると保存先がずれる。OS のユーザー環境変数で設定するのが正しい） |
 | ~~J-3~~ | ~~`orderless` が `completion-styles '(orderless)` のみ。`basic` フォールバックがなく TRAMP / ファイル名補完で問題が出やすい~~ |
 | ~~J-4~~ | ~~`marginalia` を `vertico-after-init-hook` という自作フック経由で有効化する回りくどい構造~~ |
 | ~~J-5~~ | ~~`helm-minibuffer-set-up-hook` への `add-hook` — helm 未使用~~ |

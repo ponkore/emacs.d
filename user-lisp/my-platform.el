@@ -10,8 +10,27 @@
 ;;; [3] 環境設定
 
 (when (eq system-type 'windows-nt)
-  (setq w32-get-true-file-attributes nil)
-  (setenv "HOME" (getenv "USERPROFILE")))
+  ;; (setenv "HOME" (getenv "USERPROFILE")) は削除した (計画書の J-2)。
+  ;;
+  ;; 狙いは、HOME が未設定のときに Emacs が HOME を %APPDATA% にしてしまうのを
+  ;; 避けることだったと思われる。emacs -Q で実測すると:
+  ;;   HOME 未設定 -> HOME=C:\Users\masao\AppData\Roaming
+  ;;                  ~ -> c:/Users/masao/AppData/Roaming
+  ;;   HOME 設定済 -> ~ -> c:/Users/masao
+  ;;
+  ;; しかしこの行では狙いを達成できない。init.el が読まれている時点で .emacs.d
+  ;; の探索は終わっている。HOME が %APPDATA% を指す環境なら Emacs は
+  ;; %APPDATA%\.emacs.d を見に行くので、この設定自体が読み込まれない。
+  ;;
+  ;; そのうえ有害になりうる。user-emacs-directory は展開前の "~/.emacs.d/" と
+  ;; いう文字列のままで、Windows の Emacs は expand-file-name のたびに HOME を
+  ;; 読み直す。つまり途中で HOME を差し替えると、init.el を読み込んだ場所と
+  ;; user-emacs-directory の指す先がずれ、recentf / custom.el / straight の
+  ;; 保存先が実際に動いている設定とは別のディレクトリになる。
+  ;;
+  ;; Windows で ~ を C:\Users\<user> にしたい場合は、設定側ではなく OS の
+  ;; ユーザー環境変数 HOME を設定する (このマシンでは設定済み)。
+  (setq w32-get-true-file-attributes nil))
 
 ;;; [3] w32-symlinks (削除済み)
 
