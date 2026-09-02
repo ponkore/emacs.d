@@ -157,7 +157,7 @@
 (require 'my-keybind)   ; グローバルキーバインド
 (require 'my-editor)   ; エディタ全般の設定
 (require 'my-dired)   ; dired と neotree
-(require 'my-text)   ; テキストモード (org / markdown / rst / adoc)
+(require 'my-text)   ; テキストモード (org / markdown / rst)
 (require 'my-lang-lisp)   ; Lisp 系 (Emacs Lisp / Clojure / Common Lisp)
 (require 'my-lang-python)   ; Python
 (require 'my-lang-web)   ; Web 系 (PHP / JavaScript / TypeScript)

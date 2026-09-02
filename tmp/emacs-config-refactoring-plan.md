@@ -253,8 +253,8 @@ defined` 26 件、`might not be defined at runtime` 12 件）は遅延ロード�
 |---|---|---|---|
 | K-1 | 中 | my-appearance.el / my-platform.el | 自由変数 5 件。`my:buffer-encoding`（390 行）、`doom-modeline-buffer-encoding`（392 行）、`doom-modeline--eglot`（453 行）、`mac-option-modifier` / `mac-command-modifier`（my-platform.el 83-84 行）→ `defvar` 宣言か `with-suppressed-warnings` |
 | K-2 | 低 | 5 ファイル | docstring 80 桁超 6 件（my-dired.el:67 / my-editor.el:131 / my-lsp.el:108 / my-project.el:20 / my-text.el:246）と、docstring 内の未エスケープのシングルクォート 1 件（my-appearance.el:18） |
-| K-3 | 中 | my-lang-misc.el:126 | `Package cl is deprecated`。`(require 'cl)` を `cl-lib` へ |
-| K-4 | 低 | site-lisp | `mayu-mode.el` / `visual-basic-mode.el` に `lexical-binding` cookie が無い。`visual-basic-mode.el` は `case`（27.1 で obsolete）も使用。ベンダコードなので上流待ちか、こちらで手当てするかの判断が要る |
+| ~~K-3~~ | ~~中~~ | ~~my-lang-misc.el:126~~ | ~~`Package cl is deprecated`。`(require 'cl)` を `cl-lib` へ~~（真の出所は `site-lisp/visual-basic-mode.el:200`。use-package がコンパイル時に require するため行番号が `my-lang-misc.el:126` に出ていた。`cl-lib` + `cl-case` に変更して解消。残った 1 件は `adoc-mode`（`straight/build/` 配下・上流のコード）由来だったが、ほとんど使わなくなっていたため adoc-mode ごと削除して解消） |
+| K-4 | 低 | site-lisp | `mayu-mode.el` / `visual-basic-mode.el` に `lexical-binding` cookie が無い。~~`visual-basic-mode.el` は `case`（27.1 で obsolete）も使用。~~（`case` は K-3 で `cl-case` に解消済み）ベンダコードだが `site-lisp/` は既にローカル改変している（`c54b21f` で `flet`→`cl-flet`）ので手当ては可能。ただし 1990 年代のコードを lexical binding にするのは動的束縛の見直しが要る |
 
 ---
 

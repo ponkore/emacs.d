@@ -1,4 +1,4 @@
-;;; my-text.el --- テキストモード (org / markdown / rst / adoc)  -*- lexical-binding: t -*-
+;;; my-text.el --- テキストモード (org / markdown / rst)  -*- lexical-binding: t -*-
 ;;; Commentary:
 ;; init.el から機械的に分割したもの。読み込み順は init.el を参照。
 ;;; Code:
@@ -317,11 +317,14 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
                            (setq indent-tabs-mode nil)
                            (setq frame-background-mode 'dark))))
 
-;;; [3] asciidoc
+;;; [3] asciidoc (adoc-mode は削除した)
 
-(use-package adoc-mode
-  :straight t
-  :defer t)
+;; ほとんど使わなくなったため外した。
+;; adoc-mode は (require 'cl) を素で書いており (adoc-mode.el:177、コード中の
+;; コメントも "I know, I should remove it, I will, eventually")、
+;; ロードするだけで "Package cl is deprecated" が出ていた。
+;; straight/build/ 配下なのでこちらでは直せない。
+;; .adoc / .asciidoc は今後 fundamental-mode で開く。
 
 (provide 'my-text)
 ;;; my-text.el ends here
