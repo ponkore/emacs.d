@@ -53,7 +53,87 @@ NOSELECT (前置引数) を付けると MIME 型を選ばせる (`yank-media' �
       ;; yank-media はエラーかメッセージだけで戻り、point は動かない。
       (when (> (point) beg)
         (org-link-preview-region nil t beg (point)))))
-  :hook (org-mode-hook . turn-on-font-lock)
+
+  ;; --- 保存時に <buffer-file-name>_assets/ との整合性を見る ---
+  (defvar my:org-assets-inhibit-check nil
+    "非 nil のあいだは `my:org-assets-check-on-save' を何もせずに戻す。
+`org-save-all-org-buffers' は 1 時間ごとのタイマーからも呼ばれるので、
+その最中に y-or-n-p でユーザーの手を止めないため。")
+  (defun my:org-assets--key (file)
+    "FILE を比較用に正規化した絶対パスにして返す。
+大文字小文字を区別しないファイルシステム (Windows / macOS) では downcase する。"
+    (let ((f (file-truename (expand-file-name file))))
+      (if (file-name-case-insensitive-p (file-name-directory f))
+          (downcase f)
+        f)))
+  (defun my:org-assets--linked-files ()
+    "バッファ内の file: リンクが指す先を `my:org-assets--key' 化して返す。
+ナローイングされていてもバッファ全体を見る。見えている範囲だけを見ると
+範囲外からリンクされているファイルを消してしまう。"
+    (org-with-wide-buffer
+     (delete-dups
+      (org-element-map (org-element-parse-buffer) 'link
+        (lambda (link)
+          (when (equal "file" (org-element-property :type link))
+            (my:org-assets--key (org-element-property :path link))))))))
+  (defun my:org-assets--mentioned-p (file)
+    "FILE のファイル名がバッファ内に文字列として現れるか。
+`org-element' はコメント行や例示ブロックの中のリンクを拾わない。
+消してしまってからでは遅いので、削除の前にもう一段の保険として見る。"
+    (org-with-wide-buffer
+     (goto-char (point-min))
+     (search-forward (file-name-nondirectory file) nil t)))
+  (defun my:org-assets-check-on-save ()
+    "保存後に _assets/ ディレクトリとバッファ内のリンクを突き合わせる。
+どこからもリンクされていないファイルは 1 つずつ確認のうえごみ箱へ移し、
+リンク先が存在しないものは警告するだけで保存自体は成功させる。"
+    (unless (or my:org-assets-inhibit-check noninteractive)
+      (let ((dir (ignore-errors (my:org-image-save-directory))))
+        (when (and dir (file-directory-p dir))
+          (let* ((linked (my:org-assets--linked-files))
+                 (dirkey (file-name-as-directory (my:org-assets--key dir)))
+                 ;; サブディレクトリとドットファイルは対象外。
+                 (files (seq-filter
+                         (lambda (f)
+                           (and (file-regular-p f)
+                                (not (string-prefix-p "." (file-name-nondirectory f)))))
+                         (directory-files dir t)))
+                 (keys (mapcar #'my:org-assets--key files))
+                 (orphans (seq-remove
+                           (lambda (f)
+                             (or (member (my:org-assets--key f) linked)
+                                 (my:org-assets--mentioned-p f)))
+                           files))
+                 (missing (seq-filter
+                           (lambda (k)
+                             (and (string-prefix-p dirkey k)
+                                  (not (member k keys))))
+                           linked)))
+            (when orphans
+              (map-y-or-n-p
+               (lambda (f)
+                 (format "%s はどこからもリンクされていません。ごみ箱へ移しますか? "
+                         (file-name-nondirectory f)))
+               (lambda (f)
+                 ;; delete-file の TRASH を t にして戻せるようにしておく。
+                 (condition-case err
+                     (delete-file f t)
+                   (error (message "%s を削除できませんでした: %s"
+                                   (file-name-nondirectory f)
+                                   (error-message-string err)))))
+               orphans
+               '("ファイル" "ファイル" "ごみ箱へ移す")))
+            (when missing
+              ;; after-save-hook は write-region の "Wrote ..." より後に走るので、
+              ;; ここの message は上書きされずに残る。
+              (message "警告: %s にリンク先がありません: %s"
+                       (file-name-nondirectory (directory-file-name dir))
+                       (mapconcat #'file-name-nondirectory missing ", "))))))))
+  (defun my:org-assets-enable-check ()
+    "このバッファの `after-save-hook' に `my:org-assets-check-on-save' を足す。"
+    (add-hook 'after-save-hook #'my:org-assets-check-on-save nil t))
+  :hook ((org-mode-hook . turn-on-font-lock)
+         (org-mode-hook . my:org-assets-enable-check))
   ;; M-v (scroll-down-command) を org-mode でだけ潰す。
   ;; スクロールは my-keybind.el の C-z が使える。
   :bind (:map org-mode-map ("M-v" . my:org-yank-image))
@@ -88,6 +168,11 @@ NOSELECT (前置引数) を付けると MIME 型を選ばせる (`yank-media' �
   :config
   ;; 一時間に一回、org-modeの全てのバッファを保存する。
   (run-at-time "00:59" 3600 #'org-save-all-org-buffers)
+  ;; そのタイマー経由の保存では _assets/ の確認プロンプトを出さない。
+  (defun my:org-assets-around-save-all (orig &rest args)
+    (let ((my:org-assets-inhibit-check t))
+      (apply orig args)))
+  (advice-add 'org-save-all-org-buffers :around #'my:org-assets-around-save-all)
   ;; local functions
   ;; アーカイブ先の指定に含まれる #YM を YYYY-MM に置き換える。
   ;; 例: #+ARCHIVE: %s_#YM_archive::  ->  foo.org_2026-08_archive

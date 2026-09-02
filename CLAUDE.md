@@ -622,6 +622,38 @@ Emacs 30 で MS-Windows も `yank-media` に対応し、org 9.7 以降が
 emacs --batch --eval '(message "%S" (gui-get-selection (quote CLIPBOARD) (quote TARGETS)))'
 ```
 
+### 保存時の `_assets/` 整合性チェック
+
+org バッファを保存すると（`after-save-hook`）、`_assets/` があるときだけ
+バッファ内のリンクと突き合わせる（`my:org-assets-check-on-save`）。
+
+| 状態 | 動作 |
+|---|---|
+| `_assets/` にあるがリンクされていない | `map-y-or-n-p` で 1 つずつ確認してごみ箱へ（`y`/`n`/`!`/`q`） |
+| リンクはあるが `_assets/` に無い | 保存は成功させ、`message` で警告 |
+
+消す側の判断を誤るとファイルが失われるので、安全側に倒してある。
+
+- **必ず `org-with-wide-buffer` で見る。** ナローイングされたバッファで
+  `org-element-parse-buffer` を呼ぶと見えている範囲しか解析されず、
+  範囲外からリンクされているファイルを消してしまう
+- リンク判定は `org-element` だけに頼らず、**ファイル名がバッファ内に文字列と
+  して現れるかも見る**（`my:org-assets--mentioned-p`）。`org-element` は
+  コメント行や例示ブロックの中のリンクを拾わないため、それだけだと
+  「コメントアウトして退避してある画像」を消してしまう
+- 削除は `(delete-file f t)` でごみ箱へ送る。誤って消しても戻せるように
+- パスの比較は `file-truename` で正規化し、`file-name-case-insensitive-p` が
+  真なら `downcase` する（Windows / macOS）
+- `directory-files` の MATCH に文字列先頭アンカー（バックスラッシュ +
+  バッククォート）入りの正規表現は書かない。エスケープを
+  1 つ落としても静かに「1 件も一致しない」になり、**全リンクが「リンク先が
+  無い」と誤判定される**。述語で絞るほうが壊れにくい
+
+`org-save-all-org-buffers` は 1 時間ごとのタイマーからも呼ばれる。そのまま
+だとタイマーが `y-or-n-p` を出して作業を止めるので、`:around` advice で
+`my:org-assets-inhibit-check` を束縛し、その間はチェックごと飛ばす。
+手で `M-x org-save-all-org-buffers` したときも同じく黙って保存する。
+
 ## モードライン (doom-modeline)
 
 背景色は **modus のパレット上書き**で指定する。Emacs 29 以降 `mode-line` とは
