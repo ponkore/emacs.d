@@ -128,7 +128,7 @@
 | ~~C-1~~ | ~~高~~ | ~~7 箇所~~ | ~~`defadvice` / `ad-activate` / `ad-do-it`（Emacs 24.4 で obsolete）: `scroll-up`, `scroll-down`, `org-pandoc-run`, `vc-svn-command`, `grep`, `insert-file-contents-literally`, `minibuffer-complete` → `advice-add` へ移行~~ |
 | ~~C-2~~ | ~~高~~ | ~~windows-ime~~ | ~~`input-method-inactivate-hook` は Emacs 24.3 で obsolete → `input-method-deactivate-hook`~~ |
 | ~~C-3~~ | ~~高~~ | ~~テーマ~~ | ~~`modus-themes-load-themes` / `modus-themes-load-vivendi` は modus-themes 4.x で**削除済み**。`modus-themes-region` も廃止。かつ modus-themes は Emacs 31 に**同梱**されているので `:straight t` 不要 → `(load-theme 'modus-vivendi t)`~~ |
-| C-4 | 中 | 日本語env | `default-file-name-coding-system` は obsolete |
+| ~~C-4~~ | ~~中~~ | ~~日本語env~~ | ~~`default-file-name-coding-system` は obsolete~~（訂正: obsolete ではない。`prefer-coding-system` の副作用を戻していた行だが、`file-name-coding-system` が非 nil なので参照されないフォールバック。docstring の指示どおり `file-name-coding-system` のみ設定する形にして削除） |
 | ~~C-5~~ | ~~中~~ | ~~recentf-ext~~ | ~~`(run-with-idle-timer 120 t '(lambda () ...))` — quote された lambda（非推奨）~~ |
 | ~~C-6~~ | ~~中~~ | ~~scss-mode~~ | ~~`(previous-line)` を Lisp コード中で使用 → コンパイラ警告。`(forward-line -1)` へ~~ |
 | ~~C-7~~ | ~~中~~ | ~~全般~~ | ~~`linum-format` / `linum` face — `linum.el` は Emacs 29 で obsolete。`display-line-numbers` 移行済みなのでデッド設定~~ |

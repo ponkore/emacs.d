@@ -177,8 +177,18 @@
   (set-keyboard-coding-system 'cp932)
 
   (prefer-coding-system 'utf-8-unix)
+  ;; (setq default-file-name-coding-system 'cp932) は削除した (計画書の C-4)。
+  ;; この変数は obsolete ではない。直前の prefer-coding-system が
+  ;; default-file-name-coding-system を utf-8-unix に書き換えるので、
+  ;; あの setq はその副作用を cp932 に戻していた。
+  ;;
+  ;; ただし default-file-name-coding-system は file-name-coding-system が nil の
+  ;; ときしか参照されないフォールバックで、次行の set-file-name-coding-system で
+  ;; cp932 が入る。docstring も「手で設定せず file-name-coding-system を使え」と
+  ;; 言っているので、設定するのは file-name-coding-system だけにする。
+  ;; (Windows は w32-unicode-filenames が t (既定) のため、そもそもどちらも
+  ;;  大部分は無視され、ファイル名は utf-8 として扱われる)
   (set-file-name-coding-system 'cp932)
-  (setq default-file-name-coding-system 'cp932)
 
   ;; tr-ime setup
   (tr-ime-advanced-install)
