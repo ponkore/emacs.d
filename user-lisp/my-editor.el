@@ -156,7 +156,11 @@
   ;;
   ;; whitespace ( http://qiita.com/catatsuy/items/55d50d13ebc965e5f31e )
   ;;
-  :straight t
+  ;; :straight t は外した (計画書の D-4)。whitespace は Emacs 同梱で、
+  ;; straight もレシピを (:type built-in) と解決して clone も build もして
+  ;; いなかった (straight/repos, straight/build のどちらにも無い)。
+  ;; 実害は無かったが「外部から入れている」という誤った表示になるうえ、
+  ;; 起動のたびにレシピ検索が走る。組み込みは無記述にする方針に合わせる。
   :diminish
   :custom
   ((whitespace-style-with-tab '(face tabs tab-mark spaces space-mark trailing space-before-tab space-after-tab::space))

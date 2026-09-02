@@ -144,7 +144,7 @@
 | ~~D-1~~ | ~~高~~ | ~~**straight.el と package.el が併走**している。`:straight t` と `:ensure t` が混在（`vertico`, `cljstyle-format`, `calendar`, `org-download`, `dashboard`, `cp5022x` が `:ensure`）。どちらかに統一が必要~~ |
 | ~~D-2~~ | ~~高~~ | ~~`package-archives` に **marmalade**（2017 年に停止）と **orgmode.org/elpa**（廃止済み）が残っている → `package-refresh-contents` が遅延/失敗~~ |
 | ~~D-3~~ | ~~中~~ | ~~`(package-initialize)` の明示呼び出しと `package-refresh-contents` を起動時に実行 → 起動が遅い。Emacs 27+ では不要~~ |
-| D-4 | 高 | **組み込みライブラリに `:straight t` / `:ensure t` が付いている**: `uniquify`, `whitespace`, `rst`, `cc-mode`, `bat-mode`, `calendar`, `csharp-mode`（Emacs 29+ で組み込み）。straight がクローンを試みて警告/失敗する |
+| ~~D-4~~ | ~~高~~ | ~~**組み込みライブラリに `:straight t` / `:ensure t` が付いている**: `uniquify`, `whitespace`, `rst`, `cc-mode`, `bat-mode`, `calendar`, `csharp-mode`（Emacs 29+ で組み込み）。straight がクローンを試みて警告/失敗する~~（訂正: straight は `(:type built-in)` と解決するのでクローンも失敗もしない。実害は誤った表示とレシピ検索のみ） |
 | ~~D-5~~ | ~~中~~ | ~~`leaf sql-mode` / `leaf text-scale` / `leaf ripgrep*` / `leaf grep-r` など、**存在しない feature 名**を leaf ブロック名にしている（動作はするが `:require` 等と噛み合わない）~~ |
 | ~~D-6~~ | ~~中~~ | ~~straight の bootstrap URL が `raxod502/straight.el`（現在は `radian-software/straight.el`。リダイレクトで動くが要更新）~~ |
 | ~~D-7~~ | ~~中~~ | ~~`embark` は `:disabled t` なのに `embark-consult` は有効 → 結局 embark が入る~~ |
