@@ -195,15 +195,35 @@
   (markdown-mode-hook . my:setup-markdown-mode)
   (gfm-mode-hook      . my:setup-markdown-mode)
   :custom
-  (markdown-command (let ((pandoc-options `("-F pandoc-crossref"
-                                            "--template=default.html"
-                                            "--self-contained"
-                                            "-s"
-                                            "--from=gfm+footnotes"
-                                            "--to=html"
-                                            "--metadata"
-                                            ,(my:pandoc-data-file "metadata.yml"))))
-                      (concat "pandoc " (s-join " " pandoc-options))))
+  ;; 計画書の G-3。
+  ;;
+  ;;   - --self-contained は pandoc 3 で非推奨。実行すると
+  ;;     "[WARNING] Deprecated: --self-contained. Use --embed-resources
+  ;;      --standalone instead." が出る。--embed-resources に置き換えた。
+  ;;     --standalone (-s) は元から付いているので出力は同一。
+  ;;   - --metadata はファイルを読ませるオプションではなく KEY[=VAL] を取る。
+  ;;     パスを渡していたため metadata.yml は読まれず、代わりに無意味な
+  ;;     メタデータキーが 1 つ作られるだけだった。--metadata-file に直した。
+  ;;   - --template / --metadata-file / -F pandoc-crossref は、指すものが無い
+  ;;     環境ではコマンド全体を失敗させる。実際この環境には pandoc の
+  ;;     ユーザーデータディレクトリ自体が無く、
+  ;;       Could not find data file 'templates\default.html'
+  ;;     で exit 97 になっていた (markdown のプレビューが動いていなかった)。
+  ;;     open-junk-file や Typora と同じく、在るときだけ付ける形にする。
+  ;;     テンプレートを外しても -s で pandoc 内蔵の既定テンプレートが使われる。
+  (markdown-command
+   (let* ((template (my:pandoc-data-file "templates/default.html"))
+          (metadata (my:pandoc-data-file "metadata.yml"))
+          (pandoc-options
+           (append
+            (when (executable-find "pandoc-crossref") '("-F pandoc-crossref"))
+            (when (file-readable-p template) (list (concat "--template=" template)))
+            '("--embed-resources"
+              "-s"
+              "--from=gfm+footnotes"
+              "--to=html")
+            (when (file-readable-p metadata) (list (concat "--metadata-file=" metadata))))))
+     (concat "pandoc " (s-join " " pandoc-options))))
   ;; Typora は Windows のインストールパス直書きだったため、存在するときだけ設定する
   (markdown-open-command
    (seq-find #'file-executable-p
