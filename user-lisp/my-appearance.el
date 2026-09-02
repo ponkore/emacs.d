@@ -269,10 +269,11 @@
   (set-frame-parameter nil 'alpha-background 85)
   ;; scroll bar を表示しない
   (when (fboundp 'scroll-bar-mode) (scroll-bar-mode 0))
-  ;; 行番号のface
-  ;; TODO: `linum` という face が Emacs29? からなくなった
-  ;; (set-face-attribute 'linum nil :foreground "red" :height 0.8)
-  ;; (set-face-attribute 'linum nil :height 0.8)
+  ;; 行番号の face。linum の face は linum.el ごと Emacs 29 でなくなった。
+  ;; display-line-numbers での対応する face は
+  ;; `line-number' と `line-number-current-line'。
+  ;; もともと 2 行とも無効にしてあったので、設定自体は復活させない。
+  ;; (set-face-attribute 'line-number nil :height 0.8)
   )
 
 ;;; [3] テーマ

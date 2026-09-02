@@ -307,13 +307,14 @@
   (scroll-step 1)
   ;; 画面スクロール時の重複行数
   (next-screen-context-lines 1)
-  ;; バッファ中の行番号表示
-  ;; (global-linum-mode . t)
-  (global-display-line-numbers-mode 1)
+  ;; バッファ中の行番号表示は :hook で行う (下記)。
+  ;; global-display-line-numbers-mode だと IBuffer や dired、*Help* など
+  ;; 編集しないバッファにまで行番号が出てしまう。
+  ;; 旧 linum.el 時代の (global-linum-mode . t) / (linum-format "%5d") は、
+  ;; linum.el が Emacs 29 で廃止されて以降きいていないデッド設定なので削除した。
+  ;; 桁幅を固定したくなったら display-line-numbers-width (nil = 内容に応じて自動)。
   ;; 下線を引く
   (global-hl-line-mode t)
-  ;; 行番号のフォーマット
-  (linum-format "%5d")
   ;; 画像ファイルを表示
   (auto-image-file-mode t)
   ;; evalした結果を全部表示
@@ -381,6 +382,12 @@
   ;; 古いバックアップファイルの削除
   (delete-old-versions t)
   :hook
+  ;; 行番号は「編集するモード」でだけ表示する。
+  ;; prog-mode / text-mode / conf-mode の派生モードが対象になるので、
+  ;; special-mode 派生 (IBuffer, dired, *Help*, magit など) には出ない。
+  (prog-mode-hook . display-line-numbers-mode)
+  (text-mode-hook . display-line-numbers-mode)
+  (conf-mode-hook . display-line-numbers-mode)
   ;; shebangがあるファイルを保存すると実行権をつける。
   (after-save-hook . executable-make-buffer-file-executable-if-script-p)
   ;;
