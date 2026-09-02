@@ -255,8 +255,8 @@
   :config
   ;; バックアップファイルを作らない (bavckup-inhibited のタイポで無効だった)
   ;; auto-save-list-file-name はここにあったが、関連する
-  ;; auto-save-list-file-prefix が global-configuraions 側にあり
-  ;; 2 ブロックに分かれていた。まとめてそちらへ移した。
+  ;; auto-save-list-file-prefix が別ブロック (下の editor global configuration)
+  ;; 側にあり 2 ブロックに分かれていた。まとめてそちらへ移した。
   (setq backup-inhibited t))
 
 ;;; [3] 保存時バッファ内容が空であればファイルを削除
@@ -277,7 +277,7 @@
   ;; leaf の :global-minor-mode 相当
   :config (global-auto-revert-mode 1))
 
-;;; [3] editor global configraiton
+;;; [3] editor global configuration
 
 ;; 疑似パッケージなので use-package の名前は emacs にする。
 ;; 実在しない feature 名にすると :config が with-eval-after-load に包まれて
