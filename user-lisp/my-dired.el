@@ -132,6 +132,36 @@ _R_ename    ch_M_od        _t_oggle       _e_dit    _[_ hide detail     _._toggg
     ("q" nil)
     ("." nil :color blue)))
 
+;;; [4] dired-x
+
+;; dired-x は「ロードされた瞬間に dired-mode-map を無条件で書き換える」。
+;; defcustom による切り替えは無く、避ける手段が無い (Emacs 31.1 dired-x.el):
+;;
+;;   (define-key dired-mode-map "V" 'dired-do-run-mail)
+;;   (define-key dired-mode-map "F" 'dired-do-find-marked-files)
+;;   (define-key dired-mode-map "\M-!" 'dired-smart-shell-command) ほか
+;;
+;; つまり dired の :bind で V に置いた dired-vc-status は、dired-x が
+;; 読まれた時点で dired-do-run-mail に上書きされる。
+;;
+;; dired-x を明示的に require しているつもりが無くても読まれる。
+;;   - dired-sidebar の :config の (require 'dired-x)  (dired-omit-mode のため)
+;;   - サイドバーの a (dired-omit-mode は dired-x で唯一の autoload)
+;; どちらも F8 を押すと通るので、「F8 を一度でも押すとその後 V が効かなく
+;; なる」という分かりにくい壊れ方をしていた (0b11587 で neotree を
+;; dired-sidebar に置き換えたときからの回帰)。
+;;
+;; dired-x のあとに張り直す。:defer t + :config なので
+;; (with-eval-after-load 'dired-x ...) になり、dired-x が読まれない環境では
+;; dired 側の :bind がそのまま残る。どちらでも V は dired-vc-status。
+;;
+;; :bind ではなく define-key なのは、順序が要点だから。:bind は
+;; dired-x のロードとは無関係に張られてしまい、上書きを取り返せない。
+(use-package dired-x
+  :defer t
+  :config
+  (define-key dired-mode-map "V" #'dired-vc-status))
+
 ;;; [3] dired-sidebar
 
 ;; neotree から移行した。neotree をやめた理由:
