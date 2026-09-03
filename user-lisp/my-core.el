@@ -38,6 +38,22 @@ Windows は %APPDATA%/pandoc、それ以外は XDG または ~/.pandoc。"
   "pandoc のユーザーデータディレクトリ配下の NAME を返す。"
   (expand-file-name name (my:pandoc-data-directory)))
 
+(defun my:open-file-externally (file)
+  "FILE を OS のファイル関連付けに渡して外部アプリで開く。
+Windows は `w32-shell-execute' (ShellExecuteW)、macOS は open(1)、
+それ以外は xdg-open。いずれも Emacs を待たせない。"
+  (let ((file (expand-file-name file)))
+    (unless (file-exists-p file)
+      (user-error "No such file: %s" file))
+    (pcase system-type
+      ;; ShellExecuteW はバックスラッシュ区切りを期待する。
+      ;; convert-standard-filename が w32 では unix->dos 変換をする。
+      ('windows-nt (w32-shell-execute "open" (convert-standard-filename file)))
+      ;; DESTINATION に 0 を渡すと非同期になり、終了を待たない。
+      ('darwin (call-process "open" nil 0 nil file))
+      (_ (call-process "xdg-open" nil 0 nil file)))
+    (message "Opened externally: %s" (abbreviate-file-name file))))
+
 ;;; [3] tree-sitter
 
 ;; Emacs 29 以降の組み込み tree-sitter。文法 (grammar) は共有ライブラリなので

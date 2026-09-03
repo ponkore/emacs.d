@@ -15,8 +15,38 @@
 
 (use-package dired
   :commands dired-vc-status
+  :preface
+  ;; Excel ブックのような「Emacs で読んでも意味が無い」ファイルは
+  ;; バッファに読み込まず、OS の関連付け (= Excel) に渡す。
+  ;; 拡張子を足したくなったらこの正規表現に加える。
+  (defvar my:dired-external-open-regexp
+    "\\.\\(?:xls\\|xlsx\\|xlsm\\)\\'"
+    "dired で開かずに `my:open-file-externally' へ渡すファイル名の正規表現。
+大文字小文字は区別しない。")
+
+  (defun my:dired-external-open-p (file)
+    "FILE を Emacs で開かずに OS の関連付けへ渡すべきなら non-nil。"
+    (and (not (file-directory-p file))
+         (let ((case-fold-search t))
+           (string-match-p my:dired-external-open-regexp file))
+         t))
+
+  (defun my:dired-find-file ()
+    "point のファイルを開く。
+`my:dired-external-open-regexp' に一致するものは、バッファに
+読み込まずに OS の関連付けで開く。それ以外は `dired-find-file'。"
+    (interactive)
+    (let ((file (dired-get-file-for-visit)))
+      (if (my:dired-external-open-p file)
+          (my:open-file-externally file)
+        (dired-find-file))))
   :bind
   (:map dired-mode-map
+   ;; RET / f / e は同じ dired-find-file なので、まとめて差し替える。
+   ;; (o の other-window や v の view は素のままにしてある)
+   ("RET" . my:dired-find-file)
+   ("f" . my:dired-find-file)
+   ("e" . my:dired-find-file)
    ("V" . dired-vc-status)
    ;; 本家 ripgrep-regexp は検索ディレクトリも聞いてくる。dired では
    ;; そのバッファのディレクトリで検索したいので my:ripgrep-regexp を使う
@@ -73,8 +103,10 @@ _R_ename    ch_M_od        _t_oggle       _e_dit    _[_ hide detail     _._toggg
 "
     ("[" dired-hide-details-mode)
     ("+" dired-create-directory)
-    ("RET" dired-open-in-accordance-with-situation :exit t)
-    ("f" dired-open-in-accordance-with-situation :exit t)
+    ;; dired-open-in-accordance-with-situation はどこにも定義が無く、
+    ;; Org 方式だった頃から死んだ参照のままだった (押すと void-function)。
+    ("RET" my:dired-find-file :exit t)
+    ("f" my:dired-find-file :exit t)
     ("C" dired-do-copy)   ;; Copy all marked files
     ("D" dired-do-delete)
     ("M" dired-do-chmod)
@@ -184,6 +216,27 @@ _R_ename    ch_M_od        _t_oggle       _e_dit    _[_ hide detail     _._toggg
   ;; つまり :custom-face ではなく face 属性のプロパティリストを
   ;; 変数に入れる必要がある。
   (setq dired-sidebar-face '(:height 0.9))
+  ;; --- サイドバーでも Excel を外部起動する ---
+  ;;
+  ;; サイドバーの RET は dired-find-file ではなく dired-sidebar-find-file
+  ;; なので、dired-mode-map の差し替えでは効かない。キーを潰すのではなく
+  ;; advice にしてあるのは、入口が 3 つあるため:
+  ;;   RET     -> dired-sidebar-find-file
+  ;;   C-o     -> dired-sidebar-find-file-alt (call-interactively で上を呼ぶ)
+  ;;   mouse-2 -> dired-sidebar-mouse-subtree-cycle-or-find-file (DIR 引数付き)
+  ;;
+  ;; orig を呼ぶ前に判定するのが肝。dired-sidebar-find-file は
+  ;; ファイルに対して get-mru-window / next-window で表示先を選び、
+  ;; 空いていなければ split-window までする。外部に投げるファイルで
+  ;; ウィンドウ分割を起こさないよう、その手前で抜ける。
+  (defun my:dired-sidebar-open-externally (orig &optional dir)
+    "Excel ブック等はウィンドウを選ぶ前に OS の関連付けへ渡す。"
+    (let ((file (or dir (dired-get-file-for-visit))))
+      (if (my:dired-external-open-p file)
+          (my:open-file-externally file)
+        (funcall orig dir))))
+  (advice-add 'dired-sidebar-find-file :around #'my:dired-sidebar-open-externally)
+
   ;; dired-omit-mode のため
   (require 'dired-x))
 
