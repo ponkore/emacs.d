@@ -17,8 +17,34 @@
 ;;     デーモン経由        656 ms
 ;;     stdio の往復        0.13 ms/回 (無視できる)
 ;;
-;; これは段階 2a (素通しプロキシ)。キャッシュも先読みもファイル監視もしない。
-;; 設計と実測の詳細は tmp/magit-gitd-2a-design.md を参照。
+;; 段階 2b でキャッシュと並列先読みを足した。残っていた「29 回の git 起動を
+;; 直列に待つ 0.6 秒」を潰すためで、変化が無ければ git を 1 回も起動しない。
+;; 設計と実測の詳細は tmp/magit-gitd-2a-design.md と tmp/magit-gitd-2b-design.md。
+;;
+;;; キャッシュの正しさ (2b でいちばん難しいところ)
+;;
+;; 古い答えを返すキャッシュは **静かに壊れる**。magit が事実と違う内容を表示し、
+;; しかもユーザはそれに気づけない。そこで無効化を「通知」ではなく
+;; **トークン**で表現している。
+;;
+;; `git/run' には毎回 `repo' (監視中のリポジトリのルート) と `token'
+;; (そのリポジトリ状態の通し番号) を載せる。デーモンは (repo, token, コマンド)
+;; でキャッシュし、token が違えば問答無用でミスにする。
+;; **無効化通知は存在しない**ので、「通知を 1 つ落とすと永久に古いまま」
+;; という壊れ方をしない。
+;;
+;; token を上げるのは `my-magit-watch.el' の 3 か所だけ:
+;;
+;;   1. 分類を通った w32notify イベント 1 件ごと (外部からの変更)
+;;   2. `magit-pre-refresh-hook' — magit 自身の書き込みと、ユーザの `g'。
+;;      `magit-run-git-with-input' (call-process-region) や
+;;      `magit-start-process' (非同期) はデーモンを通らないが、magit は
+;;      コマンドの後に必ず `magit-refresh' を呼ぶのでここで捕まる
+;;   3. デーモン経由で書き込みコマンドが走ったとき (`my:gitd--process-file')
+;;
+;; **監視 (`my:magit-watch-mode') が動いていないリポジトリでは `repo' も
+;; `token' も付かず、キャッシュも先読みも行われない。** キャッシュの寿命は
+;; 監視の寿命に従属する。これが最大の安全弁になっている。
 ;;
 ;; 安全側の作り:
 ;;   - バイナリが無い / デーモンが死んだ / 形態が未知 → 黙って素の
@@ -65,8 +91,15 @@
 当然遅くなるので、導入直後の検証期間だけ有効にする使い方を想定している。"
   :type 'boolean)
 
-(defconst my:gitd-protocol 1
+(defconst my:gitd-protocol 2
   "プロトコル版。Rust 側の PROTOCOL と揃える。")
+
+(defcustom my:gitd-cache t
+  "非 nil なら、読み取り結果をデーモン側にキャッシュして先読みさせる。
+
+nil にすると段階 2a と同じ素通しプロキシになる。
+キャッシュを疑ったときの切り分けに使う。"
+  :type 'boolean)
 
 (defconst my:gitd-verify-buffer "*gitd verify*")
 
@@ -89,8 +122,10 @@
 (defvar my:gitd--disabled nil "サーキットブレーカが落ちたら非 nil。")
 (defvar my:gitd--in-fallback nil "再入防止。素通し実行中は非 nil。")
 
-(defvar my:gitd--stats (list :routed 0 :fallback 0 :daemon-ms 0.0 :saved-ms 0.0)
+(defvar my:gitd--stats (list :routed 0 :fallback 0 :cached 0 :daemon-ms 0.0 :saved-ms 0.0)
   "統計。`my:gitd-stats' で表示する。")
+
+(defvar my:gitd--threads nil "デーモンが使う並列度。`initialize' で受け取る。")
 
 (defconst my:gitd--native-spawn-ms 56.0
   "素の `process-file' 1 回あたりのプロセス生成コストの実測値 (ms)。
@@ -124,8 +159,12 @@
       (unless (equal (plist-get r :protocol) my:gitd-protocol)
         (jsonrpc-shutdown conn)
         (setq my:gitd--disabled t)
-        (error "gitd: プロトコル不一致 (Emacs %s / バイナリ %s)。M-x my:gitd-build で作り直してください"
-               my:gitd-protocol (plist-get r :protocol)))
+        ;; `error' にすると `my:gitd--ensure' の condition-case に飲まれて
+        ;; ユーザに届かない。作り直せば直るものなので必ず見せる。
+        (message "gitd: プロトコル不一致 (Emacs %s / バイナリ %s)。M-x my:gitd-build で作り直してください"
+                 my:gitd-protocol (plist-get r :protocol))
+        (error "gitd: プロトコル不一致"))
+      (setq my:gitd--threads (plist-get r :threads))
       (setq my:gitd--envs (make-hash-table :test #'equal))
       (setq my:gitd--conn conn))))
 
@@ -205,9 +244,10 @@ Unicode に戻す。Rust 側はワイド API で子プロセスを起動する�
 
 (defconst my:gitd--read-only-subcommands
   '("rev-parse" "symbolic-ref" "describe" "status" "diff" "show" "log"
+    "diff-index" "diff-files" "diff-tree"
     "for-each-ref" "show-ref" "ls-files" "ls-tree" "cat-file" "merge-base"
     "rev-list" "var" "name-rev" "check-ignore" "check-attr" "count-objects"
-    "branch" "tag" "remote" "config" "stash" "update-index")
+    "branch" "tag" "remote" "config" "stash" "update-index" "worktree")
   "失敗したときに素通しで再実行してよいサブコマンド。
 
 ルーティングの可否ではなく **再実行してよいか** の判定に使う。
@@ -240,11 +280,48 @@ Unicode に戻す。Rust 側はワイド API で子プロセスを起動する�
                                rest))
            ((or "branch" "tag" "remote") (and (member "--list" rest) t))
            ("stash" (equal rest '("list")))
+           ("worktree" (equal (car rest) "list"))
            ;; .git/index の stat キャッシュを書き換えるが冪等なので
            ;; 二重実行は無害。2b ではキャッシュ対象から外すこと。
            ("update-index" (equal rest '("--refresh")))
            (_ t))
          t)))
+
+(declare-function my:magit-watch-scope "my-magit-watch")
+(declare-function my:magit-watch-bump "my-magit-watch")
+
+(defun my:gitd--scope ()
+  "`default-directory' を含む監視中リポジトリの (ROOT . TOKEN) を返す。
+
+無ければ nil。**ここで git を呼んではいけない。** `magit-toplevel' を
+呼ぶと `magit-process-file' に再入する。`my-magit-watch' が監視中の
+ルートを持っているので、その表を引くだけで済ませる。
+
+`my-magit-watch' が無い / 監視していないリポジトリでは nil になり、
+キャッシュも先読みも行われずに段階 2a と同じ動作になる。"
+  (and my:gitd-cache
+       (fboundp 'my:magit-watch-scope)
+       (my:magit-watch-scope default-directory)))
+
+(defun my:gitd--role (program args)
+  "PROGRAM ARGS のキャッシュ上の役割を返す。
+
+  \"cache\"    結果をキャッシュしてよい読み取り
+  \"prelude\"  先読みの先頭で直列に走らせる。キャッシュはしない
+  nil        素通し。キャッシュにも先読みにも関与しない (既定)
+
+`update-index --refresh' だけが `prelude' になる。これは
+`magit-status-refresh-buffer' が **先頭で** 呼ぶもので、
+「stat は変わったが内容は同じ」ファイルのインデックス側 stat キャッシュを
+更新する。先読みでこれを飛ばすと、`diff-files' などが「変更あり」と
+報告した結果がキャッシュに残り、magit が本物の `update-index --refresh' を
+走らせて直した後もその古い答えが返ってしまう。"
+  (let ((local (my:gitd--local-args program args)))
+    (cond
+     ((equal local '("update-index" "--refresh")) "prelude")
+     ((equal (car local) "update-index") nil)
+     ((my:gitd-read-only-p program args) "cache")
+     (t nil))))
 
 (defun my:gitd--known-buffer-form-p (buffer)
   "BUFFER が再現できる形なら非 nil。
@@ -259,9 +336,15 @@ Unicode に戻す。Rust 側はワイド API で子プロセスを起動する�
            (or (null (cadr buffer)) (stringp (cadr buffer)))
            (null (cddr buffer)))))
 
+(defvar magit-process-record-invocations)
+
 (defun my:gitd--routable-p (program infile buffer display)
   (and my:gitd-mode
        (my:gitd--available-p)
+       ;; magit 自身の呼び出し記録は `magit-process-file' の本体にあるので、
+       ;; 横取りすると記録されなくなる。デバッグのために有効にしている
+       ;; ときは素通しにして、magit から見た挙動を完全に保つ
+       (not (bound-and-true-p magit-process-record-invocations))
        (null infile)                            ; 標準入力は扱わない
        (null display)
        (not (file-remote-p default-directory))
@@ -271,17 +354,32 @@ Unicode に戻す。Rust 側はワイド API で子プロセスを起動する�
 
 ;;; ---------------------------------------------------------------- 実行
 
-(defun my:gitd--request (conn program args want-stderr)
-  "デーモンに git を実行させて (EXIT STDOUT STDERR) を返す。
-STDOUT / STDERR は生バイト (unibyte 文字列)。"
+(defun my:gitd--request (conn program args want-stderr role scope)
+  "デーモンに git を実行させて (EXIT STDOUT STDERR CACHED) を返す。
+STDOUT / STDERR は生バイト (unibyte 文字列)。
+
+ROLE / SCOPE が非 nil のときだけ `repo' と `token' を載せる。
+**書き込みコマンドには決して載せない。** デーモン側のリポジトリ状態を
+書き込みが動かすと、先読みで作ったキャッシュを古いトークンで
+巻き戻してしまうことがある。"
   (let* ((send (lambda (id)
                  (jsonrpc-request
                   conn 'git/run
-                  (list :program (my:gitd--to-text program)
-                        :cwd (my:gitd--to-text default-directory)
-                        :args (vconcat (mapcar #'my:gitd--to-text args))
-                        :env id
-                        :want_stderr (if want-stderr t :json-false))
+                  (nconc
+                   (list :program (my:gitd--to-text program)
+                         ;; **必ず expand-file-name する。** Emacs は file
+                         ;; バッファの default-directory を "~/..." に略記
+                         ;; することがあり、`call-process' は内部で展開するが
+                         ;; Rust の `current_dir' は展開しない。そのまま渡すと
+                         ;; 「ディレクトリ名が無効です (os error 267)」になる
+                         :cwd (my:gitd--to-text (expand-file-name default-directory))
+                         :args (vconcat (mapcar #'my:gitd--to-text args))
+                         :env id
+                         :want_stderr (if want-stderr t :json-false))
+                   (and role scope
+                        (list :repo (my:gitd--to-text (car scope))
+                              :token (cdr scope)
+                              :role role)))
                   :timeout nil)))
          (id (my:gitd--env-id conn))
          (r (condition-case err
@@ -296,7 +394,32 @@ STDOUT / STDERR は生バイト (unibyte 文字列)。"
     (list (plist-get r :exit)
           (base64-decode-string (plist-get r :stdout))
           (and want-stderr (plist-get r :stderr)
-               (base64-decode-string (plist-get r :stderr))))))
+               (base64-decode-string (plist-get r :stderr)))
+          (eq (plist-get r :cached) t))))
+
+;;; ---------------------------------------------------------------- 先読み
+
+(defun my:gitd--notify (method params)
+  "接続済みのときだけ通知を送る。応答は待たない。
+
+**接続していなければ何もしない。** タイマーから呼ばれるので、
+ここでデーモンを起こしにいくと、magit を使っていない時間にも
+プロセスが立ち上がってしまう。"
+  (when (and my:gitd-mode (my:gitd--available-p) (my:gitd--live-p))
+    (ignore-errors (jsonrpc-notify my:gitd--conn method params))))
+
+(defun my:gitd-prewarm (root token)
+  "ROOT の TOKEN 時点の状態を先読みするようデーモンに頼む。
+
+直前のリフレッシュで実際に使われたコマンド列をデーモンが覚えており、
+それを並列に走らせてキャッシュを埋める。応答は待たない。"
+  (when my:gitd-cache
+    (my:gitd--notify 'repo/prewarm (list :repo (my:gitd--to-text root)
+                                         :token token))))
+
+(defun my:gitd-forget (root)
+  "ROOT についてデーモンが持っている状態を捨てさせる。"
+  (my:gitd--notify 'repo/forget (list :repo (my:gitd--to-text root))))
 
 (defun my:gitd--emit (buffer stdout stderr)
   "素の `process-file' と同じように STDOUT / STDERR を BUFFER に出す。"
@@ -349,14 +472,22 @@ STDOUT / STDERR は生バイト (unibyte 文字列)。"
         (apply orig program infile buffer display args)
       (condition-case err
           (let* ((want-stderr (and (consp buffer) (stringp (cadr buffer))))
+                 (role (and my:gitd-cache (my:gitd--role program args)))
+                 (scope (and role (my:gitd--scope)))
                  (t0 (float-time))
-                 (r (my:gitd--request conn program args want-stderr))
+                 (r (my:gitd--request conn program args want-stderr role scope))
                  (ms (* 1000 (- (float-time) t0))))
             (setq my:gitd--failures 0)
             (cl-incf (plist-get my:gitd--stats :routed))
+            (when (nth 3 r) (cl-incf (plist-get my:gitd--stats :cached)))
             (cl-incf (plist-get my:gitd--stats :daemon-ms) ms)
             (cl-incf (plist-get my:gitd--stats :saved-ms)
                      (max 0 (- my:gitd--native-spawn-ms ms)))
+            ;; 書き込みが通ったらトークンを進める。magit-pre-refresh-hook でも
+            ;; 上がるが、magit には「書いてから全体リフレッシュを挟まずに
+            ;; 読む」経路があるので、ここでも上げておく
+            (when (and (null role) (fboundp 'my:magit-watch-bump))
+              (my:magit-watch-bump default-directory))
             (when (and my:gitd-verify (my:gitd-read-only-p program args))
               (my:gitd--verify program args (nth 0 r) (nth 1 r)))
             (my:gitd--emit buffer (nth 1 r) (nth 2 r))
@@ -387,17 +518,38 @@ STDOUT / STDERR は生バイト (unibyte 文字列)。"
 
 ;;;###autoload
 (defun my:gitd-stats ()
-  "ルーティング数・フォールバック数・短縮時間を表示する。"
+  "ルーティング数・キャッシュヒット率・フォールバック数・短縮時間を表示する。"
   (interactive)
-  (let ((routed (plist-get my:gitd--stats :routed)))
-    (message "gitd: %d 回経由 / %d 回フォールバック / 平均 %.1f ms / 累計短縮 %.1f 秒%s"
-             routed
+  (let ((routed (plist-get my:gitd--stats :routed))
+        (cached (plist-get my:gitd--stats :cached)))
+    (message "gitd: %d 回経由 (うちキャッシュ %d = %d%%) / %d 回フォールバック / 平均 %.1f ms / 累計短縮 %.1f 秒%s"
+             routed cached
+             (if (zerop routed) 0 (round (* 100.0 (/ (float cached) routed))))
              (plist-get my:gitd--stats :fallback)
              (if (zerop routed) 0.0 (/ (plist-get my:gitd--stats :daemon-ms) routed))
              (/ (plist-get my:gitd--stats :saved-ms) 1000.0)
              (cond (my:gitd--disabled "  [停止中]")
-                   ((my:gitd--live-p) "")
+                   ((my:gitd--live-p) (format "  [%s 並列]" (or my:gitd--threads "?")))
                    (t "  [未接続]")))))
+
+;;;###autoload
+(defun my:gitd-daemon-stats ()
+  "デーモン側が持っているリポジトリごとの状態を表示する。"
+  (interactive)
+  (if (not (my:gitd--live-p))
+      (message "gitd: 未接続")
+    (let ((r (jsonrpc-request my:gitd--conn 'gitd/stats nil :timeout nil)))
+      (with-current-buffer (get-buffer-create "*gitd stats*")
+        (erase-buffer)
+        (insert (format "並列度: %s\n\n" (plist-get r :threads)))
+        (seq-doseq (repo (plist-get r :repos))
+          (insert (format "%s\n  token=%s  cached=%s  recipe=%s  prelude=%s\n  hits=%s  misses=%s  prewarms=%s\n\n"
+                          (plist-get repo :repo) (plist-get repo :token)
+                          (plist-get repo :cached) (plist-get repo :recipe)
+                          (plist-get repo :prelude) (plist-get repo :hits)
+                          (plist-get repo :misses) (plist-get repo :prewarms))))
+        (goto-char (point-min))
+        (display-buffer (current-buffer))))))
 
 ;;;###autoload
 (define-minor-mode my:gitd-mode

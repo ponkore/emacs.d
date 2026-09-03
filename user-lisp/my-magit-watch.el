@@ -15,6 +15,41 @@
 ;;
 ;; 設計と実測は tmp/magit-autorefresh-stage1-design.md を参照。
 ;;
+;;; gitd との協調 (段階 2b)
+;;
+;; `my-gitd' のデーモン側キャッシュは (リポジトリ, トークン, コマンド) で引く。
+;; そのトークンをここが持っている (`my:magit-watch-repo-serial')。
+;; **進め忘れると gitd が古い答えを返し続ける**ので、判断に迷ったら進める。
+;;
+;; タイマーは 2 本ある。どちらもイベントごとに張り直す。
+;;
+;;   0.1 秒 (`my:magit-watch-prewarm-delay')  先読みを頼む
+;;   0.4 秒 (`my:magit-watch-debounce')       リフレッシュする
+;;
+;; 差の 0.3 秒が先読みの持ち時間で、その間にデーモンが 28 コマンドを 8 並列で
+;; 走らせてキャッシュを埋める。おかげでリフレッシュが 0.6 秒 → 50〜70 ms。
+;; 0.1 秒待つのは、1 ファイルの保存で w32notify が約 10 件のイベントを出すため
+;; (最初の 1 件で頼むと残り 9 件でトークンが進んで無駄になる)。
+;;
+;;; 【重要】読み取りだけの git もイベントを出す
+;;
+;; 実測 (2026-09): `status --porcelain' で 4 件 (`.git' ×2 と
+;; `.git\index.lock' ×2)、`update-index --refresh' は何もしない場合でも 3 件。
+;; つまり **リフレッシュも先読みも、必ず自分でイベントを作る**。
+;;
+;; 分類上これらはすべて `suspect' なので、`suspect' だけを狙って 2 つ手当てする。
+;;
+;;   1. `suspect' ではトークンを進めない。進めると自分のリフレッシュや
+;;      先読みが自分のキャッシュを壊す
+;;   2. `suspect' では既に張ってあるタイマーを延長しない。「何かが起きたかも」
+;;      以上のことを言わないので、評価が予約済みなら足す情報が無い。
+;;      **延長すると先読みが自分自身を呼び続け、リフレッシュが永久に来ない**
+;;      (実際にそうなった。先読み 63 回・リフレッシュ 0 回)
+;;
+;; 1 の代わりに、`my:magit-watch--fire' がフィンガープリントの不一致を
+;; 見つけたときにトークンを進める。イベントが落ちても取り返せるという
+;; 段階 1 の性質はこれで保たれる。
+;;
 ;;; 自励振動について (重要)
 ;;
 ;; `magit-refresh-buffer' を 1 回走らせるだけで毎回 7 件のイベントが出る
@@ -65,6 +100,9 @@
 (declare-function magit-refresh-buffer "magit-mode")
 (declare-function magit-process-git "magit-process")
 (defvar magit-git-global-arguments)
+(defvar magit-pre-refresh-hook)
+
+(defvar my:magit-watch-mode)            ; define-minor-mode で定義される
 
 (defgroup my:magit-watch nil
   "ワークツリーの変化で magit を自動更新する。"
@@ -73,6 +111,20 @@
 (defcustom my:magit-watch-debounce 0.4
   "最後のイベントからこの秒数だけ待ってからリフレッシュする。"
   :type 'number)
+
+(defcustom my:magit-watch-prewarm-delay 0.1
+  "最後のイベントからこの秒数で `my-gitd' に先読みを頼む。
+
+`my:magit-watch-debounce' より **短く**すること。差が先読みの持ち時間になる。
+既定では 0.4 - 0.1 = 0.3 秒あり、29 コマンドを 8 並列で走らせるには足りる。
+
+0.1 秒待つのは、**1 ファイルの保存で w32notify が約 10 件のイベントを出す**
+ため。イベント 1 件ごとにトークンが上がるので、最初の 1 件で先読みを頼むと
+残り 9 件で無効化されてしまう。
+
+nil にすると先読みを頼まない (リフレッシュ直前には必ず頼むので、
+遅くなるだけで壊れはしない)。"
+  :type '(choice number (const nil)))
 
 (defcustom my:magit-watch-min-interval 2.0
   "自動リフレッシュの最短間隔 (秒)。
@@ -95,22 +147,59 @@
   gitdir        ; .git ディレクトリ (絶対、末尾 "/")
   desc          ; w32notify のディスクリプタ
   fp            ; .git/index と .git/HEAD の (mtime . size)。判定の要
+  serial        ; 状態の通し番号。gitd のキャッシュのトークンになる
   pending       ; 未処理イベントの分類 (シンボルのリスト)
   wt-dirs       ; この窓で変化したワークツリーのディレクトリ (ハッシュ)
   wt-overflow   ; wt-dirs が上限を超えたら t (判断を諦める)
   ign-cache     ; 相対ディレクトリ -> ignored かどうか (ハッシュ)
-  timer
+  timer         ; リフレッシュ用のデバウンスタイマー
+  prewarm-timer ; 先読み用の短いタイマー
+  prewarmed     ; この窓で先読みを頼んだか (1 窓 1 回に絞る)
   last-refresh) ; 最後にリフレッシュした時刻 (レート制限用)
 
 (defvar my:magit-watch--repos (make-hash-table :test #'equal)
   "root -> `my:magit-watch-repo'。")
 
 (defvar my:magit-watch--stats
-  (list :events 0 :classified 0 :refreshed 0 :skipped 0 :deferred 0 :ign-error 0)
+  (list :events 0 :classified 0 :refreshed 0 :skipped 0 :deferred 0
+        :throttled 0 :prewarmed 0 :ign-error 0)
   "統計。`my:magit-watch-stats' で表示する。")
 
 (defvar my:magit-watch--ign-warned nil
   "check-ignore の失敗を 1 度だけ知らせるためのフラグ。")
+
+;;; ------------------------------------------------ トークン (gitd との接点)
+
+;; `my-gitd' のデーモン側キャッシュは (repo, token, コマンド) で引く。
+;; token を進めるのはここだけで、進め忘れると **古い答えが返り続ける**。
+;; 逆に進めすぎても遅くなるだけなので、迷ったら進める。
+
+(declare-function my:gitd-prewarm "my-gitd")
+(declare-function my:gitd-forget "my-gitd")
+
+(defun my:magit-watch-scope (&optional dir)
+  "DIR を含む監視中リポジトリの (ROOT . TOKEN) を返す。無ければ nil。
+
+`my-gitd' が `git/run' のたびに呼ぶ。**git を呼んではいけない**
+\(`magit-process-file' に再入する)。監視表を引くだけで済ませている。"
+  (and my:magit-watch-mode
+       (when-let* ((repo (my:magit-watch--repo-of (or dir default-directory))))
+         (cons (my:magit-watch-repo-root repo)
+               (or (my:magit-watch-repo-serial repo) 0)))))
+
+(defun my:magit-watch-bump (&optional dir)
+  "DIR のリポジトリの状態が変わったことにする (トークンを進める)。"
+  (when-let* ((repo (my:magit-watch--repo-of (or dir default-directory))))
+    (cl-incf (my:magit-watch-repo-serial repo))))
+
+(defun my:magit-watch--ask-prewarm (repo)
+  "REPO の現在のトークンで先読みを頼む。**純粋な最適化**。
+
+送らなくても遅くなるだけで壊れない。逆に送りすぎると、ビルド中に
+無駄な git 起動が増える。"
+  (when (fboundp 'my:gitd-prewarm)
+    (my:gitd-prewarm (my:magit-watch-repo-root repo)
+                     (or (my:magit-watch-repo-serial repo) 0))))
 
 ;;; ---------------------------------------------------------------- 分類
 
@@ -251,9 +340,13 @@ mtime を見て判断する。ブランチ切替では両方とも必ず変わ�
             (not (my:magit-watch--ignored-p repo (hash-table-keys h)))))))
 
 (defun my:magit-watch--stale-p (repo)
-  "REPO をリフレッシュする必要があるなら非 nil。
+  "REPO をリフレッシュする必要があるなら、その理由のシンボルを返す。
 
-ワークツリーか .git のメタ情報が動いていれば無条件に要る。
+  `meta'        .git のメタ情報が動いた
+  `worktree'    ワークツリーが動いた (gitignore されていないもの)
+  `fingerprint' 決め手のイベントは無いが、内容を見たら変わっていた
+  nil           更新は要らない
+
 `index' と `suspect' しか無いときは、前回のリフレッシュ直後に取った
 フィンガープリントと比べて本当に変わったかを見る。ここで
 
@@ -262,17 +355,21 @@ mtime を見て判断する。ブランチ切替では両方とも必ず変わ�
 
 の両方が落ちる。どちらも magit が既にリフレッシュ済みで、その時点の
 スナップショットと一致するため。**時刻ではなく内容で見ているので、
-イベントの配送順に依存しない。**"
+イベントの配送順に依存しない。**
+
+**副作用を持たせないこと。** 先読みタイマーとリフレッシュタイマーの
+両方から、同じ窓で何度も呼ばれる。"
   (let ((pending (my:magit-watch-repo-pending repo)))
     (cond
      ((null pending) nil)
-     ((memq 'meta pending) t)
+     ((memq 'meta pending) 'meta)
      ;; ワークツリーの変化は、gitignore されているものだけなら無視する
      ((and (memq 'worktree pending)
            (my:magit-watch--worktree-relevant-p repo))
-      t)
-     (t (not (equal (my:magit-watch-repo-fp repo)
-                    (my:magit-watch--fingerprint repo)))))))
+      'worktree)
+     ((not (equal (my:magit-watch-repo-fp repo)
+                  (my:magit-watch--fingerprint repo)))
+      'fingerprint))))
 
 (defun my:magit-watch--allowed-p ()
   "今リフレッシュしてよいなら非 nil。
@@ -334,23 +431,71 @@ mtime を見て判断する。ブランチ切替では両方とも必ず変わ�
      ;; レート制限。ビルド中の暴走を止める
      ((< (- (float-time) (or (my:magit-watch-repo-last-refresh repo) 0))
          my:magit-watch-min-interval)
+      (cl-incf (plist-get my:magit-watch--stats :throttled))
       (my:magit-watch--arm repo my:magit-watch-min-interval))
      (t
-      (let ((stale (my:magit-watch--stale-p repo)))
+      (let ((reason (my:magit-watch--stale-p repo)))
+        ;; 決め手のイベントが落ちていて内容で気づいた場合だけ、ここで
+        ;; トークンを進める。`suspect' ではコールバックで進めていないので、
+        ;; これが無いと gitd が古い答えを返し続ける
+        (when (eq reason 'fingerprint)
+          (cl-incf (my:magit-watch-repo-serial repo)))
         (setf (my:magit-watch-repo-pending repo) nil)
         (setf (my:magit-watch-repo-wt-dirs repo) nil)
         (setf (my:magit-watch-repo-wt-overflow repo) nil)
-        (if stale
-            (progn (cl-incf (plist-get my:magit-watch--stats :refreshed))
-                   (my:magit-watch--refresh repo))
+        (setf (my:magit-watch-repo-prewarmed repo) nil)
+        (if reason
+            (progn
+              ;; 先読みタイマーが間に合っていなくても、ここで頼めば
+              ;; デーモン側が並列に走らせ、magit の要求は single-flight で
+              ;; それに合流する。直列 29 回ぶんの待ちが 1 回ぶんになる
+              (my:magit-watch--ask-prewarm repo)
+              (cl-incf (plist-get my:magit-watch--stats :refreshed))
+              (my:magit-watch--refresh repo))
           (cl-incf (plist-get my:magit-watch--stats :skipped))))))))
 
-(defun my:magit-watch--arm (repo delay)
-  (when (my:magit-watch-repo-timer repo)
-    (cancel-timer (my:magit-watch-repo-timer repo)))
-  (setf (my:magit-watch-repo-timer repo)
-        (run-with-timer delay nil #'my:magit-watch--fire
-                        (my:magit-watch-repo-root repo))))
+(defun my:magit-watch--fire-prewarm (root)
+  "先読みタイマーから呼ばれる。リフレッシュはしない。
+
+`my:magit-watch--stale-p' をここでも通すのが肝で、`.gitignore' で
+無視されるだけの変化 (ビルド出力など) では先読みも走らない。
+**`pending' を消さないこと。** リフレッシュ側の判定がまだ要る。
+
+**1 つの窓では 1 回しか頼まない。** 先読みは 28 個の git を走らせ、その
+どれもが `.git' と `.git/index.lock' のイベントを出す (実測: 読み取り
+10 種で 4 件、`update-index --refresh' だけでも 3 件)。頼むたびに
+タイマーが張り直されるので、絞らないと先読みが自分自身を呼び続ける。"
+  (when-let* ((repo (gethash root my:magit-watch--repos)))
+    (setf (my:magit-watch-repo-prewarm-timer repo) nil)
+    (when (and (not (my:magit-watch-repo-prewarmed repo))
+               (my:magit-watch--stale-p repo))
+      (setf (my:magit-watch-repo-prewarmed repo) t)
+      (cl-incf (plist-get my:magit-watch--stats :prewarmed))
+      (my:magit-watch--ask-prewarm repo))))
+
+(defun my:magit-watch--arm (repo delay &optional only-if-idle)
+  "REPO のリフレッシュを DELAY 秒後に予約する。
+
+ONLY-IF-IDLE が非 nil なら、既に予約があるときは**延長しない**。
+`suspect' のイベントに使う。自分の git 実行が出すイベントで
+デバウンスの窓が延び続け、いつまでも発火しなくなるのを防ぐ。"
+  (unless (and only-if-idle (my:magit-watch-repo-timer repo))
+    (when (my:magit-watch-repo-timer repo)
+      (cancel-timer (my:magit-watch-repo-timer repo)))
+    (setf (my:magit-watch-repo-timer repo)
+          (run-with-timer delay nil #'my:magit-watch--fire
+                          (my:magit-watch-repo-root repo)))))
+
+(defun my:magit-watch--arm-prewarm (repo &optional only-if-idle)
+  (when (and my:magit-watch-prewarm-delay
+             (< my:magit-watch-prewarm-delay my:magit-watch-debounce)
+             (not (and only-if-idle (my:magit-watch-repo-prewarm-timer repo))))
+    (when (my:magit-watch-repo-prewarm-timer repo)
+      (cancel-timer (my:magit-watch-repo-prewarm-timer repo)))
+    (setf (my:magit-watch-repo-prewarm-timer repo)
+          (run-with-timer my:magit-watch-prewarm-delay nil
+                          #'my:magit-watch--fire-prewarm
+                          (my:magit-watch-repo-root repo)))))
 
 ;;; ---------------------------------------------------------------- 監視
 
@@ -367,6 +512,15 @@ mtime を見て判断する。ブランチ切替では両方とも必ず変わ�
               (kind (my:magit-watch--classify rel)))
     (cl-incf (plist-get my:magit-watch--stats :classified))
     (cl-pushnew kind (my:magit-watch-repo-pending repo))
+    ;; **状態が変わった証拠があるときだけトークンを進める。**
+    ;; `suspect' (.git 自身と .git/**/*.lock) を含めてはいけない。
+    ;; **読み取りだけの git もこれらのイベントを出す**ため (実測: `status'
+    ;; ですら index.lock を作る)、含めると自分のリフレッシュや先読みが
+    ;; 自分のキャッシュを壊してしまう。
+    ;; 決め手のイベントが落ちた場合は `my:magit-watch--fire' が
+    ;; フィンガープリントの不一致を見て進める
+    (unless (eq kind 'suspect)
+      (cl-incf (my:magit-watch-repo-serial repo)))
     (cond
      ((eq kind 'worktree)
       ;; 除外ルールが変わったらキャッシュを捨てる
@@ -382,7 +536,12 @@ mtime を見て判断する。ブランチ切替では両方とも必ず変わ�
       ;; .git/info/exclude や core.excludesFile の変更でも除外ルールは変わる
       (when (member rel '(".git/info/exclude" ".git/config"))
         (setf (my:magit-watch-repo-ign-cache repo) nil))))
-    (my:magit-watch--arm repo my:magit-watch-debounce)))
+    ;; `suspect' は「何かが起きたかもしれない」以上のことを言わない。
+    ;; 既に評価が予約してあるなら窓を延ばさない (延ばすと、自分の git 実行が
+    ;; 出すイベントで永久に発火しなくなる。実際にそうなった)
+    (let ((idle-only (eq kind 'suspect)))
+      (my:magit-watch--arm repo my:magit-watch-debounce idle-only)
+      (my:magit-watch--arm-prewarm repo idle-only))))
 
 (defun my:magit-watch--under-p (dir root)
   (let ((d (expand-file-name dir))
@@ -408,7 +567,7 @@ mtime を見て判断する。ブランチ切替では両方とも必ず変わ�
         (unless (gethash root my:magit-watch--repos)
           (when-let* ((gitdir (magit-gitdir)))
             (let ((repo (my:magit-watch--make-repo
-                         :root root :gitdir gitdir)))
+                         :root root :gitdir gitdir :serial 1)))
               ;; watch を張る前にフィンガープリントを取る (取りこぼし防止)
               (setf (my:magit-watch-repo-fp repo)
                     (my:magit-watch--fingerprint repo))
@@ -422,10 +581,15 @@ mtime を見て判断する。ブランチ切替では両方とも必ず変わ�
 
 (defun my:magit-watch-remove (root)
   (when-let* ((repo (gethash root my:magit-watch--repos)))
-    (when (my:magit-watch-repo-timer repo)
-      (cancel-timer (my:magit-watch-repo-timer repo)))
+    (dolist (tm (list (my:magit-watch-repo-timer repo)
+                      (my:magit-watch-repo-prewarm-timer repo)))
+      (when tm (cancel-timer tm)))
     (ignore-errors (w32notify-rm-watch (my:magit-watch-repo-desc repo)))
-    (remhash root my:magit-watch--repos)))
+    (remhash root my:magit-watch--repos)
+    ;; 監視をやめたらキャッシュも捨てさせる。以後トークンを進める者が
+    ;; いなくなるので、残しておくと古い答えを返し続けることになる
+    (when (fboundp 'my:gitd-forget)
+      (my:gitd-forget root))))
 
 (defun my:magit-watch--remove-all ()
   (dolist (root (hash-table-keys my:magit-watch--repos))
@@ -445,6 +609,28 @@ mtime を見て判断する。ブランチ切替では両方とも必ず変わ�
           (my:magit-watch--fingerprint repo))
     (setf (my:magit-watch-repo-last-refresh repo) (float-time))))
 
+(defun my:magit-watch--pre-refresh ()
+  "`magit-pre-refresh-hook'。トークンを進めて先読みを頼む。
+
+**このフックは `magit-refresh' でしか走らない。** つまり
+
+  - ユーザが `g' を押したとき
+  - magit のコマンド (stage / commit / checkout / ...) の直後
+
+の 2 つで、自動更新が使う `magit-refresh-buffer' では走らない。
+
+トークンを進めるのが重要で、`magit-run-git-with-input'
+\(`call-process-region') や `magit-start-process' (非同期) はデーモンを
+通らないため、書き込みをデーモン側から観測できない。magit は必ず
+`magit-refresh' で締めるので、ここで捕まえれば取りこぼさない。
+**`g' が必ず本当のことを言う**のもこれで保証される。
+
+先読みを頼むのは速度のため。頼んでおけばデーモンが 29 コマンドを
+並列に走らせ、直後に来る magit の要求はそれに合流する。"
+  (when-let* ((repo (my:magit-watch--repo-of default-directory)))
+    (cl-incf (my:magit-watch-repo-serial repo))
+    (my:magit-watch--ask-prewarm repo)))
+
 (defun my:magit-watch--after-mode ()
   "`magit-mode-hook'。バッファができたら監視を始める。"
   (my:magit-watch-add default-directory))
@@ -455,13 +641,15 @@ mtime を見て判断する。ブランチ切替では両方とも必ず変わ�
 (defun my:magit-watch-stats ()
   "イベント数・リフレッシュ数・抑止数を表示する。"
   (interactive)
-  (message "magit-watch: %d 監視中 / イベント %d (分類を通った %d) / リフレッシュ %d / 変化なしで抑止 %d / 操作中で待ち直し %d%s"
+  (message "magit-watch: %d 監視中 / イベント %d (分類を通った %d) / リフレッシュ %d / 先読み %d / 変化なしで抑止 %d / 操作中で待ち直し %d / レート制限で待ち直し %d%s"
            (hash-table-count my:magit-watch--repos)
            (plist-get my:magit-watch--stats :events)
            (plist-get my:magit-watch--stats :classified)
            (plist-get my:magit-watch--stats :refreshed)
+           (plist-get my:magit-watch--stats :prewarmed)
            (plist-get my:magit-watch--stats :skipped)
            (plist-get my:magit-watch--stats :deferred)
+           (plist-get my:magit-watch--stats :throttled)
            (let ((e (plist-get my:magit-watch--stats :ign-error)))
              (if (zerop e) "" (format " / check-ignore 失敗 %d" e)))))
 
@@ -476,12 +664,14 @@ mtime を見て判断する。ブランチ切替では両方とも必ず変わ�
       (progn
         (add-hook 'magit-mode-hook #'my:magit-watch--after-mode)
         (add-hook 'magit-refresh-buffer-hook #'my:magit-watch--after-refresh)
+        (add-hook 'magit-pre-refresh-hook #'my:magit-watch--pre-refresh)
         ;; 既にある magit バッファを拾う
         (dolist (buf (buffer-list))
           (with-current-buffer buf
             (when (derived-mode-p 'magit-mode) (my:magit-watch-add)))))
     (remove-hook 'magit-mode-hook #'my:magit-watch--after-mode)
     (remove-hook 'magit-refresh-buffer-hook #'my:magit-watch--after-refresh)
+    (remove-hook 'magit-pre-refresh-hook #'my:magit-watch--pre-refresh)
     (my:magit-watch--remove-all)))
 
 ;; 対象は Windows のみ。`w32notify-add-watch' の `subtree' に相当するものが
