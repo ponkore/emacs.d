@@ -107,7 +107,26 @@
   ;; 一度 M-x grep するとセッション全体で null-device が "/dev/null" のままだった。
   ;; let 束縛にしたので両方とも確実に元へ戻る。
   (defun my:grep-with-cp932 (orig &rest args)
-    (let ((default-process-coding-system '(utf-8 . cp932))
+    (let (;; 【重要】コマンド行の書き込み側を ANSI コードページに固定する。
+          ;;
+          ;; grep は compilation-start 経由で shell-file-name (bash.exe) に
+          ;; "-c コマンド行" を渡す。Emacs はプロセスを ANSI API で起動する
+          ;; ので、コマンド行は cp932 でエンコードされていなければならない。
+          ;; UTF-8 のまま渡すと受け取り側で cp932 として解釈され、日本語の
+          ;; 検索語が化けて「一致なし」になる (エラーにはならない)。
+          ;;
+          ;; default-process-coding-system だけでは効かない。my-shell.el の
+          ;;   (modify-coding-system-alist 'process ".*sh\\.exe" 'utf-8)
+          ;; が process-coding-system-alist を通じて car/cdr とも utf-8 に
+          ;; 固定し、そちらが優先されるため。coding-system-for-write は
+          ;; それより強い。
+          ;;
+          ;; grep は標準入力を使わない (/dev/null を渡している) ので、
+          ;; 書き込み側を変えても副作用は無い。M-! / M-| や M-x shell の
+          ;; 標準入力は utf-8 のまま (alist を触っていないので不変)。
+          ;; 非 Windows では locale-coding-system が utf-8 なので no-op。
+          (coding-system-for-write locale-coding-system)
+          (default-process-coding-system '(utf-8 . cp932))
           ;; grep をどのシェル経由で動かすかで null デバイス名が変わる。
           ;; bash/sh 経由なら /dev/null、cmd (cmdproxy) なら NUL。
           ;; 以前は無条件で "/dev/null" にしていたため、cmd 側で動くと
@@ -131,7 +150,10 @@
      (list (read-from-minibuffer "Ripgrep search for: " (thing-at-point 'symbol))))
     ;; ripgrep-executable などを参照するので、先にロードしておく
     (require 'ripgrep)
-    (let ((default-directory (dired-current-directory)))
+    (let ((default-directory (dired-current-directory))
+          ;; grep と同じ理由でコマンド行を ANSI コードページで書く。
+          ;; (my:grep-with-cp932 のコメント参照)
+          (coding-system-for-write locale-coding-system))
       (compilation-start
        (mapconcat 'identity
                   (append (list ripgrep-executable)

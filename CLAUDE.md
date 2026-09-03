@@ -917,14 +917,102 @@ UTF-8 のバイト列が受け取り側で cp932 として解釈される。
 `grep`（`my-utils.el`）や `org-pandoc`（`my-text.el`）と同じく cdr だけ
 `locale-coding-system` に戻している。
 
-**外部プログラムにファイル名を渡すときは毎回これを疑うこと。** 同じ穴は
-`M-x compile` / `shell-command` / ripgrep など、`user-lisp/` の外から
-非 ASCII の引数を渡す経路すべてに残っている（`default-process-coding-system`
-そのものを直せば一掃できるが、cdr は標準入力のエンコードも兼ねるので
-影響範囲が広い。2026-09 時点では個別に束縛する方針）。
-
 なお Windows の `my:open-file-externally`（`my-core.el`）は
 `w32-shell-execute`（ワイド API）なのでこの問題は無い。
+
+2026-09-04 に `default-process-coding-system` そのものを
+`(utf-8 . cp932)` に直したので、`M-x compile` / `shell-command` /
+ripgrep など `user-lisp/` の外を通る経路も含めて一掃してある（次節）。
+`my:markdown-open-external` の束縛は冗長になったが、macOS / Linux では
+`locale-coding-system` が utf-8 で no-op になるため、そのまま残してある。
+
+### `prefer-coding-system` が `default-process-coding-system` を上書きする
+
+**`(setq default-process-coding-system '(utf-8 . utf-8))` は GUI では
+2015 年からずっと無意味だった。**
+
+`my-japanese.el` の `*encoding` 相当のブロックでこれを設定しても、後続の
+w32 ブロックにある `(prefer-coding-system 'utf-8-unix)` が
+`set-default-coding-systems` 経由で `default-process-coding-system` を
+`(CODING . CODING)` に書き戻す。実測:
+
+```elisp
+(setq default-process-coding-system '(utf-8 . cp932))  ; => (utf-8 . cp932)
+(prefer-coding-system 'utf-8-unix)                     ; => (utf-8 . utf-8)
+```
+
+`default-file-name-coding-system` が `set-file-name-coding-system 'cp932` で
+打ち消されているのとまったく同じ構図で、こちらは打ち消しが無かった。
+そのため **cdr を変えるには `prefer-coding-system` より後で入れ直す**
+必要がある。
+
+なお w32 ブロックは `:if (eq window-system 'w32)` なので **batch では走らない**。
+batch での最終値は前段の `setq` が決める。両方に置いてあるのはそのため。
+
+### `(utf-8 . cp932)` に変えたときの影響（2026-09-04 に GUI で実測）
+
+| 観点 | 変更前 `(utf-8 . utf-8)` | 変更後 `(utf-8 . cp932)` |
+|---|---|---|
+| 引数（日本語パス）を `if exist` で確認 | **MISSING** | **EXIST** |
+| 出力の復号（日本語のコミット件名） | OK | OK |
+| 標準入力（`call-process-region` → `git hash-object`） | utf-8 | **cp932 に変わる** |
+| pandoc（`markdown-preview`） | OK | OK |
+| `shell-command-on-region`（往復） | OK | OK |
+| magit | OK | OK |
+| `markdown-open`（MarkText） | NG | OK |
+
+cdr は**引数と標準入力の両方**を兼ねるので、標準入力に UTF-8 を要求する
+相手には `process-coding-system-alist` で個別に指定する。現状は pandoc
+（`markdown-preview` と `org-pandoc` がバッファを `call-process-region` で
+流し込む）だけ。
+
+magit は `magit-process-git-arguments` が引数を自分で cp932 に
+`encode-coding-string` し（unibyte 文字列になるので二重エンコードは
+起きない）、標準入力も `magit-run-git-with-input` が自分で utf-8 に
+`encode-coding-region` するので、どちらの設定でも影響を受けない
+（magit issue #3250）。**magit だけが壊れていなかったのはこれが理由。**
+
+### シェル経由の経路は `process-coding-system-alist` が優先される
+
+`M-x grep` と `my:ripgrep-regexp` は `compilation-start` 経由で
+`shell-file-name`（Git の `bash.exe`）に `-c "コマンド行"` を渡す。
+ここは **`default-process-coding-system` を直しても効かない。**
+`my-shell.el` の
+
+```elisp
+(modify-coding-system-alist 'process ".*sh\\.exe" 'utf-8)
+```
+
+が `process-coding-system-alist` に載り、そちらが優先されて car / cdr とも
+utf-8 に固定されるため。実測（`検索対象キーワード` を bash に渡して
+`od` で見る）:
+
+| | 届いたバイト |
+|---|---|
+| 期待（UTF-8） | `e6 a4 9c e7 b4 a2 …` |
+| そのまま | `e8 ae 80 e6 87 83 ef bd b4 …`（UTF-8 を cp932 と解釈した化け） |
+| `coding-system-for-write` = cp932 | **一致** |
+| alist を `(utf-8 . cp932)` に差し替え | **一致** |
+
+**alist は書き換えていない。** cdr はコマンド行と標準入力を兼ねるので、
+alist を `(utf-8 . cp932)` にすると `M-!` / `M-|`
+（`shell-command-on-region`）や `M-x shell` の標準入力まで cp932 になる。
+代わりに、**標準入力を使わない grep / ripgrep の側だけ**
+`coding-system-for-write` を `locale-coding-system` に束縛した
+（`my:grep-with-cp932` と `my:ripgrep-regexp`）。`coding-system-for-write`
+は alist より強い。非 Windows では `locale-coding-system` が utf-8 なので
+no-op になる。
+
+実測（`grep検証/日本語ファイル.md` に日本語の行を置いて検索）:
+
+| | 変更前 | 変更後 |
+|---|---|---|
+| `M-x grep` で日本語を検索 | **一致なし** | **ヒット** |
+| dired から `my:ripgrep-regexp` | **exit code 1** | **ヒット** |
+| `M-|`（`shell-command-on-region`）の往復 | OK | OK |
+
+**日本語の検索語で「一致なし」になったら、まずこれを疑うこと。**
+grep も rg もエラーを出さず、ただ 0 件を返す。
 
 ## magit の高速化 (`gitd/` + `my-gitd.el`)
 

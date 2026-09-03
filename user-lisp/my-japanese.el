@@ -147,7 +147,38 @@
   (when (eq system-type 'darwin)
     (setq default-process-coding-system '(utf-8-unix . utf-8-unix)))
   (when (eq system-type 'windows-nt)
-    (setq default-process-coding-system '(utf-8 . utf-8))))
+    ;; 【重要】cdr (書き込み側) は cp932 にすること。
+    ;;
+    ;; cdr は 2 つの用途を兼ねている。
+    ;;
+    ;;   1. `call-process' / `start-process' の引数のエンコード
+    ;;   2. `call-process-region' などで渡す標準入力のエンコード
+    ;;
+    ;; Windows の Emacs はプロセスを ANSI API で起動するので、1 は
+    ;; ANSI コードページ (cp932) でなければならない。utf-8 にすると、
+    ;; 送った UTF-8 のバイト列が受け取り側で cp932 として解釈され、
+    ;; 日本語を含むパスは存在しないファイル名になる。しかも多くの
+    ;; プログラムは「そんなファイルは無い」と黙って何もしないので、
+    ;; 何の手がかりも残らない (markdown-open で実際に踏んだ。
+    ;; CLAUDE.md の「call-process の引数は cp932 でエンコードすること」)。
+    ;;
+    ;; 2012 年の gnupack 由来の設定は (cp932 . cp932) だった。2015-02-21 の
+    ;; dff5d74 で (utf-8 . utf-8) に変えたが、これは car (出力の復号) を
+    ;; utf-8 にしたかっただけで、cdr まで巻き添えになっていた。
+    ;;
+    ;; 2 の側で UTF-8 を要求する相手には `process-coding-system-alist' で
+    ;; 個別に指定する (下記)。magit は自分で encode-coding-region して
+    ;; いるので影響を受けない (magit issue #3250)。
+    (setq default-process-coding-system '(utf-8 . cp932))
+
+    ;; pandoc は標準入力を UTF-8 で受け取る。markdown-preview
+    ;; (markdown-mode の `markdown') と org-pandoc がバッファを
+    ;; `call-process-region' で流し込むので、ここだけ cdr を utf-8 に戻す。
+    ;; この alist は `default-process-coding-system' より優先される。
+    ;; 引数側も utf-8 になるが、pandoc に渡しているのはテンプレート等の
+    ;; ASCII パスだけなので実害は無い。
+    (add-to-list 'process-coding-system-alist
+                 '("pandoc" utf-8 . utf-8))))
 
 ;;; [3] 日本語入力サポート(Windows)
 
@@ -189,6 +220,20 @@
   ;; (Windows は w32-unicode-filenames が t (既定) のため、そもそもどちらも
   ;;  大部分は無視され、ファイル名は utf-8 として扱われる)
   (set-file-name-coding-system 'cp932)
+
+  ;; default-file-name-coding-system と同じ理由で、これも prefer-coding-system の
+  ;; 副作用を打ち消す必要がある。prefer-coding-system は
+  ;; set-default-coding-systems 経由で default-process-coding-system を
+  ;; (CODING . CODING) にしてしまうため、上の *encoding ブロックで
+  ;; (utf-8 . cp932) にしても、ここで (utf-8 . utf-8) に戻される。
+  ;;
+  ;; つまり 2015-02-21 (dff5d74) から書かれていた
+  ;;   (setq default-process-coding-system '(utf-8 . utf-8))
+  ;; は GUI では最初から効いておらず、値は prefer-coding-system が
+  ;; 決めていた。cdr を cp932 にするにはここで入れ直すしかない。
+  ;; (batch では window-system が nil でこのブロックごと走らないため、
+  ;;  *encoding ブロックの setq が最後の値になる)
+  (setq default-process-coding-system '(utf-8 . cp932))
 
   ;; tr-ime setup
   (tr-ime-advanced-install)
