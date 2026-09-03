@@ -72,13 +72,13 @@ Emacs 31.1 の `user-lisp/` は、既定では `package-activate-all` の直後�
 
 | モジュール | 内容 |
 |---|---|
-| `my-core` | 汎用ヘルパ（`my:pandoc-data-file` など）、`s` |
+| `my-core` | 汎用ヘルパ（`my:pandoc-data-file`、`my:open-file-externally` など）、`s` |
 | `my-japanese` | 文字コード、cp932/UTF-8 変換テーブル、Windows IME（tr-ime）、migemo |
 | `my-appearance` | フォント、フレーム、modus-vivendi テーマ、doom-modeline、all-the-icons |
 | `my-completion` | vertico、consult、marginalia、orderless、corfu、cape |
 | `my-keybind` | グローバルキーバインド（`C-h` → `delete-backward-char`、`C-z` → `scroll-down`） |
 | `my-editor` | hydra、symbol-overlay、smartparens、whitespace、yasnippet、recentf ほか |
-| `my-dired` | dired、hydra-dired、dired-sidebar（`F8`。差分表示は my-vc の diff-hl） |
+| `my-dired` | dired、hydra-dired、dired-sidebar（`F8`。差分表示は my-vc の diff-hl）、dired-x の上書き対策 |
 | `my-text` | org-mode、ox-pandoc、markdown、rst、adoc |
 | `my-lang-lisp` | Emacs Lisp、Clojure（cider）、Common Lisp（slime） |
 | `my-lang-python` | Python（python-ts-mode、pyvenv、py-isort、blacken） |
@@ -657,6 +657,109 @@ org バッファを保存すると（`after-save-hook`）、`_assets/` がある
 だとタイマーが `y-or-n-p` を出して作業を止めるので、`:around` advice で
 `my:org-assets-inhibit-check` を束縛し、その間はチェックごと飛ばす。
 手で `M-x org-save-all-org-buffers` したときも同じく黙って保存する。
+
+## dired で外部アプリを起動する
+
+Excel ブック（`.xls` / `.xlsx` / `.xlsm`）は Emacs で読んでも意味が無いので、
+バッファに読み込まず OS のファイル関連付けに渡す。
+
+| | |
+|---|---|
+| 判定 | `my:dired-external-open-regexp` / `my:dired-external-open-p`（`my-dired.el`） |
+| 起動 | `my:open-file-externally`（`my-core.el`）。Windows は `w32-shell-execute`、macOS は `open(1)`、他は `xdg-open` |
+
+拡張子を足したいときは `my:dired-external-open-regexp` に加える。dired と
+サイドバーで同じ述語を共有しているので両方に効く。
+
+dired 側は `RET` / `f` / `e` を差し替える（3 つとも同じ `dired-find-file`）。
+`o`（other-window）と `v`（view）は素のままにしてある。
+
+### サイドバーは `dired-find-file` を通らない
+
+`dired-sidebar` の `RET` は `dired-sidebar-find-file` なので、`dired-mode-map`
+の差し替えでは効かない。しかも入口が 3 つある。
+
+| 入口 | コマンド |
+|---|---|
+| `RET` / `C-m` | `dired-sidebar-find-file` |
+| `C-o` | `dired-sidebar-find-file-alt` → `call-interactively` で上を呼ぶ |
+| `mouse-2` | `dired-sidebar-mouse-subtree-cycle-or-find-file` → DIR 引数付きで上を呼ぶ |
+
+3 つまとめて押さえるため、キーではなく `dired-sidebar-find-file` への
+`:around` advice にしてある。
+
+**`orig` を呼ぶ前に判定すること。** `dired-sidebar-find-file` はファイルに
+対して `get-mru-window` / `next-window` で表示先を選び、空いていなければ
+`split-window` までする。外部に投げるだけのファイルでウィンドウ分割を
+起こしてはいけない。
+
+これは「別の開き方」ではなくウィンドウ管理のラッパで、サイドバーが
+dedicated window であることに由来する。ディレクトリならサイドバーの中で
+ルートを差し替え（`dired-sidebar-with-no-dedication` + `find-alternate-file`）、
+ファイルなら隣のウィンドウを選んでから `find-file` する。
+
+### 【重要】`dired-x` は `dired-mode-map` を無条件で書き換える
+
+`dired-x.el` はロードされた瞬間に、トップレベルの裸の `define-key` で
+`dired-mode-map` を書き換える。`defcustom` による切り替えは無い。
+
+```elisp
+(define-key dired-mode-map "F" 'dired-do-find-marked-files)
+(define-key dired-mode-map "V" 'dired-do-run-mail)
+(define-key dired-mode-map "\M-!" 'dired-smart-shell-command)
+(define-key dired-mode-map "\M-(" 'dired-mark-sexp)
+(define-key dired-mode-map "\C-x\M-o" 'dired-omit-mode)
+```
+
+`use-package dired` の `:bind` は dired のロード時に張られるので、あとから
+`dired-x` が読まれると **`V` の `dired-vc-status` が奪われる**。
+
+`dired-x` は明示的に require したつもりが無くても読まれる。入口は 2 つあり、
+**どちらも `F8` を通る**。
+
+- `dired-sidebar` の `:config` の `(require 'dired-x)`（`dired-omit-mode` のため）
+- サイドバーの `a`（`dired-omit-mode` は `dired-x` で唯一の autoload）
+
+つまり「**`F8` を一度でも押すと、そのセッションでは以後 `V` が効かなくなる**」
+という壊れ方をしていた。2026-08-30 に neotree を dired-sidebar に置き換えた
+ときからの回帰で、2026-09 に気づいた。
+
+`:defer t` + `:config` の `use-package dired-x` で張り直している。
+`eval-after-load` はファイルのロード完了後に走るので、`dired-x` 自身の
+`define-key` に必ず勝つ。**`:bind` では駄目**で、`dired-x` のロードとは
+無関係に張られてしまい上書きを取り返せない。
+
+`dired-mode-map` に置いたキーが効かないときは、**まず `dired-x` を疑う**こと。
+奪われるのは上の 5 つと `*(` / `*O` / `*.`。
+
+## markdown のプレビューと外部エディタ
+
+似ているが**別経路**の 2 つがある。
+
+| | コマンド | 経路 |
+|---|---|---|
+| ブラウザで HTML を見る | `markdown-preview`（`C-c C-c p`、hydra の `v`） | `markdown-command`（pandoc）で HTML に変換 → `*markdown-output*` → `browse-url-of-buffer` が一時ファイルに書き出して OS 既定ブラウザで開く |
+| 外部エディタで開く | `markdown-open`（`C-c C-c o`、hydra の `O`） | `save-buffer` してから `call-process` で `markdown-open-command` に**元の `.md` のパスを渡す**だけ。pandoc も browse-url も通らない |
+
+`.md` そのものを渡したい相手（MarkText、Typora）は後者。**新しいコマンドを
+作る必要は無い。**
+
+`markdown-open-command` は MarkText を先頭に置いてある。
+
+```elisp
+(or (executable-find "marktext") ...Typora のパス候補...)
+;; => "c:/Users/masao/.local/bin/marktext.cmd"
+```
+
+- `executable-find` は Windows では `exec-suffixes`（`.exe` `.com` `.bat`
+  `.cmd` `.btm`）を補うので、拡張子なしの `"marktext"` で `.cmd` が見つかる。
+  `~/.local/bin` は `exec-path` に入っている
+- `marktext.cmd` は `start` で起動して即座に戻るため、`markdown-open` の
+  同期 `call-process` でも Emacs は固まらない。**戻らないラッパを
+  `markdown-open-command` にすると固まる**
+- 以前は Typora のインストールパスを `seq-find` で探すだけだったが、この
+  マシンに Typora は無いので結果は `nil` で、`markdown-open` は
+  `Variable markdown-open-command must be set` で常に失敗していた
 
 ## magit の高速化 (`gitd/` + `my-gitd.el`)
 
