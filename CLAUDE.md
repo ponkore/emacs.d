@@ -890,6 +890,42 @@ dedicated window であることに由来する。ディレクトリならサイ
   マシンに Typora は無いので結果は `nil` で、`markdown-open` は
   `Variable markdown-open-command must be set` で常に失敗していた
 
+### 【重要】`call-process` の引数は cp932 でエンコードすること
+
+`my-japanese.el` は Windows で `default-process-coding-system` を
+`(utf-8 . utf-8)` にしている。**`call-process` の引数はこの cdr で
+エンコードされる**が、Emacs のプロセス起動は ANSI API なので、送った
+UTF-8 のバイト列が受け取り側で cp932 として解釈される。
+結果、**日本語を含むパスは存在しないファイル名になる**。
+
+実測（`KOB00100_チェック仕様・メッセージ一覧.md`、GUI・実設定）:
+
+| `default-process-coding-system` | cmd の `if exist %1` |
+|---|---|
+| `(utf-8 . utf-8)`（設定のまま） | **MISSING** |
+| `(utf-8 . cp932)` | EXIST |
+| `emacs -Q`（既定） | EXIST |
+
+**この壊れ方は何の手がかりも残さない。** MarkText は受け取ったパスを
+`isMarkdownFile`（存在チェックを含む）で黙って捨て、ログにも書かずに
+`startUpAction`（`blank`）へフォールバックする。`start` 経由なので終了
+コードも必ず 0。つまり「**MarkText は起動するが空白**」だけが見える。
+
+そのため `markdown-open-command` には**文字列ではなく関数**
+（`my:markdown-open-external`）を渡している。文字列だと `markdown-open`
+自身が `call-process` するので、束縛する隙が無い。関数の中で
+`grep`（`my-utils.el`）や `org-pandoc`（`my-text.el`）と同じく cdr だけ
+`locale-coding-system` に戻している。
+
+**外部プログラムにファイル名を渡すときは毎回これを疑うこと。** 同じ穴は
+`M-x compile` / `shell-command` / ripgrep など、`user-lisp/` の外から
+非 ASCII の引数を渡す経路すべてに残っている（`default-process-coding-system`
+そのものを直せば一掃できるが、cdr は標準入力のエンコードも兼ねるので
+影響範囲が広い。2026-09 時点では個別に束縛する方針）。
+
+なお Windows の `my:open-file-externally`（`my-core.el`）は
+`w32-shell-execute`（ワイド API）なのでこの問題は無い。
+
 ## magit の高速化 (`gitd/` + `my-gitd.el`)
 
 magit のリフレッシュが遅い原因は **git ではなく Emacs のプロセス生成コスト**。
