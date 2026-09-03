@@ -33,13 +33,28 @@
 ;; あとから届くイベントは必ず一致する。外部の `git add' なら一致しない。
 ;; **時刻ではなく内容で判定しているので、イベントの配送順に依存しない。**
 ;;
-;;; 既知の制限
+;;; .gitignore の扱い
 ;;
-;; `.gitignore' を見ていない。`build/' に 200 ファイル作ると分類後でも
-;; 1001 件残る。パスだけのフィルタでは落とせず、git に聞くしかない。
-;; 「表示中のバッファだけ」と「レート制限」で上限は決めているが、
-;; 根本的な解決は段階 2b (監視を常駐プロセスに移し、Rust の `ignore' crate で
-;; イベントを Emacs に送る前に落とす) で行う。
+;; 監視は `.gitignore' を知らないので、`build/' に 200 ファイル作ると
+;; 分類後でも 1001 件のイベントが残る。git は無視するのに監視は拾うため、
+;; そのままだとビルド中に無関係なリフレッシュが延々と走る。
+;;
+;; パスだけのフィルタでは落とせない (どのパターンが書いてあるか分からない)
+;; ので git に聞くしかないが、**イベントごとに聞いてはいけない**。
+;; 3 段構えで濃縮している:
+;;
+;;   1. コールバックでは「変化したディレクトリ」をハッシュに入れるだけ。
+;;      ビルドは数千ファイルを出すが **ディレクトリは数個**なので濃縮できる
+;;   2. デバウンス後に、未知のディレクトリだけを `git check-ignore' へ
+;;      **まとめて 1 回**渡す
+;;   3. 結果はリポジトリごとにキャッシュする。ビルド中は同じディレクトリが
+;;      延々と来るので、**定常状態では git を 1 回も呼ばない**
+;;
+;; キャッシュは `.gitignore' / `.git/info/exclude' / `.git/config' の変更で捨てる。
+;;
+;; 判定はディレクトリ単位なので、**リポジトリ直下の無視されるファイル**
+;; (ルートの `*.log' など) はパス単位で見る。ディレクトリ数が
+;; `my:magit-watch--wt-dirs-limit' を超えたら判断を諦めてリフレッシュする。
 
 ;;; Code:
 
@@ -48,6 +63,8 @@
 (declare-function magit-toplevel "magit-git")
 (declare-function magit-gitdir "magit-git")
 (declare-function magit-refresh-buffer "magit-mode")
+(declare-function magit-process-git "magit-process")
+(defvar magit-git-global-arguments)
 
 (defgroup my:magit-watch nil
   "ワークツリーの変化で magit を自動更新する。"
@@ -60,8 +77,8 @@
 (defcustom my:magit-watch-min-interval 2.0
   "自動リフレッシュの最短間隔 (秒)。
 
-`.gitignore' を見られないため、ビルド中は無関係なイベントが大量に来る
-\(実測: build/ に 200 ファイルで分類後 1001 件)。ここで上限を決める。"
+`.gitignore' の判定 (Commentary 参照) で無関係な変化はほぼ落ちるが、
+追跡対象のファイルが本当に大量に書き換わる場合の上限としてここで抑える。"
   :type 'number)
 
 (defcustom my:magit-watch-visible-only t
@@ -79,6 +96,9 @@
   desc          ; w32notify のディスクリプタ
   fp            ; .git/index と .git/HEAD の (mtime . size)。判定の要
   pending       ; 未処理イベントの分類 (シンボルのリスト)
+  wt-dirs       ; この窓で変化したワークツリーのディレクトリ (ハッシュ)
+  wt-overflow   ; wt-dirs が上限を超えたら t (判断を諦める)
+  ign-cache     ; 相対ディレクトリ -> ignored かどうか (ハッシュ)
   timer
   last-refresh) ; 最後にリフレッシュした時刻 (レート制限用)
 
@@ -86,8 +106,11 @@
   "root -> `my:magit-watch-repo'。")
 
 (defvar my:magit-watch--stats
-  (list :events 0 :classified 0 :refreshed 0 :skipped 0 :deferred 0)
+  (list :events 0 :classified 0 :refreshed 0 :skipped 0 :deferred 0 :ign-error 0)
   "統計。`my:magit-watch-stats' で表示する。")
+
+(defvar my:magit-watch--ign-warned nil
+  "check-ignore の失敗を 1 度だけ知らせるためのフラグ。")
 
 ;;; ---------------------------------------------------------------- 分類
 
@@ -157,6 +180,76 @@ mtime を見て判断する。ブランチ切替では両方とも必ず変わ�
                       (file-attribute-size a))))
             '("index" "HEAD"))))
 
+;;; ------------------------------------------------ .gitignore (課題 3)
+
+(defconst my:magit-watch--wt-dirs-limit 64
+  "1 つのデバウンス窓で覚えるワークツリーのディレクトリ数の上限。
+
+超えたら `.gitignore' の判断を諦めてリフレッシュする（安全側）。
+実運用ではビルド出力は数個のディレクトリに集中するので、まず超えない。")
+
+(defun my:magit-watch--ign-key (rel)
+  "REL (相対パス、区切りは /) から `.gitignore' 判定のキーを作る。
+
+ディレクトリ単位にまとめるのが肝。ビルドは数千ファイルを出すが
+**ディレクトリは数個**なので、これで濃縮できる。
+ルート直下のファイルはまとめようがないのでパスそのものを使う。"
+  (if-let* ((dir (file-name-directory rel)))
+      (directory-file-name dir)
+    rel))
+
+(defun my:magit-watch--ignored-p (repo keys)
+  "KEYS (相対パスのリスト) が全部 git に無視されるなら非 nil。
+
+判定はキャッシュする。ビルド中は同じディレクトリが延々と来るので、
+**定常状態では git を 1 回も呼ばない**。未知のキーがあるときだけ
+`git check-ignore' をまとめて 1 回呼ぶ。"
+  (let* ((cache (or (my:magit-watch-repo-ign-cache repo)
+                    (setf (my:magit-watch-repo-ign-cache repo)
+                          (make-hash-table :test #'equal))))
+         (unknown (seq-filter (lambda (k) (eq (gethash k cache 'unset) 'unset)) keys)))
+    (when unknown
+      (let* ((default-directory (my:magit-watch-repo-root repo))
+             ;; `magit-git-global-arguments' をそのまま使ってはいけない。
+             ;;   - `--literal-pathspecs' を check-ignore は受け付けず
+             ;;     "pathspec magic not supported by this command" で落ちる
+             ;;   - `-z' は `--stdin' とセットでないと
+             ;;     "-z only makes sense with --stdin" で落ちる
+             ;; そこで最小限に絞る。`core.quotePath=false' は日本語パスが
+             ;; C 形式でクォートされて突き合わせに失敗するのを防ぐため。
+             (magit-git-global-arguments '("--no-pager" "-c" "core.quotePath=false"))
+             (exit nil)
+             (out (magit--with-temp-process-buffer
+                    (setq exit (magit-process-git t (list "check-ignore" "--" unknown)))
+                    (buffer-string)))
+             ;; 該当なしの終了コードは 1。128 以上は本物のエラー
+             (ignored (and (memq exit '(0 1))
+                           (split-string out "\n" t "[ \t\r]+"))))
+        (when (and (integerp exit) (>= exit 128))
+          (cl-incf (plist-get my:magit-watch--stats :ign-error))
+          (unless my:magit-watch--ign-warned
+            (setq my:magit-watch--ign-warned t)
+            (message "magit-watch: git check-ignore が失敗しました (exit %s)。%s"
+                     exit "gitignore の判定を諦めて毎回リフレッシュします")))
+        ;; check-ignore は無視されるものだけを返す。
+        ;; 返らなかったものは「無視されない」として覚える。
+        ;; 失敗したときも「無視されない」= 安全側 (リフレッシュする) に倒れる。
+        (dolist (k unknown)
+          (puthash k (and (member k ignored) t) cache))))
+    (seq-every-p (lambda (k) (gethash k cache)) keys)))
+
+(defun my:magit-watch--worktree-relevant-p (repo)
+  "この窓のワークツリー変化が git から見て意味があるなら非 nil。
+
+`.gitignore' で無視されるディレクトリの変化しか無ければ nil を返す。
+これが無いと、ビルド中に無関係なリフレッシュが延々と走る
+（実測: build/ に 200 ファイルで分類後 1001 件のイベント）。"
+  (or (my:magit-watch-repo-wt-overflow repo)
+      (let ((h (my:magit-watch-repo-wt-dirs repo)))
+        (or (null h)
+            (zerop (hash-table-count h))
+            (not (my:magit-watch--ignored-p repo (hash-table-keys h)))))))
+
 (defun my:magit-watch--stale-p (repo)
   "REPO をリフレッシュする必要があるなら非 nil。
 
@@ -173,7 +266,11 @@ mtime を見て判断する。ブランチ切替では両方とも必ず変わ�
   (let ((pending (my:magit-watch-repo-pending repo)))
     (cond
      ((null pending) nil)
-     ((or (memq 'worktree pending) (memq 'meta pending)) t)
+     ((memq 'meta pending) t)
+     ;; ワークツリーの変化は、gitignore されているものだけなら無視する
+     ((and (memq 'worktree pending)
+           (my:magit-watch--worktree-relevant-p repo))
+      t)
      (t (not (equal (my:magit-watch-repo-fp repo)
                     (my:magit-watch--fingerprint repo)))))))
 
@@ -241,6 +338,8 @@ mtime を見て判断する。ブランチ切替では両方とも必ず変わ�
      (t
       (let ((stale (my:magit-watch--stale-p repo)))
         (setf (my:magit-watch-repo-pending repo) nil)
+        (setf (my:magit-watch-repo-wt-dirs repo) nil)
+        (setf (my:magit-watch-repo-wt-overflow repo) nil)
         (if stale
             (progn (cl-incf (plist-get my:magit-watch--stats :refreshed))
                    (my:magit-watch--refresh repo))
@@ -259,12 +358,30 @@ mtime を見て判断する。ブランチ切替では両方とも必ず変わ�
   "w32notify のコールバック。**軽く保つこと。**
 
 ビルド中は 1 秒に数千件来る (実測: 200 ファイル作成で 2001 件)。
-ここで git を呼ぶような作りにしてはいけない。"
+**ここで git を呼ぶような作りにしてはいけない。** `.gitignore' の判定も
+ここではせず、ディレクトリ名をハッシュに入れて濃縮するだけにして、
+実際の判定はデバウンス後に 1 回だけ行う。"
   (cl-incf (plist-get my:magit-watch--stats :events))
   (when-let* ((repo (gethash root my:magit-watch--repos))
-              (kind (my:magit-watch--classify (or (nth 2 ev) ""))))
+              (rel (subst-char-in-string ?\\ ?/ (or (nth 2 ev) "")))
+              (kind (my:magit-watch--classify rel)))
     (cl-incf (plist-get my:magit-watch--stats :classified))
     (cl-pushnew kind (my:magit-watch-repo-pending repo))
+    (cond
+     ((eq kind 'worktree)
+      ;; 除外ルールが変わったらキャッシュを捨てる
+      (when (equal (file-name-nondirectory rel) ".gitignore")
+        (setf (my:magit-watch-repo-ign-cache repo) nil))
+      (let ((h (or (my:magit-watch-repo-wt-dirs repo)
+                   (setf (my:magit-watch-repo-wt-dirs repo)
+                         (make-hash-table :test #'equal)))))
+        (if (>= (hash-table-count h) my:magit-watch--wt-dirs-limit)
+            (setf (my:magit-watch-repo-wt-overflow repo) t)
+          (puthash (my:magit-watch--ign-key rel) t h))))
+     ((eq kind 'meta)
+      ;; .git/info/exclude や core.excludesFile の変更でも除外ルールは変わる
+      (when (member rel '(".git/info/exclude" ".git/config"))
+        (setf (my:magit-watch-repo-ign-cache repo) nil))))
     (my:magit-watch--arm repo my:magit-watch-debounce)))
 
 (defun my:magit-watch--under-p (dir root)
@@ -338,13 +455,15 @@ mtime を見て判断する。ブランチ切替では両方とも必ず変わ�
 (defun my:magit-watch-stats ()
   "イベント数・リフレッシュ数・抑止数を表示する。"
   (interactive)
-  (message "magit-watch: %d 監視中 / イベント %d (分類を通った %d) / リフレッシュ %d / 変化なしで抑止 %d / 操作中で待ち直し %d"
+  (message "magit-watch: %d 監視中 / イベント %d (分類を通った %d) / リフレッシュ %d / 変化なしで抑止 %d / 操作中で待ち直し %d%s"
            (hash-table-count my:magit-watch--repos)
            (plist-get my:magit-watch--stats :events)
            (plist-get my:magit-watch--stats :classified)
            (plist-get my:magit-watch--stats :refreshed)
            (plist-get my:magit-watch--stats :skipped)
-           (plist-get my:magit-watch--stats :deferred)))
+           (plist-get my:magit-watch--stats :deferred)
+           (let ((e (plist-get my:magit-watch--stats :ign-error)))
+             (if (zerop e) "" (format " / check-ignore 失敗 %d" e)))))
 
 (declare-function magit--refresh-buffer-function "magit-mode")
 
@@ -364,6 +483,12 @@ mtime を見て判断する。ブランチ切替では両方とも必ず変わ�
     (remove-hook 'magit-mode-hook #'my:magit-watch--after-mode)
     (remove-hook 'magit-refresh-buffer-hook #'my:magit-watch--after-refresh)
     (my:magit-watch--remove-all)))
+
+;; 対象は Windows のみ。`w32notify-add-watch' の `subtree' に相当するものが
+;; 他のバックエンドには無く (inotify も kqueue も非再帰)、そちらは段階 2b で
+;; 常駐プロセス側に監視を移すときにまとめて考える。
+(when (eq system-type 'windows-nt)
+  (my:magit-watch-mode 1))
 
 (provide 'my-magit-watch)
 ;;; my-magit-watch.el ends here
