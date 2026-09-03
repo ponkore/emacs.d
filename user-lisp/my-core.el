@@ -70,6 +70,18 @@ Windows は `w32-shell-execute' (ShellExecuteW)、macOS は open(1)、
           (c-sharp    . ("https://github.com/tree-sitter/tree-sitter-c-sharp"))
           (css        . ("https://github.com/tree-sitter/tree-sitter-css"))
           (dockerfile . ("https://github.com/camdencheek/tree-sitter-dockerfile"))
+          ;; go / gomod / gowork は go-ts-mode.el 自身も
+          ;; treesit-language-source-alist に追加するが、この setq が
+          ;; 丸ごと上書きするため my:install-treesit-grammars からは見えない。
+          ;; go-ts-mode.el と同じ内容 (commit まで) を書いておくこと。
+          ;; add-to-list は equal で重複を避けるので二重登録にはならないが、
+          ;; 1 文字でも違うと両方が登録されて 2 回ビルドされる。
+          (go         . ("https://github.com/tree-sitter/tree-sitter-go"
+                         :commit "12fe553fdaaa7449f764bc876fd777704d4fb752"))
+          (gomod      . ("https://github.com/camdencheek/tree-sitter-go-mod"
+                         :commit "3b01edce2b9ea6766ca19328d1850e456fde3103"))
+          (gowork     . ("https://github.com/omertuc/tree-sitter-go-work"
+                         :commit "949a8a470559543857a62102c84700d291fc984c"))
           (html       . ("https://github.com/tree-sitter/tree-sitter-html"))
           (javascript . ("https://github.com/tree-sitter/tree-sitter-javascript"))
           (json       . ("https://github.com/tree-sitter/tree-sitter-json"))

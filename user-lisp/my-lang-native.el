@@ -103,5 +103,80 @@
 (setq csharp-ts-indent-offset 4)
 (my:treesit-remap 'csharp-mode 'csharp-ts-mode 'c-sharp)
 
+;;; [3] Go
+
+;; Emacs 31.1 同梱の go-ts-mode / go-mod-ts-mode / go-work-ts-mode を使う。
+;;
+;; 外部の go-mode は入れない。go-ts-mode.el が autoload で
+;;   (add-to-list 'auto-mode-alist '("\\.go\\'" . go-ts-mode-maybe))
+;;   (add-to-list 'treesit-major-mode-remap-alist '(go-mode . go-ts-mode))
+;; を済ませており、go-mode を :mode で足すと auto-mode-alist の先頭に
+;; 積まれて必ず go-mode が勝つ。しかも treesit-major-mode-remap-alist は
+;; treesit-enabled-modes が非 nil のときしか major-mode-remap-alist に
+;; 反映されない (既定は nil) ので、tree-sitter 版への差し替えも起きない。
+;; つまり go-mode を「フォールバック」として足すと、フォールバックのまま
+;; 固定される。Rust / C# のような my:treesit-remap も要らない。
+;;
+;; 文法が無い環境では go-ts-mode-maybe が fundamental-mode にする。
+;; M-x my:install-treesit-grammars で go / gomod / gowork を入れること。
+;;
+;; 外部ツールは gopls だけでよい:
+;;   go install golang.org/x/tools/gopls@latest
+;; 整形の gofumpt と静的解析の staticcheck は gopls に内蔵されており、
+;; goimports 相当は source.organizeImports の code action が担う。
+;; いずれも my-lsp.el の eglot-workspace-configuration で有効にしてある。
+
+(use-package go-ts-mode
+  ;; Emacs 31.1 組み込みなので :straight は付けない。:mode も書かない (上記)。
+  :custom
+  ;; gofmt はタブでインデントするので indent-tabs-mode は t のまま
+  ;; (go-ts-mode 自身が設定する)。go-ts-indent-offset は「タブ何個ぶんか」
+  ;; ではなく桁数なので、tab-width と揃えないと継続行がずれる。
+  (go-ts-indent-offset 4)
+  :bind
+  ;; C-c C-d (docstring) と C-c C-t t/f/p (テスト実行) は go-ts-mode-map に
+  ;; 最初から入っているので張り直さない。
+  (:map go-ts-mode-map
+   ("C-c C-l" . my:go-golangci-lint))
+  :hook
+  ;; go.mod / go.work でも gopls は動く (依存の診断が出る)。
+  ((go-ts-mode-hook go-mod-ts-mode-hook go-work-ts-mode-hook) . eglot-ensure)
+  (go-ts-mode-hook . yas-minor-mode)
+  (go-ts-mode-hook . my:go-ts-setup)
+  :preface
+  (defun my:go-organize-imports ()
+    "gopls に source.organizeImports を適用させる。
+`eglot-code-actions' を対話的に (INTERACTIVE 非 nil で) 呼ぶと、該当が
+0 件のときに `eglot--error' が飛んで before-save-hook ごと止まり、
+保存できなくなる。非対話で候補を取り出して、あるときだけ実行する。"
+    (when-let* ((server (eglot-current-server))
+                (actions (eglot-code-actions (point-min) (point-max)
+                                             "source.organizeImports")))
+      (dolist (action actions)
+        (eglot-execute server action))))
+
+  (defun my:go-before-save ()
+    "import を整理してから gofumpt で整形する。
+順序は逆にできない。整形が先だと、あとから足された import 行が
+整形されないまま残る。"
+    (when (eglot-managed-p)
+      (my:go-organize-imports)
+      (eglot-format-buffer)))
+
+  (defun my:go-ts-setup ()
+    (setq-local tab-width 4)
+    (add-hook 'before-save-hook #'my:go-before-save nil t))
+
+  (defun my:go-golangci-lint ()
+    "モジュールのルートで golangci-lint を走らせる。
+gopls 内蔵の staticcheck より重く、保存のたびに走らせると
+flymake-no-changes-timeout (1.0 秒) に間に合わないので、
+flymake には載せずに明示的に呼ぶ形にしてある。"
+    (interactive)
+    (let ((default-directory
+           (or (locate-dominating-file default-directory "go.mod")
+               default-directory)))
+      (compile "golangci-lint run ./..."))))
+
 (provide 'my-lang-native)
 ;;; my-lang-native.el ends here

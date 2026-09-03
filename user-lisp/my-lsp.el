@@ -11,6 +11,15 @@
 ;; eglot は組み込みなので :straight は付けない。
 
 (use-package eglot
+  :preface
+  (defun my:eglot-normalize-drive-letter (path)
+    "PATH の Windows ドライブレターを小文字に揃える。
+`eglot-uri-to-path' の :filter-return に使う。"
+    (if (and (stringp path)
+             (> (length path) 1)
+             (eq (aref path 1) ?:))
+        (concat (downcase (substring path 0 1)) (substring path 1))
+      path))
   :custom
   ;; サーバは自動では落とさない。t にすると最後の管理バッファを kill した
   ;; ときに eglot-shutdown が走り、:shutdown の同期リクエスト (timeout 1.5s) と
@@ -46,7 +55,26 @@
                         "**/vendor/**/{Tests,tests}/**"
                         "**/.history/**" "**/vendor/**/vendor/**"
                         "**/_oldver/**"
-                        "**/env.pisc/**"]))))
+                        "**/env.pisc/**"]))
+     ;;
+     ;; gopls:
+     ;;   gofumpt      - 整形。gopls に内蔵されているので gofumpt の
+     ;;                  バイナリは要らない。eglot-format-buffer がこれを使う。
+     ;;   staticcheck  - honnef.co/go/tools の解析。これも内蔵。診断は
+     ;;                  eglot 経由で flymake (C-c !) に出る。
+     ;;   analyses     - staticcheck とは別枠の gopls 独自解析。shadow は
+     ;;                  変数のシャドウイングで、正しいコードにも出るので
+     ;;                  うるさければここから外す。
+     ;;   hints        - inlay hints。eglot は管理バッファで
+     ;;                  eglot-inlay-hints-mode を既定で有効にするため、
+     ;;                  ここを t にすると常時表示になる。C-c l h で切れる。
+     :gopls
+     (:gofumpt t
+      :staticcheck t
+      :usePlaceholders t
+      :analyses (:unusedparams t :unusedwrite t :nilness t :shadow t)
+      :hints (:parameterNames t :assignVariableTypes t
+              :compositeLiteralFields t :functionTypeParameters t))))
   :bind
   ;; lsp-mode の lsp-keymap-prefix "C-c l" に相当するものを自前で用意する。
   ;; eglot にはプレフィックスキーの仕組みが無い。
@@ -71,7 +99,32 @@
                  . (,(or (executable-find "sourcekit-lsp")
                          (and (eq system-type 'darwin)
                               "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/sourcekit-lsp")
-                         "sourcekit-lsp")))))
+                         "sourcekit-lsp"))))
+  ;; 【重要】Windows でサーバが大文字のドライブレターの URI を返すと、
+  ;; 診断が 1 件も表示されない。
+  ;;
+  ;; gopls は textDocument/publishDiagnostics の uri を
+  ;;   file:///C:/Users/...
+  ;; と大文字で返す (eglot が送る workspaceFolders は file:///c%3A/... )。
+  ;; eglot--flymake-handle-push は eglot-uri-to-path した結果を
+  ;; eglot--find-buffer-visiting に渡すが、そこは buffer-file-name との
+  ;; 文字列 equal で突き合わせる (file-truename が遅いため避けている。
+  ;; bug#70036)。Emacs の buffer-file-name はドライブレターが小文字なので
+  ;; 一致せず、診断は flymake-list-only-diagnostics に回されて
+  ;; **警告も出ないまま消える**。eglot-uri-to-path 自身が持つ正規化
+  ;; (trueroot で始まるならプロジェクトの root に置換する) も、
+  ;; string-prefix-p が大文字小文字を区別するので効かない。
+  ;;
+  ;; 実測 (gopls v0.23.0 / Emacs 31.1):
+  ;;   uri-to-path "file:///C:/..." → "C:/..."  → find-buffer は nil
+  ;;   advice で "c:/..." に直すと 0.5 秒で診断が出る
+  ;;
+  ;; 整形もジャンプも補完も効くので「flymake だけが静かに死ぬ」形で出る。
+  ;; 診断が出ないときは、まずサーバが返す uri の綴りを疑うこと
+  ;; (eglot-events-buffer-config を有効にして publishDiagnostics を見る)。
+  (when (eq system-type 'windows-nt)
+    (advice-add 'eglot-uri-to-path :filter-return
+                #'my:eglot-normalize-drive-letter)))
 
 ;;; [3] flymake
 
