@@ -25,7 +25,7 @@ Windows（主）、macOS、Linux 向けの個人 Emacs 設定リポジトリ。E
   5. `(prepare-user-lisp ...)`
   6. `custom.el` の読み込み
   7. `user-lisp/` 各モジュールの `require`（順序は分割前の記述順のまま）
-- `user-lisp/` — 設定本体。21 モジュールに分割（下記）
+- `user-lisp/` — 設定本体。22 モジュールに分割（下記）
 - `custom.el` — `customize` が自動生成するファイル
 - `site-lisp/` — パッケージマネージャで入手できないローカルベンダの Emacs Lisp
 - `gitd/` — magit の git 実行を肩代わりする常駐プロセス（Rust）。
@@ -90,6 +90,7 @@ Emacs 31.1 の `user-lisp/` は、既定では `package-activate-all` の直後�
 | `my-project` | projectile（プレフィックス: `C-c p`） |
 | `my-vc` | magit、diff-hl（`C-c g` の hydra）、Windows の SVN 対応 |
 | `my-gitd` | magit の同期 git 実行を常駐プロセス（`gitd/`）に肩代わりさせる。Windows のみ |
+| `my-magit-watch` | ワークツリーを監視して magit バッファを自動更新。Windows のみ |
 | `my-shell` | exec-path-from-shell、Windows 用 shell 設定 |
 | `my-utils` | calendar、open-junk-file、grep/ripgrep、blog 用ヘルパ |
 | `my-platform` | Windows / macOS 固有設定 |
@@ -770,11 +771,130 @@ M-x my:gitd-restart   ; サーキットブレーカが落ちたときの復帰
 
 現状は**段階 2a（素通しプロキシ）**。キャッシュも先読みもファイル監視もしない。
 
-- 段階 1: 自動リフレッシュ。`w32notify-add-watch` は `subtree` フラグで
-  再帰監視できる（**`filenotify.el` の `file-notify-add-watch` はこれを
-  渡していない**ので、汎用 API 経由では非再帰になる）
-- 段階 2b: キャッシュ + 並列先読み。Rust で 8 並列にすると 29 コマンドが
-  180 ms で終わるので、監視と組み合わせれば体感を数十 ms にできる
+段階 2b でキャッシュ + 並列先読みを載せる。Rust で 8 並列にすると 29 コマンドが
+180 ms で終わるので、監視と組み合わせれば体感を数十 ms にできる。
+そのとき監視も常駐プロセス側に移し、`.gitignore` の判定を `ignore` crate に
+置き換える（`my-magit-watch.el` の `check-ignore` 呼び出しが不要になる）。
+
+## magit の自動更新 (`my-magit-watch.el`)
+
+ワークツリー / インデックス / HEAD の変化を検知して、表示中の magit バッファを
+`magit-refresh-buffer` する。Windows のみ、**既定で有効**。
+切るときは `M-x my:magit-watch-mode`、様子を見るときは `M-x my:magit-watch-stats`。
+
+段階 2a でリフレッシュが 0.6 秒になったので実用に耐えるようになった。
+**2a 無しではこれは入れられなかった**（1.7 秒の固まりが頻発する）。
+
+設計と実測は `tmp/magit-autorefresh-stage1-design.md`。
+
+### `w32notify-add-watch` を直接呼ぶこと
+
+`subtree` フラグを渡すと **1 個の watch で配下を再帰的に監視できる**
+（追加コスト 0.2 ms、watch 後に作ったディレクトリも届く）。
+
+**`filenotify.el` の `file-notify-add-watch` は `subtree` を渡さない**
+（`file-notify--add-watch-w32notify` が `file-name` / `directory-name` /
+`size` / `last-write-time` しか組み立てない）ので、汎用 API 経由では非再帰。
+
+### 【重要】batch では検証できない
+
+**w32notify のイベントはコマンドループ経由で配送されるため、`--batch` では
+1 件も届かない。** `accept-process-output` や `sit-for` を回しても駄目。
+最初 batch で測って全部 0 件になった。
+
+テストは GUI で書く。`emacs -Q -l probe.el` で結果をファイルに書いて
+`kill-emacs` する形にしてある。
+
+### 自励振動と二重リフレッシュ
+
+`magit-refresh-buffer` を 1 回走らせるだけで **毎回きっちり 7 件**の
+イベントが出る（`.git/index.lock` が 4 件、`.git` ディレクトリ自身が 3 件）。
+素直に繋ぐと「イベント → リフレッシュ → イベント」で回り続ける。
+さらに magit で stage すると `.git/index` が書かれるが、magit は自分で
+リフレッシュ済みなので監視側がもう 1 回走る。
+
+**時刻では区別できない。** イベントは遅れて届くので、magit 自身の書き込みか
+外部の変更かを到着時刻から判断することはできない。**内容で見る。**
+
+`.git/index` と `.git/HEAD` の `(mtime . size)` をフィンガープリントとし、
+**`magit-refresh-buffer-hook` で毎回取り直す**。このフックは
+**自分のリフレッシュでも magit 自身のリフレッシュでも走る**のが肝。
+
+| | |
+|---|---|
+| magit の stage | git が index を書く → magit がリフレッシュ → そこでスナップショット → あとから届くイベントは必ず一致 → **抑止** |
+| 外部の `git add` | スナップショットは前のまま → 一致しない → **リフレッシュ** |
+
+`stat` を 2 回するだけで git は呼ばない。
+
+### イベントは欠落する
+
+1000 ファイル作成に対しイベントは **4095 件**しか届かなかった
+（1 ファイル 10 件出るので 1 万件が期待値）。`ReadDirectoryChangesW` の
+バッファ溢れで避けられない。**イベントの完全性に依存した設計にはできない。**
+差分更新（「このファイルだけ再描画」）のような最適化はやらないこと。
+
+対策として分類に `suspect` を設けた。`.git` ディレクトリ自身や
+`.git/**/*.lock` は**それ自体は何も証明しないが「何かは起きた」合図**なので、
+拾ってフィンガープリントで判断する。決め手のイベントが落ちても
+粗い `.git` の mtime 更新は残りやすい。
+
+### `.gitignore` の判定
+
+監視は `.gitignore` を知らないので、`build/` に 200 ファイル作ると分類後でも
+1001 件残る。パスだけのフィルタでは落とせないので git に聞くしかないが、
+**イベントごとに聞いてはいけない**。3 段構えで濃縮している。
+
+1. コールバックでは**変化したディレクトリ**をハッシュに入れるだけ
+   （ビルドは数千ファイルを出すが**ディレクトリは数個**）
+2. デバウンス後に、未知のディレクトリだけを `check-ignore` へ**まとめて 1 回**
+3. 結果をキャッシュ。**定常状態では git を 1 回も呼ばない**
+
+実測: `build/out` に 100 ファイルを 3 回書いて、リフレッシュ 0 回、
+`check-ignore` は 1 回目だけ。合計 4126 イベントに対しリフレッシュは 7 回。
+
+#### `check-ignore` の呼び方（2 回はまった）
+
+**`magit-git-global-arguments` をそのまま使ってはいけない。**
+
+| 書き方 | 何が起きるか |
+|---|---|
+| `check-ignore -z -- PATH` | `fatal: -z only makes sense with --stdin` |
+| `--literal-pathspecs` 付き | `fatal: pathspec magic not supported by this command: 'literal'` |
+
+どちらも `ignore-errors` で握り潰すと **「何も無視されない」= 安全側に倒れる**ため、
+**動いているように見えて 1 件も効いていない**という形で表面化する。
+
+```elisp
+(let ((magit-git-global-arguments '("--no-pager" "-c" "core.quotePath=false")))
+  (magit-process-git t (list "check-ignore" "--" paths)))
+```
+
+`core.quotePath=false` は日本語パスが C 形式でクォートされて突き合わせに
+失敗するのを防ぐため。終了コードは 0（該当あり）/ 1（該当なし）/
+128 以上（エラー）で、128 以上は 1 度だけ `message` で知らせる。
+
+### 抑止条件に入れてよいもの・いけないもの
+
+**ユーザが操作をやめれば自然に解消するものだけ**を入れる
+（ミニバッファ・transient・isearch・キーボードマクロ・リージョン・
+`input-pending-p`）。
+
+**`frame-focus-state` を入れてはいけない。** フォーカスが外れている間は
+永久に偽のままなので待ち直しが終わらず、**フォーカスを失った時点から
+二度と更新されなくなる**（実測で 0.3 秒ごとに再アームし続けた）。
+背景の CPU は `my:magit-watch-visible-only` とレート制限で抑える。
+
+### `.lock` の除外は `.git/` 配下に限ること
+
+`index.lock` を落とすために `.lock` で除外したくなるが、ワークツリーには
+`Cargo.lock` や `flake.lock` といった**追跡対象のファイル**がある。
+
+### テストを書くときの注意
+
+このマシンは `init.defaultBranch = main`。テスト用リポジトリで
+`git checkout master` は失敗する。`-q` で握り潰すと「イベントが来ない」と
+誤診する（実際に 1 度誤診した）。`git init -b main` と明示すること。
 
 ## モードライン (doom-modeline)
 
@@ -843,6 +963,19 @@ git が走り切る。書き込みの途中で `C-g` すると「中断したの
 ことになる。対処するなら `$/cancel` 通知を足してデーモン側で子を kill する。
 
 半端に kill された `.git/index` より安全とも言えるので、優先度は低いと判断した。
+
+### 自動更新では diff-hl が更新されない（2026-09、仕様）
+
+`my-magit-watch` は `magit-refresh-buffer`（そのバッファだけ）を呼んでおり、
+`magit-post-refresh-hook`（diff-hl がぶら下がっている）は走らない。
+自動更新のたびに全バッファの差分を取り直すのは重いのでこうしてある。
+fringe のマーカーを最新にしたいときは手で `g` を押す。
+
+### 自動更新の `.gitignore` 判定はディレクトリ単位（2026-09、仕様）
+
+追跡対象のディレクトリの中にある無視されるファイル（`src/` の中の `*.log`
+など）は落とせず、リフレッシュが走る。`check-ignore` をファイル単位で
+呼べば正確になるが、ビルド中のカーディナリティが跳ね上がるので採らない。
 
 ### `my-gitd` の書き込み経路が実使用でしか検証できていない（2026-09）
 
