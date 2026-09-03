@@ -326,12 +326,25 @@ NOSELECT (前置引数) を付けると MIME 型を選ばせる (`yank-media' �
               "--to=html")
             (when (file-readable-p metadata) (list (concat "--metadata-file=" metadata))))))
      (concat "pandoc " (s-join " " pandoc-options))))
-  ;; Typora は Windows のインストールパス直書きだったため、存在するときだけ設定する
+  ;; C-c C-c o (markdown-open) が起動する外部エディタ。
+  ;; markdown-open は「保存してから call-process でこのコマンドにファイル名を
+  ;; 渡す」だけなので、pandoc も browse-url も通らない (markdown-preview とは
+  ;; 別経路)。
+  ;;
+  ;; Typora は Windows のインストールパス直書きだったため、存在するときだけ
+  ;; 設定していたが、このマシンには入っておらず結果は nil、つまり C-c C-c o は
+  ;; "Variable `markdown-open-command' must be set" で常に失敗していた。
+  ;; MarkText (~/.local/bin/marktext.cmd) を先頭に置く。
+  ;;
+  ;; marktext.cmd は start で起動して即座に戻るので call-process は待たない。
+  ;; executable-find は Windows では exec-suffixes (.exe .com .bat .cmd ...) を
+  ;; 補うので、拡張子なしの "marktext" で .cmd が見つかる。
   (markdown-open-command
-   (seq-find #'file-executable-p
-             (list "c:/Program Files/Typora/Typora.exe"
-                   "/Applications/Typora.app/Contents/MacOS/Typora"
-                   "/usr/bin/typora")))
+   (or (executable-find "marktext")
+       (seq-find #'file-executable-p
+                 (list "c:/Program Files/Typora/Typora.exe"
+                       "/Applications/Typora.app/Contents/MacOS/Typora"
+                       "/usr/bin/typora"))))
   (markdown-use-pandoc-style-yaml-metadata t)
   (markdown-header-scaling nil)
   ;; leaf の :hydra は init 時にインライン展開されるので :init に置く。
@@ -343,7 +356,9 @@ NOSELECT (前置引数) を付けると MIME 型を選ばせる (`yank-media' �
 _s_torong     _b_lockquote    H1~H6:_a_uto    _c_ode block     _p_romote        _H_tml
 italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         _P_DF
 リスト:_._    _t_able         _r_eference     _l_ink           _j_:move-up      _D_ocx
-取消線:_x_    hr:_-_          _i_mage         _u_ri            _k_:move-down    Pre_v_iew"
+取消線:_x_    hr:_-_          _i_mage         _u_ri            _k_:move-down    Pre_v_iew
+^^^^^^-----------------------------------------------------------------------------------
+外部エディタ (MarkText) で開く:_O_"
     ("s" markdown-insert-bold)
     ("/" markdown-insert-italic)
     ("-" markdown-insert-hr)
@@ -375,7 +390,9 @@ italic:_/_    pre:_:_         _f_ootnote      code i_n_line    _d_emote         
     ("H" md2html :exit t)
     ("P" md2pdf :exit t)
     ("D" md2docx :exit t)
-    ("v" markdown-preview :exit t)))
+    ("v" markdown-preview :exit t)
+    ;; 外部エディタ (markdown-open-command = MarkText) で開く。C-c C-c o と同じ。
+    ("O" markdown-open :exit t)))
 
 ;;; [3] ReST
 
