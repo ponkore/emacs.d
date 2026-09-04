@@ -58,6 +58,29 @@ UTF-8 の復号も自前で行う。**こちらが既定。**
 ptyd 側で削って誤魔化す必要がある。退避先として残してある。"
   :type '(choice (const :tag "eat" eat) (const :tag "term.el" term)))
 
+(defcustom my:pty-narrow-ambiguous t
+  "非 nil なら、端末を開いている間だけ ambiguous 幅を 1 に戻す。
+
+**`char-width-table' はグローバルなので、端末バッファだけ変えることが
+できない。** そのため一時的に全体を切り替えて、最後の端末を閉じたときに
+戻す。切り替えたときは `message' で知らせる。
+
+必要な理由。claude も conhost も East Asian Ambiguous を **幅 1** として
+桁を組むが、`site-lisp/eaw.el' を入れた Emacs はそれらを幅 2 で描く。
+実測 (この設定 / eaw 無し):
+
+  U+2588 █ (マスコット)  2 / 1
+  U+2500 ─ (罫線)        2 / 1
+  U+00B7 ·               2 / 1
+  U+2605 ★               2 / 1
+
+その結果、ロゴが横に伸び、表の罫線が揃わない。WezTerm で同じ画面を出すと
+正しく揃うので、ずれているのは Emacs 側だけだと分かる。
+
+nil にすると eaw の幅のまま。端末の見た目は崩れるが、他のバッファの
+桁揃えは変わらない。"
+  :type 'boolean)
+
 (defcustom my:pty-term-name "xterm-256color"
   "子プロセスに渡す TERM (`term' バックエンドのとき)。
 
@@ -254,6 +277,25 @@ ambiguous を幅 1 として扱う。Emacs 側だけ幅 2 で数えると、ル�
                   (aset tbl c 1)))
               tbl))))
 
+(defvar my:pty--saved-width-table nil
+  "`my:pty-narrow-ambiguous' で退避した元の `char-width-table'。")
+
+(defun my:pty--narrow-widths-on ()
+  "ambiguous 幅を 1 に切り替える。"
+  (when (and my:pty-narrow-ambiguous (null my:pty--saved-width-table))
+    (setq my:pty--saved-width-table char-width-table)
+    (setq char-width-table (my:pty--narrow-width-table))
+    (redraw-display)
+    (message "端末のあいだ East Asian Ambiguous を幅 1 にしました")))
+
+(defun my:pty--narrow-widths-off ()
+  "元の幅に戻す。端末が 1 つも無くなったときだけ。"
+  (when (and my:pty--saved-width-table (null my:pty--processes))
+    (setq char-width-table my:pty--saved-width-table)
+    (setq my:pty--saved-width-table nil)
+    (redraw-display)
+    (message "East Asian Ambiguous の幅を元に戻しました")))
+
 (defun my:pty--our-terminal-p (terminal)
   "TERMINAL が ptyd に繋がっているか。"
   (ignore-errors
@@ -379,6 +421,7 @@ DIR は作業ディレクトリ。ENV は非 nil なら `process-environment' �
     (process-put proc 'my:pty-backend my:pty-backend)
     (push proc my:pty--processes)
     (if eatp (my:pty--enable-eat-advice) (my:pty--enable-advice))
+    (my:pty--narrow-widths-on)
     (with-current-buffer buf
       (setq my:pty--process proc)
       (goto-char (point-max))
@@ -404,6 +447,7 @@ DIR は作業ディレクトリ。ENV は非 nil なら `process-environment' �
   (setq my:pty--processes (delq proc my:pty--processes))
   (my:pty--disable-advice)
   (my:pty--disable-eat-advice)
+  (my:pty--narrow-widths-off)
   (if (eq (process-get proc 'my:pty-backend) 'eat)
       (eat--sentinel proc msg)
     (term-sentinel proc msg)))
@@ -466,6 +510,8 @@ DIR は作業ディレクトリ。ENV は非 nil なら `process-environment' �
 
 (defun my:pty--kill-child ()
   "バッファを閉じたら子プロセスも終わらせる。"
+  (setq my:pty--processes (delq my:pty--process my:pty--processes))
+  (my:pty--narrow-widths-off)
   (when (process-live-p my:pty--process)
     (my:pty--send-json my:pty--process '((op . "q")))
     (run-at-time 0.5 nil
