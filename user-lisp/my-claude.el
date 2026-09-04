@@ -9,9 +9,13 @@
 ;; PTY プロキシ方式との比較は docs/claude/emacs-claude-pty-proxy-study.md を参照。
 ;;
 ;; 構成:
-;;   *claude: PROJECT*        会話の記録 (読み取り専用、`my:claude-mode')
-;;   *claude-input: PROJECT*  送信するテキストを書く (`my:claude-input-mode')
-;;   *claude-log: PROJECT*    生の JSON Lines (`my:claude-log' が非 nil のとき)
+;; セッションは Emacs 全体で 1 つだけ。アカウント (Pro / Enterprise / Max) の
+;; 切り替えは CLAUDE_CONFIG_DIR をプロセス起動時に渡すことでしか行えないので、
+;; C-c a a で環境を選び、切り替えたくなったら C-c a e で立て直す。
+;;
+;;   *claude*        会話の記録 (読み取り専用、`my:claude-mode')
+;;   *claude-input*  送信するテキストを書く (`my:claude-input-mode')
+;;   *claude-log*    生の JSON Lines (`my:claude-log' が非 nil のとき)
 ;;; Code:
 
 (require 'cl-lib)
@@ -26,6 +30,28 @@
   "Claude Code を stream-json 経由で使う。"
   :group 'tools
   :prefix "my:claude-")
+
+(defcustom my:claude-environments
+  '(("personal"  . nil)
+    ("jighead"   . "~/.claude-config/jighead")
+    ("ESC-Web"   . "~/.claude-config/ESC-Web"))
+  "使い分ける claude の環境。(ラベル . CLAUDE_CONFIG_DIR) の alist。
+
+CONFIG-DIR が nil なら CLAUDE_CONFIG_DIR を設定しない (claude の既定)。
+**既定の環境に対しては必ず nil にすること。** `~/.claude' を明示的に
+指定すると claude は `~/.claude/.claude.json' を探しに行くが、実体は
+`~/.claude.json' にあるため見つからず、
+
+  Claude configuration file not found at: ...\.claude\.claude.json
+
+という警告を **標準出力に** 吐く。stream-json の途中に非 JSON の行が
+混ざることになるうえ、`auth status' の email / orgName も null になる。
+
+プラン名はここに書かない。`claude auth status --json' が実際の
+subscriptionType を返すので、選択時にそちらを見せる。"
+  :type '(alist :key-type string
+                :value-type (choice (const :tag "既定 (~/.claude)" nil)
+                                    directory)))
 
 (defcustom my:claude-executable
   (or (executable-find "claude")
@@ -102,7 +128,9 @@ nil なら毎回聞く。"
   buffer         ; 会話バッファ
   log-buffer     ; 生 JSON のバッファ (nil のことがある)
   directory      ; 起動した default-directory (展開済み)
-  name           ; プロジェクト名
+  name           ; 環境のラベル
+  config-dir     ; CLAUDE_CONFIG_DIR (nil なら既定)
+  rate-limit     ; 直近の rate_limit_event の中身
   (pending "")   ; フィルタの未処理バイト
   session-id
   model
@@ -114,31 +142,107 @@ nil なら毎回聞く。"
 (defvar-local my:claude--session nil
   "そのバッファが属するセッション。会話バッファと入力バッファに入る。")
 
-(defvar my:claude--sessions nil
-  "生きているセッションのリスト。")
+(defvar my:claude--the-session nil
+  "唯一のセッション。複数持てるようにはしない。
 
-(defun my:claude--project-name ()
-  "現在のプロジェクト名。無ければディレクトリ名。"
-  (let ((root (or (and (fboundp 'projectile-project-root)
-                       (ignore-errors (projectile-project-root)))
-                  (and (fboundp 'project-current)
-                       (let ((p (project-current)))
-                         (and p (project-root p))))
-                  default-directory)))
-    (cons (expand-file-name root)
-          (file-name-nondirectory (directory-file-name root)))))
+環境 (アカウント) を切り替えるには CLAUDE_CONFIG_DIR を変えてプロセスを
+起動し直すしかなく、同時に複数あるとどちらに送っているのか分からなくなる。")
+
+(defun my:claude--project-directory ()
+  "claude を動かすディレクトリ。プロジェクトのルート、無ければ現在地。"
+  (expand-file-name
+   (or (and (fboundp 'projectile-project-root)
+            (ignore-errors (projectile-project-root)))
+       (and (fboundp 'project-current)
+            (let ((p (project-current)))
+              (and p (project-root p))))
+       default-directory)))
 
 (defun my:claude--session-for-buffer ()
-  "このバッファに紐づくセッション、無ければ nil。"
-  (or my:claude--session
-      (car my:claude--sessions)))
+  "いま使うセッション。無ければ nil。"
+  (or my:claude--session (my:claude--live-session)))
 
-(defun my:claude--live-session (name)
-  "NAME のセッションが生きていれば返す。"
-  (seq-find (lambda (s)
-              (and (equal (my:claude-session-name s) name)
-                   (process-live-p (my:claude-session-process s))))
-            my:claude--sessions))
+(defun my:claude--live-session ()
+  "セッションが生きていれば返す。"
+  (and my:claude--the-session
+       (process-live-p (my:claude-session-process my:claude--the-session))
+       my:claude--the-session))
+
+;;; --------------------------------------------------
+;;; 環境 (アカウント) の切り替え
+;;; --------------------------------------------------
+
+(defvar my:claude--auth-cache (make-hash-table :test 'equal)
+  "CONFIG-DIR -> `claude auth status --json' の結果。")
+
+(defvar my:claude--last-environment nil
+  "前回選んだ環境のラベル。次回の既定にする。")
+
+(defun my:claude--config-dir (env)
+  "環境 ENV の CLAUDE_CONFIG_DIR。既定を使うなら nil。"
+  (let ((dir (cdr (assoc env my:claude-environments))))
+    (and dir (expand-file-name dir))))
+
+(defun my:claude--process-environment (config-dir)
+  "CLAUDE_CONFIG_DIR を CONFIG-DIR にした `process-environment' を返す。
+
+CONFIG-DIR が nil のときは **設定しない** のではなく **消す**。
+Emacs 自体が CLAUDE_CONFIG_DIR の設定された環境から起動されていると、
+何もしなければそれを継承してしまい、「既定の環境」を選んだつもりで
+別のアカウントに繋がる。実際に踏んだ。"
+  (let ((process-environment (copy-sequence process-environment)))
+    (setenv "CLAUDE_CONFIG_DIR" config-dir) ; nil なら削除される
+    process-environment))
+
+(defun my:claude--auth-status (env &optional force)
+  "環境 ENV のアカウント情報を alist で返す。失敗したら nil。
+`claude auth status --json' は実測 0.24 秒と速いが、選択のたびに
+全環境ぶん呼ぶと体感に出るのでキャッシュする。FORCE で取り直す。"
+  (let ((dir (my:claude--config-dir env)))
+    (or (and (not force) (gethash env my:claude--auth-cache))
+        (puthash
+         env
+         (ignore-errors
+           (with-temp-buffer
+             (let ((process-environment (my:claude--process-environment dir))
+                   (coding-system-for-read 'utf-8-unix)
+                   (default-process-coding-system '(utf-8-unix . utf-8-unix)))
+               (when (zerop (call-process my:claude-executable nil t nil
+                                          "auth" "status" "--json"))
+                 (goto-char (point-min))
+                 ;; 既定以外の設定ディレクトリを指定すると JSON の前に
+                 ;; 警告が出ることがあるので、最初の { から読む。
+                 (when (search-forward "{" nil t)
+                   (goto-char (match-beginning 0))
+                   (json-parse-buffer :object-type 'alist))))))
+         my:claude--auth-cache))))
+
+(defun my:claude--environment-line (env)
+  "選択肢に出す 1 行。"
+  (let ((auth (my:claude--auth-status env)))
+    (format "%-10s %-11s %s"
+            env
+            (or (alist-get 'subscriptionType auth) "?")
+            (or (alist-get 'orgName auth)
+                (alist-get 'email auth)
+                (if auth "(不明)" "(未ログイン?)")))))
+
+(defun my:claude-refresh-auth ()
+  "アカウント情報のキャッシュを捨てる。"
+  (interactive)
+  (clrhash my:claude--auth-cache)
+  (message "claude のアカウント情報を取り直す"))
+
+(defun my:claude--read-environment ()
+  "使う環境をミニバッファで選ばせてラベルを返す。"
+  (let* ((envs (mapcar #'car my:claude-environments))
+         (lines (mapcar (lambda (e) (cons (my:claude--environment-line e) e)) envs))
+         (default (car (rassoc (or my:claude--last-environment (car envs)) lines)))
+         (choice (completing-read
+                  (format "claude の環境 (既定 %s): "
+                          (or my:claude--last-environment (car envs)))
+                  (mapcar #'car lines) nil t nil nil default)))
+    (setq my:claude--last-environment (cdr (assoc choice lines)))))
 
 ;;; --------------------------------------------------
 ;;; プロセスの起動
@@ -159,17 +263,21 @@ nil なら毎回聞く。"
      (list "--permission-mode" my:claude-permission-mode))
    my:claude-extra-args))
 
-(defun my:claude--start (dir name)
-  "DIR で claude を起動して session 構造体を返す。"
+(defun my:claude--start (dir env)
+  "環境 ENV で DIR に claude を起動して session 構造体を返す。"
   (unless (file-executable-p my:claude-executable)
     (user-error "claude が見つからない: %s" my:claude-executable))
-  (let* ((conv (get-buffer-create (format "*claude: %s*" name)))
-         (log  (when my:claude-log
-                 (get-buffer-create (format "*claude-log: %s*" name))))
+  (let* ((config-dir (my:claude--config-dir env))
+         (conv (get-buffer-create "*claude*"))
+         (log  (when my:claude-log (get-buffer-create "*claude-log*")))
          (session (my:claude--make-session
                    :buffer conv :log-buffer log
-                   :directory dir :name name))
+                   :directory dir :name env :config-dir config-dir))
          proc)
+    (when (and config-dir (not (file-directory-p config-dir)))
+      (user-error "CLAUDE_CONFIG_DIR が無い: %s" config-dir))
+    ;; ヘッダにプラン名を出すため。0.24 秒で、以後はキャッシュに乗る。
+    (my:claude--auth-status env)
     (setq proc
           ;; my-japanese.el が default-process-coding-system の cdr を cp932 に
           ;; しているので、束縛せずに起動すると標準入力の日本語が壊れる。
@@ -177,9 +285,12 @@ nil なら毎回聞く。"
           (let ((default-process-coding-system '(utf-8-unix . utf-8-unix))
                 ;; Rust/Node 側は `~' を展開しないので必ず絶対パスにする
                 ;; (gitd で os error 267 を踏んでいる)。
-                (default-directory dir))
+                (default-directory dir)
+                ;; アカウントの切り替えはこれだけ。claude はプロセス起動時に
+                ;; しか読まないので、環境を変えるには立て直すしかない。
+                (process-environment (my:claude--process-environment config-dir)))
             (make-process
-             :name (format "claude-%s" name)
+             :name (format "claude-%s" env)
              :buffer nil                ; 出力は自前のフィルタで捌く
              :connection-type 'pipe
              :noquery t
@@ -187,11 +298,12 @@ nil なら毎回聞く。"
              :filter (lambda (_p str) (my:claude--filter session str))
              :sentinel (lambda (_p e) (my:claude--sentinel session e)))))
     (setf (my:claude-session-process session) proc)
-    (push session my:claude--sessions)
+    (setq my:claude--the-session session)
     (with-current-buffer conv
       (my:claude-mode)
       (setq my:claude--session session
-            default-directory dir))
+            default-directory dir
+            header-line-format (my:claude--header session)))
     ;; SDK が送るハンドシェイク。返ってくる control_response に
     ;; スラッシュコマンドの一覧が入っている。
     (my:claude--send-json session
@@ -208,7 +320,8 @@ nil なら毎回聞く。"
                        (format "\n[プロセス %s]\n" e)
                        'my:claude-meta-face)
     (setf (my:claude-session-busy session) nil)
-    (setq my:claude--sessions (delq session my:claude--sessions))))
+    (when (eq session my:claude--the-session)
+      (setq my:claude--the-session nil))))
 
 ;;; --------------------------------------------------
 ;;; 送受信
@@ -332,8 +445,34 @@ nil なら毎回聞く。"
     ("control_response" nil)
     ;; 段階 4 で使う。今は捨てる。
     ("stream_event" nil)
-    ("rate_limit_event" nil)
+    ;; 残量はアカウントを切り替える判断材料そのものなので拾う。
+    ("rate_limit_event"
+     (setf (my:claude-session-rate-limit session)
+           (alist-get 'rate_limit_info obj))
+     (my:claude--update-header session))
     (_ nil)))
+
+(defun my:claude--header (session)
+  "会話バッファのヘッダ行。どのアカウントに繋いでいるかを常に見せる。"
+  (let* ((auth (gethash (my:claude-session-name session) my:claude--auth-cache))
+         (rl (my:claude-session-rate-limit session)))
+    (concat
+     (format "%s(%s)"
+             (my:claude-session-name session)
+             (or (alist-get 'subscriptionType auth) "?"))
+     (when-let* ((m (my:claude-session-model session))) (format " | %s" m))
+     (when rl
+       (let ((w (alist-get 'unifiedWindows rl)))
+         (format " | 5h %d%% 7d %d%%"
+                 (round (* 100 (or (alist-get 'utilization (alist-get 'five_hour w)) 0)))
+                 (round (* 100 (or (alist-get 'utilization (alist-get 'seven_day w)) 0))))))
+     (format " | %s" (abbreviate-file-name
+                      (directory-file-name (my:claude-session-directory session)))))))
+
+(defun my:claude--update-header (session)
+  (when (buffer-live-p (my:claude-session-buffer session))
+    (with-current-buffer (my:claude-session-buffer session)
+      (setq header-line-format (my:claude--header session)))))
 
 (defun my:claude--handle-system (obj session)
   (pcase (alist-get 'subtype obj)
@@ -342,23 +481,18 @@ nil なら毎回聞く。"
      ;; 見出しが混ざるので、ヘッダ行に出す。
      (setf (my:claude-session-session-id session) (alist-get 'session_id obj)
            (my:claude-session-model session) (alist-get 'model obj))
-     (let ((header
-            (format "claude %s | %s | %s%s"
-                    (or (alist-get 'claude_code_version obj) "?")
-                    (or (alist-get 'model obj) "?")
-                    (or (alist-get 'permissionMode obj) "?")
-                    (let ((bad (seq-filter
-                                (lambda (m)
-                                  (not (equal (alist-get 'status m) "connected")))
-                                (append (alist-get 'mcp_servers obj) nil))))
-                      (if bad
-                          (format " | MCP 未接続: %s"
-                                  (mapconcat (lambda (m) (alist-get 'name m))
-                                             bad ", "))
-                        "")))))
-       (when (buffer-live-p (my:claude-session-buffer session))
-         (with-current-buffer (my:claude-session-buffer session)
-           (setq header-line-format header)))))
+     (my:claude--update-header session)
+     ;; MCP の失敗は毎ターン出すとうるさいので 1 度だけ本文に出す。
+     (let ((bad (seq-filter
+                 (lambda (m) (not (equal (alist-get 'status m) "connected")))
+                 (append (alist-get 'mcp_servers obj) nil))))
+       (when (and bad (not (my:claude-session-session-id session)))
+         (my:claude--insert
+          session
+          (format "MCP 未接続: %s
+"
+                  (mapconcat (lambda (m) (alist-get 'name m)) bad ", "))
+          'my:claude-error-face))))
     ("permission_denied"
      (my:claude--insert
       session
@@ -512,16 +646,50 @@ nil なら毎回聞く。"
 ;;; --------------------------------------------------
 
 ;;;###autoload
-(defun my:claude ()
-  "このプロジェクトの claude セッションを開く。無ければ起動する。"
-  (interactive)
-  (let* ((pair (my:claude--project-name))
-         (dir (car pair))
-         (name (cdr pair))
-         (session (or (my:claude--live-session name)
-                      (my:claude--start dir name))))
+(defun my:claude (&optional arg)
+  "claude セッションを開く。無ければ環境を選んで起動する。
+
+セッションは Emacs 全体で 1 つだけ持つ。アカウントの切り替えは
+CLAUDE_CONFIG_DIR をプロセス起動時に渡すことでしか行えないため、
+複数あるとどちらに送っているのか分からなくなるので増やさない。
+
+ARG (`C-u') を付けると、生きているセッションがあっても畳んで、
+環境と作業ディレクトリを選び直す。Pro の残量が尽きたときに
+その場で Max へ逃がすのがこの操作。"
+  (interactive "P")
+  (let ((session (my:claude--live-session)))
+    (when (and session arg)
+      (my:claude-quit-session session)
+      (setq session nil))
+    (unless session
+      (let ((dir (my:claude--project-directory))
+            (env (my:claude--read-environment)))
+        (setq session (my:claude--start dir env))))
+    ;; 起動済みのセッションを別プロジェクトから呼んだときは黙って
+    ;; 使い回すが、cwd が違うことは知らせる (claude はそちらを見る)。
+    (let ((here (my:claude--project-directory)))
+      (unless (equal here (my:claude-session-directory session))
+        (message "claude のセッションは %s のまま (C-u C-c a a で立て直す)"
+                 (abbreviate-file-name
+                  (directory-file-name (my:claude-session-directory session))))))
     (pop-to-buffer (my:claude-session-buffer session))
     session))
+
+;;;###autoload
+(defun my:claude-switch-environment ()
+  "環境 (アカウント) を選び直してセッションを立て直す。
+
+会話の文脈は引き継がれない。アカウントが違えばセッションの保存先も
+別なので、`--resume' でも繋がらない。"
+  (interactive)
+  (let* ((old (my:claude--live-session))
+         (dir (if old (my:claude-session-directory old)
+                (my:claude--project-directory)))
+         (env (my:claude--read-environment)))
+    (when old (my:claude-quit-session old))
+    (let ((session (my:claude--start dir env)))
+      (pop-to-buffer (my:claude-session-buffer session))
+      session)))
 
 (defun my:claude-send-string (text &optional session)
   "TEXT を claude に送る。"
@@ -581,8 +749,7 @@ nil なら毎回聞く。"
   "送信するテキストを書くバッファを開く。"
   (interactive)
   (let* ((session (or (my:claude--session-for-buffer) (my:claude)))
-         (buf (get-buffer-create
-               (format "*claude-input: %s*" (my:claude-session-name session)))))
+         (buf (get-buffer-create "*claude-input*")))
     (with-current-buffer buf
       (my:claude-input-mode)
       (setq my:claude--session session))
@@ -658,6 +825,7 @@ nil なら毎回聞く。"
 ;; p は projectile、! は flymake で埋まっている。
 (use-package emacs
   :bind (("C-c a a" . my:claude)
+         ("C-c a e" . my:claude-switch-environment)
          ("C-c a i" . my:claude-input)
          ("C-c a s" . my:claude-send-region)
          ("C-c a k" . my:claude-interrupt)

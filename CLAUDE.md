@@ -660,11 +660,57 @@ Windows の Emacs には PTY が無いので claude の対話 TUI は動かな�
 
 | キー | |
 |---|---|
-| `C-c a a` | セッションを開く（`my:claude`） |
+| `C-c a a` | セッションを開く。無ければ環境を選んで起動（`C-u` で立て直す） |
+| `C-c a e` | 環境（アカウント）を切り替える |
 | `C-c a i` | 入力バッファを開く（`C-c C-c` で送信） |
 | `C-c a s` | リージョンを送る |
 | `C-c a k` | 中断 |
 | `C-c a q` | セッション終了 |
+
+### 環境（アカウント）の切り替え
+
+Pro / Enterprise / Max 20x を `CLAUDE_CONFIG_DIR` で使い分けている。
+claude はこれを**プロセスの起動時にしか読まない**ので、切り替えは
+立て直すことでしか行えない。そのため**セッションは Emacs 全体で 1 つ**に
+限っている（複数あるとどちらに送っているのか分からなくなる）。
+
+`my:claude-environments` に `(ラベル . CLAUDE_CONFIG_DIR)` で並べる。
+選択時に `claude auth status --json` を呼んで実際のアカウントを見せる
+（実測 0.24 秒。結果はキャッシュし、`M-x my:claude-refresh-auth` で捨てる）。
+
+```
+personal   pro         ponkore@gmail.com's Organization
+jighead    max         masao.kato@jighead.co.jp's Organization
+ESC-Web    enterprise  株式会社　熾火
+```
+
+ヘッダ行に `jighead(max) | claude-opus-5 | 5h 0% 7d 6% | ~/.emacs.d` を出す。
+残量は `rate_limit_event` から取っている。**アカウントを切り替える判断は
+この数字で行う**ので、常に見えるようにしてある。
+
+#### 【重要】既定の環境には `CLAUDE_CONFIG_DIR` を「設定しない」
+
+`~/.claude` を明示的に指定してはいけない。claude は
+`$CLAUDE_CONFIG_DIR/.claude.json` を探すが、実体は `~/.claude.json` に
+あるため見つからない。実測:
+
+| | `email` / `orgName` | 標準出力 |
+|---|---|---|
+| 未設定（既定） | `ponkore@gmail.com` / 取れる | JSON のみ |
+| `CLAUDE_CONFIG_DIR=~/.claude` | **どちらも `null`** | **警告が混ざる** |
+
+警告は stderr ではなく**標準出力**に出るので、stream-json の途中に
+非 JSON の行が混ざることになる。`my:claude-environments` では
+既定の環境の CONFIG-DIR を `nil` にすること。
+
+#### 【重要】nil のときは「設定しない」ではなく「消す」
+
+Emacs 自身が `CLAUDE_CONFIG_DIR` の設定された環境から起動されていると、
+何もしなければそれを継承する。**「既定（Pro）」を選んだつもりで別の
+アカウントに繋がる。** 実際に踏んだ（`personal` が `max` と表示された）。
+
+`my:claude--process-environment` が `setenv` に nil を渡して
+明示的に削除している。
 
 ### 【重要】起動オプションは 4 つとも省略できない
 
