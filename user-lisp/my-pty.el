@@ -295,36 +295,65 @@ ambiguous を幅 1 として扱う。Emacs 側だけ幅 2 で数えると、ル�
                   (aset tbl c 1)))
               tbl))))
 
+(defcustom my:pty-console-font-fallback "Consolas"
+  "`my:pty-console-font' が半角で描かない文字に使うフォント。nil なら使わない。
+
+実測（半角 8px / 全角 16px の設定）:
+
+  文字                       HackGen  ConsoleNF  Consolas
+  ─ │ ○ △ → █ ▀ ▐ ▛ ▝ …        16        8          8
+  ① ②                          16       16          8   ← ここ
+  ★ ※                          16       16         16   ← どれも駄目
+  あ                            16       16         16
+
+囲み英数字 (①②③) は HackGen Console NF でも全角のまま。Consolas なら
+半角になる。`my-appearance.el' のコメントにある
+「Consolas だと丸付き数字が半角幅になってしまっている」は、通常の編集では
+困る挙動だが、**端末では逆にそれが正しい**（claude は ① を 1 桁として
+桁を組む）。"
+  :type '(choice (const :tag "使わない" nil) string))
+
 (defconst my:pty--ambiguous-ranges
-  '((#x00a1 . #x00ff)   ; ラテン補助 (· ° ± × ÷ § ¶)
-    (#x2000 . #x206f)   ; 一般句読点 (… † ‡ ‘ ’ “ ”)
-    (#x2100 . #x214f)   ; 文字様記号
-    (#x2150 . #x218f)   ; 数字に準じるもの
-    (#x2190 . #x21ff)   ; 矢印 (→ ←)
-    (#x2460 . #x24ff)   ; 囲み英数字 (①②③)
-    (#x2500 . #x257f)   ; 罫線素片 (─ │ ┌ ┐)
-    (#x2580 . #x259f)   ; ブロック要素 (█ ▀ ▐)
-    (#x25a0 . #x25ff)   ; 幾何学模様 (○ △ □ ◇)
-    (#x2600 . #x26ff))  ; その他の記号 (★ ☆ ※)
-  "端末のあいだフォントを差し替える範囲。
+  '(((#x00a1 . #x00ff) . main)   ; ラテン補助 (· ° ± × ÷ § ¶)
+    ((#x2000 . #x206f) . main)   ; 一般句読点 (… † ‡ ‘ ’ “ ”)
+    ((#x2100 . #x214f) . main)   ; 文字様記号
+    ((#x2150 . #x218f) . main)   ; 数字に準じるもの
+    ((#x2190 . #x21ff) . main)   ; 矢印 (→ ←)
+    ((#x2460 . #x24ff) . fallback) ; 囲み英数字 (①②③) は Consolas でないと半角にならない
+    ((#x2500 . #x257f) . main)   ; 罫線素片 (─ │ ┌ ┐)
+    ((#x2580 . #x259f) . main)   ; ブロック要素 (█ ▀ ▐)
+    ((#x25a0 . #x25ff) . main)   ; 幾何学模様 (○ △ □ ◇)
+    ((#x2600 . #x26ff) . main))  ; その他の記号 (★ ☆ ※)
+  "端末のあいだフォントを差し替える範囲と、どちらのフォントを使うか。
+
+`main' は `my:pty-console-font'、`fallback' は
+`my:pty-console-font-fallback'。
 
 ambiguous 幅の文字が多く、かつ claude の TUI が実際に使うところ。
-Nerd Font のアイコン領域 (#xe000-#xf8ff) は **触らない**。
+**Nerd Font のアイコン領域 (#xe000-#xf8ff) は触らない。**
 `my-appearance.el' がそこを別のフォントに回しており、上書きすると
-アイコンが豆腐になる。")
+アイコンが豆腐になる。
+
+`★' (U+2605) と `※' (U+203B) は **手元のどのフォントでも全角**なので、
+これらを含む行だけは揃わない。")
 
 (defvar my:pty--saved-jp-font nil
   "端末を開く前の日本語フォント。閉じるときに戻す。")
 
-(defun my:pty--apply-font (family)
-  "FAMILY を日本語と ambiguous の範囲に割り当てる。"
-  (let ((spec (font-spec :family family)))
+(defun my:pty--apply-font (family &optional fallback)
+  "FAMILY を日本語と ambiguous の範囲に割り当てる。
+FALLBACK が非 nil なら、`fallback' 指定の範囲だけそちらを使う。
+FALLBACK が nil のときは全部 FAMILY (元に戻すときはこちら)。"
+  (let ((spec (font-spec :family family))
+        (fspec (and fallback (find-font (font-spec :family fallback))
+                    (font-spec :family fallback))))
     (dolist (cs '(japanese-jisx0208 japanese-jisx0212 japanese-jisx0213-1
                   japanese-jisx0213-2 japanese-jisx0213.2004-1
                   katakana-jisx0201))
       (set-fontset-font nil cs spec))
-    (dolist (range my:pty--ambiguous-ranges)
-      (set-fontset-font nil range spec))
+    (dolist (entry my:pty--ambiguous-ranges)
+      (set-fontset-font nil (car entry)
+                        (if (and fspec (eq (cdr entry) 'fallback)) fspec spec)))
     (redraw-display)))
 
 (defun my:pty--console-font-on ()
@@ -337,7 +366,7 @@ Nerd Font のアイコン領域 (#xe000-#xf8ff) は **触らない**。
     ;; 既定のフォント名を控える。`my-appearance.el' は ascii と日本語に
     ;; 同じファミリを使っているので、これで戻せる。
     (setq my:pty--saved-jp-font (face-attribute 'default :family))
-    (my:pty--apply-font my:pty-console-font)))
+    (my:pty--apply-font my:pty-console-font my:pty-console-font-fallback)))
 
 (defun my:pty--console-font-off ()
   "元のフォントに戻す。端末が 1 つも無くなったときだけ。"
