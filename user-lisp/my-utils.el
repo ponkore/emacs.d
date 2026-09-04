@@ -143,30 +143,33 @@
 ;; 疑似パッケージなので use-package の名前は emacs にする。
 (use-package emacs
   :init
+  ;; 【重要】ripgrep も grep とまったく同じ理由でコマンド行を ANSI コード
+  ;; ページで書かなければならない (my:grep-with-cp932 のコメント参照)。
+  ;;
+  ;; 以前は my:ripgrep-regexp (dired の G) が本家 ripgrep-regexp をコピーして
+  ;; その中でだけ束縛していたため、本家を呼ぶ経路 —— projectile-ripgrep
+  ;; (C-c p s の my:projectile-search-dwim) と M-x ripgrep-regexp —— が
+  ;; 漏れていた。日本語の検索語がエラーも出さずに 0 件になる。
+  ;; 入口である ripgrep-regexp に advice を張って全経路をまとめて押さえる。
+  ;;
+  ;; ripgrep-regexp は autoload なので、定義前にここで張っておけば
+  ;; ripgrep.el がロードされた時点で引き継がれる。
+  ;; ripgrep は標準入力を使わないので書き込み側を変えても副作用は無い。
+  (defun my:ripgrep-with-cp932 (orig &rest args)
+    "コマンド行を ANSI コードページで書いた上で ORIG を ARGS で呼ぶ。"
+    (let ((coding-system-for-write locale-coding-system))
+      (apply orig args)))
+  (advice-add 'ripgrep-regexp :around #'my:ripgrep-with-cp932)
+
   (defun my:ripgrep-regexp (regexp &optional args)
-    "Run a ripgrep search with `REGEXP' rooted at `.'.
+    "Run a ripgrep search with `REGEXP' rooted at the current dired directory.
 `ARGS' provides Ripgrep command line arguments."
     (interactive
      (list (read-from-minibuffer "Ripgrep search for: " (thing-at-point 'symbol))))
-    ;; ripgrep-executable などを参照するので、先にロードしておく
-    (require 'ripgrep)
-    (let ((default-directory (dired-current-directory))
-          ;; grep と同じ理由でコマンド行を ANSI コードページで書く。
-          ;; (my:grep-with-cp932 のコメント参照)
-          (coding-system-for-write locale-coding-system))
-      (compilation-start
-       (mapconcat 'identity
-                  (append (list ripgrep-executable)
-                          ripgrep-arguments
-                          args
-                          ripgrep--base-arguments
-                          (when ripgrep-highlight-search '("--color=always"))
-                          (when (and case-fold-search
-                                     (isearch-no-upper-case-p regexp t))
-                            '("--ignore-case"))
-                          '("--")
-                          (list (shell-quote-argument regexp) ".")) " ")
-       'ripgrep-search-mode))))
+    ;; 本家は検索ディレクトリも対話的に聞いてくる。dired ではそのバッファの
+    ;; ディレクトリで検索したいので、それを渡すだけの薄いラッパにしてある。
+    ;; cp932 化は上の advice が担当するので、ここで束縛する必要は無い。
+    (ripgrep-regexp regexp (dired-current-directory) args)))
 
 ;;; [3] 自分の Blog (myblog-hugo) 用のものは削除した
 

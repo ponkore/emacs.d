@@ -1322,7 +1322,7 @@ alist を `(utf-8 . cp932)` にすると `M-!` / `M-|`
 （`shell-command-on-region`）や `M-x shell` の標準入力まで cp932 になる。
 代わりに、**標準入力を使わない grep / ripgrep の側だけ**
 `coding-system-for-write` を `locale-coding-system` に束縛した
-（`my:grep-with-cp932` と `my:ripgrep-regexp`）。`coding-system-for-write`
+（`my:grep-with-cp932` と `my:ripgrep-with-cp932`）。`coding-system-for-write`
 は alist より強い。非 Windows では `locale-coding-system` が utf-8 なので
 no-op になる。
 
@@ -1336,6 +1336,35 @@ no-op になる。
 
 **日本語の検索語で「一致なし」になったら、まずこれを疑うこと。**
 grep も rg もエラーを出さず、ただ 0 件を返す。
+
+#### 【重要】束縛はコマンドではなく `ripgrep-regexp` に張る
+
+当初 `my:ripgrep-regexp`（dired の `G`）が本家 `ripgrep-regexp` を
+**コピーして**その中でだけ束縛していたため、本家を呼ぶ経路が漏れていた。
+
+| 入口 | 通る関数 | 2026-09-04 まで |
+|---|---|---|
+| dired の `G` | `my:ripgrep-regexp`（コピー） | 束縛あり → **ヒット** |
+| `C-c p s`（`my:projectile-search-dwim`） | `projectile-ripgrep` → **本家** `ripgrep-regexp` | 束縛なし → **0 件** |
+| `M-x ripgrep-regexp` | 同上 | 同上 |
+
+`ripgrep-regexp` に `:around` advice（`my:ripgrep-with-cp932`）を張る形に
+変え、`my:ripgrep-regexp` は `(dired-current-directory)` を渡すだけの薄い
+ラッパにした。`ripgrep-regexp` は autoload なので、定義前に advice を
+張っておけば `ripgrep.el` のロード時に引き継がれる（実測で確認）。
+
+**この検証は batch ではできない。** PowerShell 7 から `--batch` で起動すると
+`locale-coding-system` が **`cp65001`**（コンソールのコードページ）になり、
+束縛が no-op になって修正前後の区別がつかない（4 通り試して全部 0 件になった）。
+GUI では `cp932` で、ANSI コードページと一致する。gitd の
+`my:gitd-ansi-coding` が `locale-coding-system` を避けているのと同じ話。
+
+GUI プローブでの実測（`~/.emacs.d` で `プロキシ` を検索）:
+
+| | |
+|---|---|
+| 修正後 `ripgrep-regexp` / `projectile-ripgrep` / `my:ripgrep-regexp` | **3 つともヒット** |
+| advice を外した `projectile-ripgrep` | **0 件**（報告された症状を再現） |
 
 ## magit の高速化 (`gitd/` + `my-gitd.el`)
 
