@@ -267,6 +267,15 @@ nil にするとブロックが確定してから一度に出る (段階 3 ま�
     (((background light)) :foreground "dark cyan"))
   "ヘッダ行 6 列目 (レート上限とリセット時刻)。")
 
+(defface my:claude-header-cost-face
+  '((t :inherit shadow))
+  "ヘッダ行 7 列目 (セッション累計コストと応答待ちの `...')。
+
+ここだけ色名を直接書かず `shadow' を継ぐ。statusline スクリプトが
+コストを C_DIM (ANSI の dim) で出しており、dim に対応する固定の色が
+無いため。`shadow' は前景しか持たないので、背景がテーマのまま残る点は
+他の列と同じ。")
+
 (defface my:claude-input-header-face
   '((((background dark))  :foreground "cyan")
     (((background light)) :foreground "dark cyan"))
@@ -881,6 +890,16 @@ worktree と submodule では `.git' がディレクトリではなくファイ�
 
 ;;; ------------------------------------------------ ヘッダ行の組み立て
 
+(defconst my:claude--header-separator
+  (propertize " | " 'face 'my:claude-header-size-face)
+  "ヘッダ行の列の区切り。
+
+**大きさの face を載せること。** 行の高さは行内でいちばん高いグリフで
+決まるので、1 か所でも素のままだとヘッダ行が縮まない。
+
+`:eval' の列が自分で区切りを出す必要がある (末尾の
+`my:claude--cost-segment') ので、定数にして共有している。")
+
 (defun my:claude--header-segment (text face &rest props)
   "TEXT を FACE で色づけしてヘッダ行の 1 列にする。PROPS も載せる。
 
@@ -900,13 +919,38 @@ size face から来る。大きさを 1 か所で決めるためにこうして�
   (apply #'propertize (replace-regexp-in-string "%" "%%" text)
          'face (list face 'my:claude-header-size-face) props))
 
+(defun my:claude--cost-segment ()
+  "ヘッダ行の最後の列。セッション累計コストと、応答待ちの `...'。
+
+`header-line-format\' の `:eval\' から呼ぶ。**モードラインではなく
+ここに出す。** かつては `mode-line-process\' に
+`[プロジェクト名 ... $0.12]\' を出していたが、ヘッダ行と重複していた。
+
+`:eval\' にするのは応答待ちの表示のため。`busy\' は送信した時点で立ち、
+`result\' で降りる。ターンごとの `my:claude--update-header\' では
+立ち上がりに間に合わない。
+
+コストは直近の `result\' の `total_cost_usd\'。**1 往復ぶんではなく
+セッション開始からの累計**が来る (`--resume\' で継いだ会話ぶんを含む)。
+
+**区切りも自分で出す。** 起動直後は `result\' がまだ来ておらず応答待ちでも
+ないので何も出さないが、そのとき区切りだけが末尾に残らないようにするため。"
+  (and-let* ((session my:claude--session)
+             (parts (delq nil
+                          (list (and-let* ((r (my:claude-session-last-result session))
+                                           (c (alist-get 'total_cost_usd r)))
+                                  (format "$%.2f" c))
+                                (and (my:claude-session-busy session) "...")))))
+    (concat my:claude--header-separator
+            (my:claude--header-segment (string-join parts " ")
+                                       'my:claude-header-cost-face))))
+
 (defun my:claude--header (session)
   "会話バッファのヘッダ行。
 
-**ヘッダ行を主に使う。** 6 列に分けて色を付けてある
+**表示はここに集約する。** 7 列に分けて色を付けてある
  (`~/.claude/statusline-command.sh\' が端末の TUI で使っている ANSI 色に
-合わせた)。モードラインは幅が狭いのでプロジェクト名とコストだけ
- (`my:claude--mode-line\')。
+合わせた)。モードラインには何も出さない。
 
   1 アカウント (プラン) と claude のバージョン   マゼンタ
   2 プロジェクト名 (フルパスは help-echo)        シアン
@@ -914,11 +958,15 @@ size face から来る。大きさを 1 か所で決めるためにこうして�
   4 モデルと effort                              イエロー
   5 コンテキスト使用量                           グリーン
   6 レート上限とリセット時刻                     シアン
+  7 累計コストと応答待ちの `...\'                 dim
 
-**戻り値は文字列ではなくリスト** (mode-line 構文)。3 列目だけは
-`(:eval (my:claude--branch-segment))\' で、再描画のたびに評価される。
-ブランチの切り替えは Emacs の外でも起きるので、ターンごとの更新
- (`my:claude--update-header\') では追随できないため。
+**戻り値は文字列ではなくリスト** (mode-line 構文)。3 列目と 7 列目は
+`:eval\' で、再描画のたびに評価される。ブランチの切り替えは Emacs の
+外でも起き、応答待ちは送信した時点で立つので、どちらもターンごとの
+更新 (`my:claude--update-header\') では追随できないため。
+
+**7 列目は区切りも自分で出す** (`my:claude--cost-segment\')。末尾なので、
+出すものが無いときに区切りだけが残らないようにする必要がある。
 
 出す項目は `~/.claude/statusline-command.sh\' が端末の TUI に出して
 いるものに合わせてある。ただし **statusLine は端末 TUI の機能で、
@@ -990,13 +1038,13 @@ settings.json から求める (`my:claude--effort')。"
                        (if (numberp r) (format-time-string "(reset %m/%d %H:%M)" r) ""))
                'my:claude-header-limit-face)
               segs)))
-    ;; 区切りにも大きさの face を載せる。ここだけ素のままだと、行の高さは
-    ;; 行内でいちばん高いグリフで決まるためヘッダ行が縮まない。
+    ;; **`mapconcat' で 1 つの文字列にはしない。** `(:eval ...)' の列を
+    ;; 活かすため、mode-line 構文のリストのまま返す。
     ;;
-    ;; **`mapconcat' で 1 つの文字列にはしない。** 3 列目の
-    ;; `(:eval ...)' を活かすため、mode-line 構文のリストのまま返す。
-    (let ((sep (propertize " | " 'face 'my:claude-header-size-face)))
-      (cdr (mapcan (lambda (seg) (list sep seg)) (nreverse segs))))))
+    ;; [7] は区切り込みで自分を出すので、ここで挟む対象には入れない。
+    (append (cdr (mapcan (lambda (seg) (list my:claude--header-separator seg))
+                         (nreverse segs)))
+            (list '(:eval (my:claude--cost-segment))))))
 
 (defun my:claude--update-header (session)
   (when (buffer-live-p (my:claude-session-buffer session))
@@ -2337,26 +2385,7 @@ Opus と Haiku を行き来してもそれまでの話は消えない。"
 
 TAB で折りたたんだツール出力の全体を別バッファに出す。
 z / C-c C-z でこのウィンドウを最大化 (もう一度で元のレイアウト)。"
-  (setq-local truncate-lines nil)
-  (setq-local mode-line-process '(:eval (my:claude--mode-line))))
-
-(defun my:claude--mode-line ()
-  "モードラインに出す `[プロジェクト名 ... $0.12]\'。
-
-幅が狭いのでここは 3 項目まで。詳細はヘッダ行 (`my:claude--header\')。
-プロジェクト名はディレクトリの basename で、フルパスは help-echo に
-入れてある。"
-  (let ((s my:claude--session))
-    (if (null s) ""
-      (let ((dir (my:claude-session-directory s)))
-        (concat
-         " ["
-         (propertize (file-name-nondirectory (directory-file-name dir))
-                     'help-echo (abbreviate-file-name dir))
-         (if (my:claude-session-busy s) " ..." "")
-         (let ((r (my:claude-session-last-result s)))
-           (if r (format " $%.2f" (or (alist-get 'total_cost_usd r) 0.0)) ""))
-         "]")))))
+  (setq-local truncate-lines nil))
 
 (defvar my:claude-input-mode-map
   (let ((map (make-sparse-keymap)))
@@ -2400,7 +2429,6 @@ C-1 のようにテキストプロパティを貼る仕掛けは要らない。�
               (my:claude--header-segment
                "C-c C-c 送信 / C-c C-k 閉じる / C-c C-z 最大化 / 行頭 / は TAB 補完 / M-p 履歴"
                'my:claude-input-header-face))
-  (setq-local mode-line-process '(:eval (my:claude--mode-line)))
   ;; cape-file が深さ 90 にいる。念のため明示的に先頭へ置く。
   (add-hook 'completion-at-point-functions #'my:claude--capf -100 t))
 

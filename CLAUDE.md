@@ -872,11 +872,15 @@ ESC-Web    enterprise  株式会社　熾火
 ```
 
 ヘッダ行に
-`jighead(max) v2.1.260 | .emacs.d | claude-opus-5 (high) | ctx 103.2k 52% | (5h 4%)(7d 8%)(reset 09/05 03:00)`
+
+```
+jighead(max) v2.1.260 | .emacs.d | master | claude-opus-5 (high) | ctx 103.2k 52% | (5h 4%)(7d 8%)(reset 09/05 03:00) | $6.17
+```
+
 を出す。残量は `rate_limit_event` から取っている。**アカウントを
 切り替える判断はこの数字で行う**ので、常に見えるようにしてある。
 
-### ステータスの表示は「ヘッダ行が主、モードラインは控えめ」
+### ステータスの表示はヘッダ行に集約する（モードラインには出さない）
 
 `~/.claude/statusline-command.sh` が端末の TUI に出している項目を
 Emacs 側で再現してある。**`statusLine` は端末 TUI の機能で、`-p`
@@ -895,8 +899,9 @@ Emacs 側で再現してある。**`statusLine` は端末 TUI の機能で、`-p
 | 4 | モデルと effort | イエロー | `system/init` の `model` と `my:claude--effort` |
 | 5 | コンテキスト使用量 | グリーン | `assistant` の `message.usage` の `input_tokens` + `cache_read_input_tokens` + `cache_creation_input_tokens` / `result` の `modelUsage.<model>.contextWindow`（1M 版なら 1000000 が来る） |
 | 6 | レート上限とリセット時刻 | シアン | `rate_limit_event` の `unifiedWindows` |
+| 7 | 累計コストと応答待ちの `...` | dim | `result` の `total_cost_usd` と `busy`（後述） |
 
-face は `my:claude-header-{plan,dir,branch,model,context,limit}-face`。
+face は `my:claude-header-{plan,dir,branch,model,context,limit,cost}-face`。
 **`:foreground` だけを指定する。** ヘッダ行では `header-line` face が
 下地になり、テキストプロパティの face はその上に重なるので、背景は
 テーマのものがそのまま残る。
@@ -1035,13 +1040,42 @@ displayed : ... ctx 103.2k 52| (5h 5(7d 8(reset 09/04 23:10)
 あわせてレート上限の表示を `(5h 5%)(7d 8%)(reset MM/DD HH:MM)` の形に
 変えてある（`%` が区切りに埋もれず読めるように）。
 
-モードラインは `[.emacs.d ... $0.12]`（プロジェクト名 / 応答待ち /
-累計コスト）だけ。フルパスは `help-echo` に入れてある。プロジェクト名は
-ヘッダ行の 2 列目にも出るが、**入力バッファ（`*claude-input*`）の
-ヘッダ行はキーの案内**なので、そちらではモードラインが唯一の表示場所に
-なる。`doom-modeline` は `mode-line-process` を `process` セグメントで
-そのまま拾うので、`doom-modeline-def-segment` を書く必要は無い
-（セグメント名がバージョンで変わる問題も踏まない）。
+#### モードラインには何も出さない（2026-09-05）
+
+かつては `mode-line-process` に `[.emacs.d ... $0.12]`（プロジェクト名 /
+応答待ち / 累計コスト）を出していたが、3 項目ともヘッダ行と重複するので
+やめた。累計コストと応答待ちの `...` はヘッダ行の 7 列目に移してある。
+
+```
+personal(pro) | .emacs.d | main | claude-opus-5 | ctx 103.2k 52% | $6.17 ...
+```
+
+- コストは直近の `result` の `total_cost_usd`。**1 往復ぶんではなく
+  セッション開始からの累計**が来る（`--resume` で継いだ会話ぶんを含む）
+- **7 列目も `:eval`。** `busy` は送信した時点で立って `result` で降りる
+  ので、ターンごとの `my:claude--update-header` では立ち上がりに
+  間に合わない。ブランチ（3 列目）と同じ理由
+- **7 列目は区切りも自分で出す**（`my:claude--cost-segment`）。末尾の列
+  なので、起動直後（`result` がまだ無く応答待ちでもない）に
+  区切りだけが行末に残らないようにする必要がある。ブランチの列が
+  「gitdir の有無で列ごと出し入れする」のに対し、こちらは毎回変わるため
+  `:eval` の側で判断するしかない
+- 色は `shadow` を継ぐ。statusline スクリプトがコストを `C_DIM`（ANSI の
+  dim）で出しており、dim に対応する固定の色が無いため。ここだけ色名を
+  直接書いていない
+
+GUI 実測（`format-mode-line` を通した実表示。末尾だけ抜粋）:
+
+| 状態 | 末尾 |
+|---|---|
+| `result` なし・応答待ちでない | `… ctx 103.2k 52%`（**区切りも出ない**） |
+| 応答待ちのみ | `… 52% \| ...` |
+| 応答待ち + `result` | `… 52% \| $6.17 ...` |
+| `result` のみ | `… 52% \| $6.17` |
+
+`my:claude-mode` / `my:claude-input-mode` とも `mode-line-process` は空。
+**この検証はモードを実際に立てて行うこと。** 変数の既定値を見ても
+「モードが設定しない」ことの証明にはならない。
 
 ### 逐次表示（`my:claude-stream`、既定 t）
 
