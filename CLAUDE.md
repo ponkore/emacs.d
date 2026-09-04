@@ -1033,13 +1033,67 @@ Emacs ──stdin (JSON Lines)──> ptyd ──ConPTY──> 子プロセス
 |---|---|
 | `M-x my:pty-build` | `ptyd.exe` を作る（`gitd` と同じく各マシンで） |
 | `M-x my:pty-run` | 任意のコマンドを端末で動かす（汎用） |
-| `M-x my:claude-term` | claude の TUI を開く（`--ax-screen-reader` 付き） |
+| `M-x my:claude-term` | claude の TUI を開く |
 
 **バイナリが無ければ `user-error` になるだけ**で、他の設定には影響しない。
 
 stdin だけ JSON にしてあるのは、キー入力のほかに画面サイズを送る必要が
 あるため。stdout を生のままにしてあるのは、そちらが本流で量が多く、
 base64 と JSON のエスケープを挟む意味が無いから。
+
+### 表示は eat (`my:pty-backend`、既定 `eat`)
+
+term.el では通常の TUI がまともに映らなかった。代替画面 (`ESC[?1049`) も
+同期出力も持たず、私用パラメータ付きの CSI (`ESC[>4;2m`) を SGR と
+誤解釈する。`--ax-screen-reader` に逃がせば崩れないが、平板で読みにくい。
+
+`eat`（NonGNU ELPA、純 elisp）に差し替えた。**通常モードの TUI が
+そのまま出る。** term.el は `my:pty-backend` を `term` にすれば残っている。
+
+| | term.el | eat |
+|---|---|---|
+| 代替画面 `?1049` | ✗（`?47` のみ） | ○ |
+| bracketed paste `?2004` | ✗ | ○ |
+| マウス `?1000`〜`?1006` | ✗ | ○ |
+| `ESC[>4;2m` | **SGR 0;2 と誤解釈** | 私用パラメータとして別扱い |
+| UTF-8 の復号 | `locale-coding-system` 決め打ち | 自前 |
+| アプリへの書き込み | `process-send-string`（advice が要る） | **`input-function` パラメータ** |
+
+最後の行が効いた。eat は端末→アプリの書き込みを `input-function` から
+出すので、**term.el のときに必要だった advice が丸ごと不要**になる。
+
+プロセスの符号化も逆になる。**eat は復号済みの文字列**を受け取る
+（パーサが文字を比較する）が、**term.el は生バイト**を要求して復号を
+自分でやる。`:coding` を切り替えている。
+
+### 【重要】eaw.el の文字幅表で eat が無限ループする
+
+`site-lisp/eaw.el` が East Asian Ambiguous を幅 2 にしていると、
+**eat が claude の TUI 出力の処理から戻ってこない**。実測（同じ 2385 文字を
+流し込む）:
+
+| | |
+|---|---|
+| `emacs -Q` | 完了 |
+| `emacs -Q` + `(eaw-fullwidth)` | **戻ってこない** |
+| 設定全体 | **戻ってこない** |
+| 幅表を戻して流す | 完了 |
+
+`my:pty--narrow-width-table` が `char-width-table` の複製を作り、
+`east-asian-ambiguous` の文字を幅 1 に戻す。それを
+`eat-term-process-output` と `eat-term-redisplay` の間だけ `let` で束縛する。
+
+**そもそも桁を数えているのは conhost** であり、Windows のコンソールは
+ambiguous を幅 1 として扱う。Emacs 側だけ幅 2 で数えると、ループしなかった
+としても桁がずれる。端末の中では conhost に合わせるのが正しい。
+バッファの外（通常の編集）には影響しない。
+
+### 【重要】`setf (eat-term-parameter …)` は使えない
+
+このリポジトリはバイトコンパイルしない方針なので、`setf` の展開は
+**my-pty.el を読み込んだ時点**で起きる。そのとき eat はまだロードされて
+おらず、gv のセッタが無いため `void-function \(setf eat-term-parameter\)`
+になる。素の関数 `eat-term-set-parameter` を使う。
 
 ### 【重要】プリミティブへの advice は native-compile されたコードに効かない
 
@@ -1065,6 +1119,8 @@ term.el が書き込む入口は 4 か所しかない。
 
 `my-gitd.el` が `magit-process-file` を、`my-lsp.el` が `eglot-uri-to-path` を
 包んでいるのは、どちらも Lisp の関数なので問題ない。
+
+### 以下は `term` バックエンド（退避先）の話
 
 ### 【重要】`locale-coding-system` をバッファローカルに上書きする
 

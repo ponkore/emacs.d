@@ -20,6 +20,13 @@
 (require 'term)
 (require 'subr-x)
 
+;; 端末エミュレータ。term.el は 1990 年代の実装で代替画面 (ESC[?1049) も
+;; 同期出力も持たず、私用パラメータ付きの CSI (ESC[>4;2m) を SGR と
+;; 誤解釈する。eat は純 elisp でそれらを正しく扱う。
+(use-package eat
+  :straight t
+  :defer t)
+
 ;;; --------------------------------------------------
 ;;; カスタマイズ
 ;;; --------------------------------------------------
@@ -39,11 +46,24 @@
   "`ptyd' の実行ファイル。`M-x my:pty-build' で作る。"
   :type 'string)
 
+(defcustom my:pty-backend 'eat
+  "端末の描画に使うもの。
+
+`eat' … 純 elisp の端末エミュレータ (NonGNU ELPA)。代替画面・
+bracketed paste・マウス・私用パラメータ付き CSI に対応していて、
+UTF-8 の復号も自前で行う。**こちらが既定。**
+
+`term' … Emacs 同梱の term.el。上のどれにも対応しておらず、
+`ESC[>4;2m' を「全属性リセット + faint」として実行してしまう。
+ptyd 側で削って誤魔化す必要がある。退避先として残してある。"
+  :type '(choice (const :tag "eat" eat) (const :tag "term.el" term)))
+
 (defcustom my:pty-term-name "xterm-256color"
-  "子プロセスに渡す TERM。
+  "子プロセスに渡す TERM (`term' バックエンドのとき)。
 
 term.el の既定は `eterm-color' だが、それを知らない相手のほうが多い。
-どのみち VT を解釈するのは conhost なので、広く知られている名前にする。"
+どのみち VT を解釈するのは conhost なので、広く知られている名前にする。
+`eat' のときは `eat-term-name' を使う。"
   :type 'string)
 
 (defcustom my:pty-map-alt-screen t
@@ -98,11 +118,18 @@ term.el 以外のエミュレータに差し替えるときは nil にする。"
                                             'utf-8-unix))))
 
 (defun my:pty--send-input (proc string)
-  "STRING をキー入力として PROC に送る。"
+  "STRING をキー入力として PROC に送る。
+
+eat はキーイベントを既にバイト列 (unibyte) にして渡してくるので、
+そのときは encode しない。二重に encode すると日本語が壊れる。"
   (my:pty--send-json
    proc
    `((op . "i")
-     (d . ,(base64-encode-string (encode-coding-string string 'utf-8) t)))))
+     (d . ,(base64-encode-string
+            (if (multibyte-string-p string)
+                (encode-coding-string string 'utf-8)
+              string)
+            t)))))
 
 (defun my:pty-send-resize (proc cols rows)
   "PROC の疑似コンソールを COLS x ROWS にする。"
@@ -150,6 +177,17 @@ term.el 以外のエミュレータに差し替えるときは nil にする。"
         (my:pty--send-input proc "\C-d")
       (apply orig args))))
 
+(defun my:pty--enable-eat-advice ()
+  (advice-add 'eat-term-process-output :around #'my:pty--eat-width-advice)
+  (advice-add 'eat-term-redisplay :around #'my:pty--eat-width-advice)
+  (add-hook 'window-size-change-functions #'my:pty--sync-size))
+
+(defun my:pty--disable-eat-advice ()
+  (unless my:pty--processes
+    (advice-remove 'eat-term-process-output #'my:pty--eat-width-advice)
+    (advice-remove 'eat-term-redisplay #'my:pty--eat-width-advice)
+    (remove-hook 'window-size-change-functions #'my:pty--sync-size)))
+
 (defun my:pty--enable-advice ()
   (advice-add 'term-send-raw-string :around #'my:pty--advice-send-raw-string)
   (advice-add 'term-send-string :around #'my:pty--advice-send-string)
@@ -186,16 +224,93 @@ term.el 以外のエミュレータに差し替えるときは nil にする。"
               (max 5 (window-body-height win)))
       (cons 100 30))))
 
+(defvar my:pty--narrow-width-table nil
+  "East Asian Ambiguous を幅 1 に戻した `char-width-table' の複製。")
+
+(defun my:pty--narrow-width-table ()
+  "端末バッファで使う文字幅表。
+
+【重要】`site-lisp/eaw.el' が ambiguous 幅の文字を幅 2 にしているが、
+**この表を使うと eat が無限ループする**。実測 (claude の TUI 出力
+2385 文字を流し込む):
+
+  emacs -Q                      … 完了
+  emacs -Q + (eaw-fullwidth)    … **戻ってこない**
+  幅表を戻して流す              … 完了
+
+そもそも桁を数えているのは conhost であり、Windows のコンソールは
+ambiguous を幅 1 として扱う。Emacs 側だけ幅 2 で数えると、ループ
+しなかったとしても桁がずれる。**端末の中では conhost に合わせる**のが
+正しい。バッファの外 (通常の編集) には影響しない。"
+  (or my:pty--narrow-width-table
+      (setq my:pty--narrow-width-table
+            (let ((tbl (copy-sequence char-width-table)))
+              (when (boundp 'east-asian-ambiguous)
+                (dolist (c east-asian-ambiguous)
+                  (aset tbl c 1)))
+              tbl))))
+
+(defun my:pty--our-terminal-p (terminal)
+  "TERMINAL が ptyd に繋がっているか。"
+  (ignore-errors
+    (let ((proc (eat-term-parameter terminal 'eat--process)))
+      (and (processp proc) (process-get proc 'my:pty)))))
+
+(defun my:pty--eat-width-advice (orig terminal &rest args)
+  "eat の処理の間だけ文字幅表を conhost に合わせる。"
+  (if (my:pty--our-terminal-p terminal)
+      (let ((char-width-table (my:pty--narrow-width-table)))
+        (apply orig terminal args))
+    (apply orig terminal args)))
+
+(defun my:pty--setup-eat (buf cols rows)
+  "BUF を eat の端末バッファにする。"
+  (with-current-buffer buf
+    (eat-mode)
+    (setq eat-terminal (eat-term-make buf (point)))
+    (eat-semi-char-mode)
+    (eat-term-resize eat-terminal cols rows)
+    ;; ここが肝。端末 -> アプリの書き込みは `input-function' から出るので、
+    ;; term.el のように送信関数を advice で包む必要が無い。
+    (eat-term-set-parameter eat-terminal 'input-function #'my:pty--eat-input)
+    (eat-term-set-parameter eat-terminal 'set-cursor-function #'eat--set-cursor)
+    (eat-term-set-parameter eat-terminal 'grab-mouse-function #'eat--grab-mouse)
+    (eat-term-set-parameter eat-terminal 'manipulate-selection-function #'eat--manipulate-kill-ring)
+    (eat-term-set-parameter eat-terminal 'ring-bell-function #'eat--bell)
+    (eat-term-set-parameter eat-terminal 'set-cwd-function #'eat--set-cwd)
+    (eat-term-set-parameter eat-terminal 'ui-command-function #'eat--handle-uic)
+    (when (fboundp 'eat--set-term-sixel-params)
+      (eat--set-term-sixel-params))))
+
+(defun my:pty--eat-input (terminal input)
+  "eat から来た INPUT を ptyd に送る。"
+  (when-let* ((proc (eat-term-parameter terminal 'eat--process)))
+    (my:pty--send-input proc input)))
+
+(defun my:pty--setup-term (buf cols rows)
+  "BUF を term.el の端末バッファにする。"
+  (with-current-buffer buf
+    (term-mode)
+    ;; 【重要】term.el は復号に `locale-coding-system' を決め打ちしている。
+    ;; 日本語 Windows では cp932 なので、UTF-8 を吐く TUI の罫線が壊れ、
+    ;; args-out-of-range で落ちる。バッファローカルに上書きする。
+    (setq-local locale-coding-system 'utf-8-unix)
+    (term-reset-size rows cols)))
+
 ;;;###autoload
 (defun my:pty-run (name command &optional dir env)
-  "COMMAND を ConPTY 経由で動かし、term のバッファを返す。
+  "COMMAND を ConPTY 経由で動かし、端末のバッファを返す。
 
 NAME はバッファ名 (`*NAME*' になる)、COMMAND は文字列のリスト、
-DIR は作業ディレクトリ、ENV は追加の環境変数 (\"K=V\" のリスト)。"
+DIR は作業ディレクトリ。ENV は非 nil なら `process-environment' を
+**丸ごと** それに差し替える。追加ではなく差し替えなのは、環境変数を
+消す必要がある場合があるため。"
   (unless (my:pty-available-p)
     (user-error "ptyd が無い。M-x my:pty-build でビルドしてください (%s)"
                 my:pty-executable))
-  (let* ((bufname (format "*%s*" name))
+  (when (eq my:pty-backend 'eat) (require 'eat))
+  (let* ((eatp (eq my:pty-backend 'eat))
+         (bufname (format "*%s*" name))
          (buf (get-buffer-create bufname))
          (dir (expand-file-name (or dir default-directory)))
          size cols rows proc)
@@ -203,24 +318,20 @@ DIR は作業ディレクトリ、ENV は追加の環境変数 (\"K=V\" のリ�
       (let ((old (get-buffer-process buf)))
         (when old (delete-process old)))
       (let ((inhibit-read-only t)) (erase-buffer))
-      (term-mode)
-      (setq default-directory dir)
-      ;; 【重要】term.el は復号に `locale-coding-system' を決め打ちしている。
-      ;; 日本語 Windows では cp932 なので、UTF-8 を吐く TUI の罫線が壊れ、
-      ;; args-out-of-range で落ちる。バッファローカルに上書きする。
-      (setq-local locale-coding-system 'utf-8-unix))
-    ;; サイズはウィンドウに合わせたいが、まだ表示されていないので既定で始める。
+      (setq default-directory dir))
+    ;; 【重要】サイズを決める前にウィンドウを確保する。決め打ちで起動すると
+    ;; 子と Emacs 側で幅が食い違い、行がずれて画面が二重に見える。
     (setq size (my:pty--window-size buf) cols (car size) rows (cdr size))
-    (with-current-buffer buf (term-reset-size rows cols))
+    (if eatp
+        (my:pty--setup-eat buf cols rows)
+      (my:pty--setup-term buf cols rows))
     (setq proc
           (let ((process-environment
-                 (append (list (format "TERM=%s" my:pty-term-name)
+                 (append (list (format "TERM=%s" (if eatp (eat-term-name)
+                                                   my:pty-term-name))
                                (format "COLUMNS=%d" cols)
                                (format "LINES=%d" rows))
                          (or env process-environment)))
-                ;; VT はバイト列。復号は term.el に任せる。
-                (coding-system-for-read 'binary)
-                (coding-system-for-write 'binary)
                 (inhibit-eol-conversion t)
                 (default-directory dir))
             (make-process
@@ -228,30 +339,43 @@ DIR は作業ディレクトリ、ENV は追加の環境変数 (\"K=V\" のリ�
              :buffer buf
              :connection-type 'pipe
              :noquery t
-             :coding '(binary . binary)
+             ;; eat は **復号済みの文字列**を受け取る作り (パーサが文字を
+             ;; 比較する)。term.el は逆に生バイトを要求し、復号を自分でやる。
+             :coding (if eatp '(utf-8-unix . binary) '(binary . binary))
              :command (append
                        (list my:pty-executable
                              "-cols" (number-to-string cols)
                              "-rows" (number-to-string rows)
                              "-dir" dir)
-                       (when my:pty-strip-unsupported-csi
-                         (list "-strip-unsupported-csi"))
-                       (when my:pty-map-alt-screen
-                         (list "-map-alt-screen"))
+                       ;; eat は私用パラメータ (? > =) を別扱いするので、
+                       ;; ptyd 側で削ったり読み替えたりする必要が無い。
+                       (unless eatp
+                         (append
+                          (when my:pty-strip-unsupported-csi
+                            (list "-strip-unsupported-csi"))
+                          (when my:pty-map-alt-screen
+                            (list "-map-alt-screen"))))
                        (list "--")
                        command)
              :stderr (my:pty--stderr-buffer name)
-             :filter #'term-emulate-terminal
+             :filter (if eatp #'eat--filter #'term-emulate-terminal)
              :sentinel #'my:pty--sentinel)))
     (process-put proc 'my:pty t)
+    (process-put proc 'my:pty-backend my:pty-backend)
     (push proc my:pty--processes)
-    (my:pty--enable-advice)
+    (if eatp (my:pty--enable-eat-advice) (my:pty--enable-advice))
     (with-current-buffer buf
       (setq my:pty--process proc)
-      (setq-local term-ptyp t)
       (goto-char (point-max))
       (set-marker (process-mark proc) (point))
-      (term-char-mode)
+      (if eatp
+          (progn
+            (eat-term-set-parameter eat-terminal 'eat--process proc)
+            (eat-term-set-parameter eat-terminal 'eat--input-process proc)
+            (eat-term-set-parameter eat-terminal 'eat--output-process proc)
+            (eat-term-redisplay eat-terminal))
+        (setq-local term-ptyp t)
+        (term-char-mode))
       (my:pty-mode 1))
     buf))
 
@@ -264,7 +388,10 @@ DIR は作業ディレクトリ、ENV は追加の環境変数 (\"K=V\" のリ�
 (defun my:pty--sentinel (proc msg)
   (setq my:pty--processes (delq proc my:pty--processes))
   (my:pty--disable-advice)
-  (term-sentinel proc msg))
+  (my:pty--disable-eat-advice)
+  (if (eq (process-get proc 'my:pty-backend) 'eat)
+      (eat--sentinel proc msg)
+    (term-sentinel proc msg)))
 
 ;;; --------------------------------------------------
 ;;; リサイズ
@@ -279,9 +406,15 @@ DIR は作業ディレクトリ、ENV は追加の環境変数 (\"K=V\" のリ�
           (let* ((cols (max 20 (window-max-chars-per-line win)))
                  (rows (max 5 (window-body-height win))))
             (with-current-buffer buf
-              (unless (and (= cols term-width) (= rows term-height))
-                (term-reset-size rows cols)
-                (my:pty-send-resize proc cols rows)))))))))
+              (if (eq (process-get proc 'my:pty-backend) 'eat)
+                  (let ((size (eat-term-size eat-terminal)))
+                    (unless (and (= cols (car size)) (= rows (cdr size)))
+                      (eat-term-resize eat-terminal cols rows)
+                      (eat-term-redisplay eat-terminal)
+                      (my:pty-send-resize proc cols rows)))
+                (unless (and (= cols term-width) (= rows term-height))
+                  (term-reset-size rows cols)
+                  (my:pty-send-resize proc cols rows))))))))))
 
 (define-minor-mode my:pty-mode
   "ptyd 経由の端末バッファであることを示す。"
@@ -305,8 +438,11 @@ DIR は作業ディレクトリ、ENV は追加の環境変数 (\"K=V\" のリ�
 範囲選択中は動かさない (コピーができなくなるため)。
 入力自体は `term-send-raw-string' がプロセスマークへ移動してから送るので
 元々ずれないが、**見た目のカーソルが別の場所にある**のが紛らわしい。"
+  ;; eat は自分でカーソルを管理するので何もしない。
   (when (and my:pty-mode
+             (eq my:pty-backend 'term)
              (not (region-active-p))
+             (derived-mode-p 'term-mode)
              (term-in-char-mode)
              (process-live-p my:pty--process))
     (let ((m (process-mark my:pty--process)))
@@ -325,12 +461,14 @@ DIR は作業ディレクトリ、ENV は追加の環境変数 (\"K=V\" のリ�
 ;;; claude を端末で動かす (案 C)
 ;;; --------------------------------------------------
 
-(defcustom my:pty-claude-screen-reader t
+(defcustom my:pty-claude-screen-reader nil
   "非 nil なら claude に `--ax-screen-reader' を渡す。
 
 代替画面・マウス・同期出力・24bit カラーが消え、上から下に流れる
-平文になる。term.el で扱えない機能がほぼ全部落ちるので、この経路では
-既定で有効にする。実測でバイト数は約 1/4 になった。"
+平文になる。実測でバイト数は約 1/4 になるが、見た目は相当に平板。
+
+**`term' バックエンドではこれを t にしないと表示が崩れる。**
+`eat' は代替画面を扱えるので nil のままでよい (既定)。"
   :type 'boolean)
 
 ;;;###autoload
