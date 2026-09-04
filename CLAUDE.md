@@ -25,7 +25,7 @@ Windows（主）、macOS、Linux 向けの個人 Emacs 設定リポジトリ。E
   5. `(prepare-user-lisp ...)`
   6. `custom.el` の読み込み
   7. `user-lisp/` 各モジュールの `require`（順序は分割前の記述順のまま）
-- `user-lisp/` — 設定本体。22 モジュールに分割（下記）
+- `user-lisp/` — 設定本体。23 モジュールに分割（下記）
 - `custom.el` — `customize` が自動生成するファイル
 - `site-lisp/` — パッケージマネージャで入手できないローカルベンダの Emacs Lisp
 - `gitd/` — magit の git 実行を肩代わりする常駐プロセス（Rust）。
@@ -98,6 +98,7 @@ Emacs 31.1 の `user-lisp/` は、既定では `package-activate-all` の直後�
 | `my-magit-watch` | ワークツリーを監視して magit バッファを自動更新。Windows のみ |
 | `my-shell` | exec-path-from-shell、Windows 用 shell 設定 |
 | `my-utils` | calendar、open-junk-file、grep/ripgrep、blog 用ヘルパ |
+| `my-claude` | Claude Code を stream-json で使う（プレフィクス: `C-c a`） |
 | `my-platform` | Windows / macOS 固有設定 |
 
 ## LSP サーバ
@@ -640,6 +641,78 @@ clone しただけの新しいマシンでは必ず必要になる手順。
 
 `fonts/` に置くのは `NFM.ttf` だけ。all-the-icons 用の 6 フォントは
 （all-the-icons をやめたので）リポジトリからも Windows からも削除済み。
+
+## Claude Code を Emacs から使う (`my-claude.el`)
+
+Windows の Emacs には PTY が無いので claude の対話 TUI は動かない
+（stdin が TTY でないと claude は自動で `--print` に落ちる）。代わりに
+**双方向のストリーミング JSON を素のパイプで駆動する**。端末エミュレーションも
+常駐プロキシも要らない。
+
+検討の経緯（ConPTY プロキシ方式との比較、PoC の実測）は
+`docs/emacs-claude-pty-proxy-study.md`、設計は
+`docs/emacs-claude-stream-json-plan.md`。
+
+| キー | |
+|---|---|
+| `C-c a a` | セッションを開く（`my:claude`） |
+| `C-c a i` | 入力バッファを開く（`C-c C-c` で送信） |
+| `C-c a s` | リージョンを送る |
+| `C-c a k` | 中断 |
+| `C-c a q` | セッション終了 |
+
+### 【重要】起動オプションは 4 つとも省略できない
+
+```
+claude -p --verbose --input-format stream-json --output-format stream-json        --permission-prompt-tool stdio
+```
+
+| 省略すると | |
+|---|---|
+| `--verbose` | **即エラー終了**（`--output-format=stream-json requires --verbose`） |
+| `--permission-prompt-tool stdio` | **許可要求が黙って自動拒否される** |
+
+後者がとくに厄介。`--permission-prompts` の既定は `host`（= クライアントが答える）
+なのに、このオプションが無いと `control_request` が**一度も飛んで来ず**、
+`system/permission_denied` が流れてツールが実行されないだけになる。
+実測では `Write` が拒否され、付けると `can_use_tool` が届いて許可でき、
+ファイルが実際に作られた。**ツールが動かないときの第一容疑者。**
+
+### 【重要】`default-process-coding-system` を束縛して起動する
+
+`my-japanese.el` がグローバルの cdr を cp932 にしているため、束縛せずに
+起動すると**標準入力の日本語が壊れる**。この経路は引数ではなく標準入力で
+本文を渡すので、`(utf-8-unix . utf-8-unix)` でよい。
+「引数は cp932」の話（別節）とは逆になる点に注意。
+
+### 割り込んでもセッションは死なない
+
+`{"type":"control_request","request":{"subtype":"interrupt"}}` を送ると
+`control_response` が返り、続けて `result` が
+`terminal_reason=aborted_streaming` / `is_error=true` で来る。
+**プロセスは生きており、次のターンもそのまま送れる**（実測）。
+
+`result` が `is_error` のときに EOF を送るとプロセスの終了コードは 1 になるが、
+異常終了ではない。sentinel で騒がないこと。
+
+### `system/init` はターンごとに来る
+
+起動直後ではなく**最初のメッセージを送ったあとに来る。しかも毎ターン来る**。
+バッファに挿すと会話の途中に何度も見出しが混ざるので、`header-line-format`
+に出している。
+
+### イベントは `assistant` だけ見れば表示できる
+
+`--include-partial-messages` を付けると `stream_event` でトークン単位に
+刻まれて来るが、`assistant` イベントがブロック確定ごとに丸ごと来るので、
+逐次表示が要らないうちは `stream_event` を捨ててよい。
+
+### 検証はプローブで安く
+
+`--model haiku --tools ""` にする。Opus だと 1 往復で $0.83 かかった
+（大半はシステムプロンプトのキャッシュ作成）。
+`my:claude-log` を t にすると生の JSON Lines が残るので、
+上流のイベント種別が変わったときに気づける。
 
 ## プラットフォーム固有の注意事項
 

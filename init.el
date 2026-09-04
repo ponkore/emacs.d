@@ -171,6 +171,7 @@
 (require 'my-magit-watch)   ; ワークツリーの変化で magit を自動更新
 (require 'my-shell)   ; Shell 関連
 (require 'my-utils)   ; ユーティリティ
+(require 'my-claude)   ; Claude Code を stream-json で使う
 (require 'my-platform)   ; OS 固有設定 (Windows / macOS)
 
 ;;; --------------------------------------------------
