@@ -81,22 +81,28 @@ nil にすると eaw の幅のまま。端末の見た目は崩れるが、他�
 桁揃えは変わらない。"
   :type 'boolean)
 
-(defcustom my:pty-console-font "HackGen Console NF"
+(defcustom my:pty-console-font "Consolas"
   "端末を開いている間だけ使うフォント。nil なら切り替えない。
 
 **幅表を直すだけでは足りない。** `char-width' を 1 にしても、フォントが
 その文字を 2 桁ぶんの幅で描けば見た目はずれる。GUI では
 `string-pixel-width' が `char-width' ではなく**フォントの送り幅**を返す
-ことからも分かる。実測 (`:height' 116、半角 8px / 全角 16px の設定):
+ことからも分かる。
 
-  HackGen Console NF     a=8 ─= 8 ○= 8 あ=16   ← これが正解
-  Consolas               a=8 ─= 8 ○= 8 あ=16   (日本語を持たない)
-  HackGen35 Console NF   a=8 ─=11 ○= 9 あ=16   (3:5 設計なので合わない)
-  Cascadia Mono          a=9 ─= 9 ○= 9 あ=16   (半角が 9px で合わない)
-  HackGen (通常の設定)   a=8 ─=16 ○=16 あ=16   ← ずれる
+実測 (`:height' 116、半角 8px / 全角 16px の設定):
 
-HackGen の Console 版は ambiguous 幅の文字を半角にした派生なので、
-半角 8 / 全角 16 という手元のメトリクスをそのまま保てる。"
+  フォント              a   あ   ─   ①   ★
+  HackGen (通常)        8   16  16   16  16   ← 全部ずれる
+  HackGen Console NF    8   16   8   16  16   ← 丸数字が残る
+  Consolas              8   16   8    8  16   ← これが最良
+  HackGen35 Console NF  8   16  11    9  --   3:5 設計で合わない
+  Cascadia Mono         9   16   9    9  --   半角が 9px で合わない
+
+Consolas は日本語を持たないが、`あ' はフォントセットのフォールバックで
+全角のまま描かれるので問題ない (実測で 16px)。
+
+`★' (U+2605) と `※' (U+203B) は**手元のどのフォントでも全角**なので、
+これらを含む行だけは揃わない。未解決。"
   :type '(choice (const :tag "切り替えない" nil) string))
 
 (defcustom my:pty-term-name "xterm-256color"
@@ -295,80 +301,32 @@ ambiguous を幅 1 として扱う。Emacs 側だけ幅 2 で数えると、ル�
                   (aset tbl c 1)))
               tbl))))
 
-(defcustom my:pty-console-font-fallback "Consolas"
-  "`my:pty-console-font' が半角で描かない文字に使うフォント。nil なら使わない。
 
-実測（半角 8px / 全角 16px の設定）:
 
-  文字                       HackGen  ConsoleNF  Consolas
-  ─ │ ○ △ → █ ▀ ▐ ▛ ▝ …        16        8          8
-  ① ②                          16       16          8   ← ここ
-  ★ ※                          16       16         16   ← どれも駄目
-  あ                            16       16         16
 
-囲み英数字 (①②③) は HackGen Console NF でも全角のまま。Consolas なら
-半角になる。`my-appearance.el' のコメントにある
-「Consolas だと丸付き数字が半角幅になってしまっている」は、通常の編集では
-困る挙動だが、**端末では逆にそれが正しい**（claude は ① を 1 桁として
-桁を組む）。"
-  :type '(choice (const :tag "使わない" nil) string))
-
-(defconst my:pty--ambiguous-ranges
-  '(((#x00a1 . #x00ff) . main)   ; ラテン補助 (· ° ± × ÷ § ¶)
-    ((#x2000 . #x206f) . main)   ; 一般句読点 (… † ‡ ‘ ’ “ ”)
-    ((#x2100 . #x214f) . main)   ; 文字様記号
-    ((#x2150 . #x218f) . main)   ; 数字に準じるもの
-    ((#x2190 . #x21ff) . main)   ; 矢印 (→ ←)
-    ((#x2460 . #x24ff) . fallback) ; 囲み英数字 (①②③) は Consolas でないと半角にならない
-    ((#x2500 . #x257f) . main)   ; 罫線素片 (─ │ ┌ ┐)
-    ((#x2580 . #x259f) . main)   ; ブロック要素 (█ ▀ ▐)
-    ((#x25a0 . #x25ff) . main)   ; 幾何学模様 (○ △ □ ◇)
-    ((#x2600 . #x26ff) . main))  ; その他の記号 (★ ☆ ※)
-  "端末のあいだフォントを差し替える範囲と、どちらのフォントを使うか。
-
-`main' は `my:pty-console-font'、`fallback' は
-`my:pty-console-font-fallback'。
-
-ambiguous 幅の文字が多く、かつ claude の TUI が実際に使うところ。
-**Nerd Font のアイコン領域 (#xe000-#xf8ff) は触らない。**
-`my-appearance.el' がそこを別のフォントに回しており、上書きすると
-アイコンが豆腐になる。
-
-`★' (U+2605) と `※' (U+203B) は **手元のどのフォントでも全角**なので、
-これらを含む行だけは揃わない。")
 
 (defvar my:pty--saved-jp-font nil
   "端末を開く前の日本語フォント。閉じるときに戻す。")
 
-(defun my:pty--apply-font (family &optional fallback)
-  "FAMILY を日本語と ambiguous の範囲に割り当てる。
-FALLBACK が非 nil なら、`fallback' 指定の範囲だけそちらを使う。
-FALLBACK が nil のときは全部 FAMILY (元に戻すときはこちら)。"
-  (let ((spec (font-spec :family family))
-        (fspec (and fallback (find-font (font-spec :family fallback))
-                    (font-spec :family fallback))))
-    ;; 【重要】`set-fontset-font' だけでは効かない。GUI で実測すると、
-    ;; nil と t の両方に入れても `font-at' が元のフォントを返し続けた。
-    ;; この設定で実際に効いている経路は `my-appearance.el' の
-    ;; `set-face-attribute' なので、まずそちらでファミリを差し替える。
-    ;; `:height' は触らない (サイズが変わると桁が全部ずれる)。
-    (set-face-attribute 'default nil :family family)
-    ;; 【重要】フォントセットの指定先は 1 つではない。
-    ;; `nil' は選択フレームのフォントセット、`t' は既定のフォントセット。
-    ;; `fontset-font' で引くと両者が食い違って見えることがあるので、
-    ;; **両方に入れる**。片方だけだと反映されないことがあった。
-    (dolist (fontset '(nil t))
-      (dolist (cs '(japanese-jisx0208 japanese-jisx0212 japanese-jisx0213-1
-                    japanese-jisx0213-2 japanese-jisx0213.2004-1
-                    katakana-jisx0201))
-        (set-fontset-font fontset cs spec))
-      (dolist (entry my:pty--ambiguous-ranges)
-        (set-fontset-font fontset (car entry)
-                          (if (and fspec (eq (cdr entry) 'fallback)) fspec spec))))
-    ;; 実現済みの face が文字ごとのフォントを抱えているので捨てさせる。
-    (clear-face-cache)
-    (force-window-update)
-    (redraw-display)))
+(defun my:pty--apply-font (family)
+  "端末用のフォント FAMILY に差し替える。
+
+【重要】`set-fontset-font' は使わない。**この設定では効かない。**
+`nil' (選択フレーム) にも `t' (既定) にも入れ、`clear-face-cache' と
+`redraw-display' まで呼んでも、GUI の実測で `font-at' は元のフォントを
+返し続け `string-pixel-width' も 16 のままだった。丸数字のレンジだけ
+別フォントに回そうとしても同じだった。
+
+実際に効くのは `set-face-attribute 'default' の経路
+(`my-appearance.el' の `emacs-font-setting' と同じ)。したがって
+**端末用に選べるフォントは 1 つだけ**で、レンジごとの割り当てはできない。
+
+`:height' は触らない。サイズが変わると桁が全部ずれる。"
+  (set-face-attribute 'default nil :family family)
+  ;; 実現済みの face が文字ごとのフォントを抱えているので捨てさせる。
+  (clear-face-cache)
+  (force-window-update)
+  (redraw-display))
 
 (defun my:pty--console-font-on ()
   "端末用のフォントに切り替える。"
@@ -380,7 +338,7 @@ FALLBACK が nil のときは全部 FAMILY (元に戻すときはこちら)。"
     ;; 既定のフォント名を控える。`my-appearance.el' は ascii と日本語に
     ;; 同じファミリを使っているので、これで戻せる。
     (setq my:pty--saved-jp-font (face-attribute 'default :family))
-    (my:pty--apply-font my:pty-console-font my:pty-console-font-fallback)))
+    (my:pty--apply-font my:pty-console-font)))
 
 (defun my:pty--console-font-off ()
   "元のフォントに戻す。端末が 1 つも無くなったときだけ。"

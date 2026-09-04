@@ -1145,43 +1145,41 @@ eat が意図して出している空の箱。
 `─` (U+2500) は **JIS X 0208 の罫線素片**なので、この行で HackGen に
 割り当てられ、全角 16px で描かれる。
 
-実測（`:height` 116、半角 8px / 全角 16px の設定）。**1 つのフォントでは
-足りず、3 つのグループに分かれる。**
+実測（`:height` 116、半角 8px / 全角 16px の設定）:
 
-| 文字 | HackGen | HackGen Console NF | Consolas |
-|---|---|---|---|
-| `a` | 8 | 8 | 8 |
-| `あ` | 16 | 16 | 16 |
-| `─ │ ○ △ → █ ▀ ▐ ▛ ▝ …` | **16** | **8** | 8 |
-| `① ②` | **16** | **16** | **8** |
-| `★ ※` | **16** | **16** | **16** |
+| フォント | `a` | `あ` | `─` | `①` | `★` | |
+|---|---|---|---|---|---|---|
+| HackGen（通常） | 8 | 16 | **16** | **16** | 16 | 全部ずれる |
+| HackGen Console NF | 8 | 16 | 8 | **16** | 16 | 丸数字が残る |
+| **Consolas** | 8 | 16 | 8 | **8** | 16 | **最良** |
+| HackGen35 Console NF | 8 | 16 | 11 | 9 | — | 3:5 設計で合わない |
+| Cascadia Mono | 9 | 16 | 9 | 9 | — | 半角が 9px |
 
-- 罫線・ブロック要素・幾何学模様・矢印は **HackGen Console NF** で解決する
-- **囲み英数字 (①②③) は Console NF でも全角のまま。Consolas が要る**。
-  `my-appearance.el` のコメントにある「Consolas だと丸付き数字が半角幅に
-  なってしまっている」は、通常の編集では困る挙動だが**端末では逆に正しい**
-- **`★` (U+2605) と `※` (U+203B) は手元のどのフォントでも全角。**
-  これらを含む行だけは揃わない（未解決）
+**`my:pty-console-font` の既定は `"Consolas"`。** Consolas は日本語を
+持たないが、`あ` はフォントセットのフォールバックで全角のまま描かれる
+（実測で 16px）。`my-appearance.el` のコメントにある「Consolas だと
+丸付き数字が半角幅になってしまっている」は、通常の編集では困る挙動だが
+**端末では逆にそれが正しい**（claude は `①` を 1 桁として桁を組む）。
 
-なお `HackGen35 Console NF` は 3:5 設計（`─`=11）、`Cascadia Mono` は
-半角が 9px で、どちらもこの設定のメトリクス（8/16）に合わない。
-
-`my:pty-console-font`（既定 `"HackGen Console NF"`）と
-`my:pty-console-font-fallback`（既定 `"Consolas"`）を、
-`my:pty--ambiguous-ranges` の範囲ごとに使い分ける。
+**`★` (U+2605) と `※` (U+203B) は手元のどのフォントでも全角。**
+これらを含む行だけは揃わない（未解決）。
 
 端末を開いているあいだだけ差し替え、幅表と同じ寿命で、最後の端末を
 閉じたら戻す。
 
-#### 【重要】`set-fontset-font` だけでは効かない
+#### 【重要】`set-fontset-font` はこの設定では効かない
 
-`set-fontset-font` を `nil`（選択フレーム）にも `t`（既定）にも入れ、
-`clear-face-cache` と `redraw-display` まで呼んでも、GUI の実測で
-`font-at` は元のフォントを返し続け `string-pixel-width` も 16 のままだった。
+`nil`（選択フレーム）にも `t`（既定）にも入れ、`clear-face-cache` と
+`redraw-display` まで呼んでも、GUI の実測で `font-at` は元のフォントを
+返し続け `string-pixel-width` も 16 のままだった。丸数字のレンジだけ
+別フォントに回そうとしても同じだった。
 
-**この設定で実際に効く経路は `set-face-attribute 'default nil :family`**
+**実際に効く経路は `set-face-attribute 'default nil :family`**
 （`my-appearance.el` の `emacs-font-setting` と同じ）。こちらに変えたら
 1 回で通った。
+
+**したがって端末用に選べるフォントは 1 つだけで、レンジごとの割り当ては
+できない。** だから `★` を諦めてでも `①` が直る Consolas を選んでいる。
 
 ```
 ▐ U+2590 width=1 pixel=8 font=HackGen Console NF
