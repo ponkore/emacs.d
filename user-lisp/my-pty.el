@@ -354,6 +354,11 @@ FALLBACK が nil のときは全部 FAMILY (元に戻すときはこちら)。"
     (dolist (entry my:pty--ambiguous-ranges)
       (set-fontset-font nil (car entry)
                         (if (and fspec (eq (cdr entry) 'fallback)) fspec spec)))
+    ;; 【重要】`set-fontset-font' だけでは表示に反映されない。
+    ;; 実現済みの face が文字ごとのフォントを抱えているので、捨てさせる。
+    ;; これが無いと `font-at' が古いフォント (HackGen) を返し続ける。
+    (clear-face-cache)
+    (force-window-update)
     (redraw-display)))
 
 (defun my:pty--console-font-on ()
