@@ -152,6 +152,8 @@ nil にするとブロックが確定してから一度に出る (段階 3 ま�
   rate-limit     ; 直近の rate_limit_event の中身
   untrusted-key  ; claude が「信頼されていない」と言ってきた projects のキー
   stream-block   ; 逐次表示中のブロックの種別 (text / thinking / tool_use)
+  streamed-text  ; いま開いているブロックを delta で出したか
+  terminal-only  ; 端末でしか使えないスラッシュコマンドの名前
   (pending "")   ; フィルタの未処理バイト
   session-id
   model
@@ -530,7 +532,11 @@ RESUME は `my:claude--command' に渡す (t で --continue、文字列で --res
      ;; init はターンごとに来る。バッファに挿すと会話の途中に何度も
      ;; 見出しが混ざるので、ヘッダ行に出す。
      (setf (my:claude-session-session-id session) (alist-get 'session_id obj)
-           (my:claude-session-model session) (alist-get 'model obj))
+           (my:claude-session-model session) (alist-get 'model obj)
+           ;; 端末が要るコマンド (doctor / color / reload-plugins)。
+           ;; 補完の注釈で分かるようにする。
+           (my:claude-session-terminal-only session)
+           (append (alist-get 'terminal_slash_commands obj) nil))
      (my:claude--update-header session)
      ;; MCP の失敗は毎ターン出すとうるさいので 1 度だけ本文に出す。
      (let ((bad (seq-filter
@@ -575,6 +581,7 @@ tool_use は逆に delta を捨てて `assistant' の確定版だけを使う。
       ("content_block_delta"
        (pcase (alist-get 'type delta)
          ("text_delta"
+          (setf (my:claude-session-streamed-text session) t)
           (my:claude--insert session (alist-get 'text delta)
                              'my:claude-assistant-face))
          ("thinking_delta"
@@ -587,7 +594,8 @@ tool_use は逆に delta を捨てて `assistant' の確定版だけを使う。
       ("content_block_stop"
        (when (equal (my:claude-session-stream-block session) "text")
          (my:claude--end-paragraph session))
-       (setf (my:claude-session-stream-block session) nil))
+       (setf (my:claude-session-stream-block session) nil
+             (my:claude-session-streamed-text session) nil))
       (_ nil))))
 
 (defun my:claude--end-paragraph (session)
@@ -614,8 +622,13 @@ delta で流し込んだ本文は末尾の改行がまちまちなので、こ�
     (seq-doseq (block content)
       (pcase (alist-get 'type block)
         ("text"
-         ;; 逐次表示しているなら delta で出し終えている。
-         (unless my:claude-stream
+         ;; 【重要】`my:claude-stream' ではなく「このブロックを実際に
+         ;; delta で出したか」で判断する。スラッシュコマンドは
+         ;; assistant で本文を返すが stream_event を伴わない
+         ;; (num_turns=0 で API を通らないため)。フラグを見ずに
+         ;; my:claude-stream だけで飛ばすと /mcp や /context が
+         ;; 何も表示されない。実際にそうなっていた。
+         (unless (my:claude-session-streamed-text session)
            (my:claude--insert session
                               (concat (string-trim-right (alist-get 'text block)) "\n\n")
                               'my:claude-assistant-face)))
@@ -823,11 +836,15 @@ C: 直下のディレクトリ一覧が出る。実際にそうなっていた�
             :exclusive 'no
             :annotation-function
             (lambda (cand)
-              (let ((e (assoc (substring cand 1) my:claude--commands)))
-                (when e
-                  (concat " " (truncate-string-to-width
-                               (replace-regexp-in-string "\n" " " (nth 1 e))
-                               70 nil nil "…")))))))))
+              (let* ((name (substring cand 1))
+                     (e (assoc name my:claude--commands))
+                     (s (my:claude--live-session))
+                     (term (and s (member name (my:claude-session-terminal-only s)))))
+                (concat (when term " [端末専用]")
+                        (when e
+                          (concat " " (truncate-string-to-width
+                                       (replace-regexp-in-string "\n" " " (nth 1 e))
+                                       70 nil nil "…"))))))))))
 
 ;;; ワークスペースの信頼
 
