@@ -133,6 +133,23 @@ nil にするとブロックが確定してから一度に出る (段階 3 ま�
   '((t :inherit warning))
   "claude が標準出力に吐いた平文の警告。")
 
+(defface my:claude-code-face
+  '((((background dark))  :background "#20242b" :extend t)
+    (((background light)) :background "#f2f2f2" :extend t))
+  "コードブロックの中身。")
+
+(defface my:claude-code-fence-face
+  '((t :inherit shadow))
+  "コードブロックの ``` の行。")
+
+(defface my:claude-heading-face
+  '((t :inherit font-lock-keyword-face :weight bold))
+  "見出し (# …)。")
+
+(defface my:claude-inline-code-face
+  '((t :inherit font-lock-constant-face))
+  "行中の `コード`。")
+
 (defface my:claude-meta-face
   '((t :inherit shadow :height 0.9))
   "コスト・所要時間などの補足。")
@@ -152,6 +169,7 @@ nil にするとブロックが確定してから一度に出る (段階 3 ま�
   rate-limit     ; 直近の rate_limit_event の中身
   untrusted-key  ; claude が「信頼されていない」と言ってきた projects のキー
   stream-block   ; 逐次表示中のブロックの種別 (text / thinking / tool_use)
+  text-start     ; いま流し込んでいる本文の開始位置 (マーカー)
   streamed-text  ; いま開いているブロックを delta で出したか
   terminal-only  ; 端末でしか使えないスラッシュコマンドの名前
   (pending "")   ; フィルタの未処理バイト
@@ -577,7 +595,9 @@ tool_use は逆に delta を捨てて `assistant' の確定版だけを使う。
     (pcase (alist-get 'type ev)
       ("content_block_start"
        (setf (my:claude-session-stream-block session)
-             (alist-get 'type (alist-get 'content_block ev))))
+             (alist-get 'type (alist-get 'content_block ev)))
+       (when (equal (my:claude-session-stream-block session) "text")
+         (my:claude--mark-text-start session)))
       ("content_block_delta"
        (pcase (alist-get 'type delta)
          ("text_delta"
@@ -593,10 +613,65 @@ tool_use は逆に delta を捨てて `assistant' の確定版だけを使う。
          (_ nil)))
       ("content_block_stop"
        (when (equal (my:claude-session-stream-block session) "text")
+         (my:claude--fontify-markdown session (my:claude-session-text-start session))
          (my:claude--end-paragraph session))
        (setf (my:claude-session-stream-block session) nil
              (my:claude-session-streamed-text session) nil))
       (_ nil))))
+
+(defun my:claude--fontify-markdown (session beg)
+  "SESSION の会話バッファの BEG から末尾までを markdown として色づけする。
+
+font-lock は使わない。このバッファは `special-mode' 派生で、挿入時に
+`font-lock-face' を直に載せているため、font-lock を有効にすると
+そちらに上書きされて競合する。ブロックが確定した時点で一度だけ塗る。"
+  (let ((buf (my:claude-session-buffer session)))
+    (when (and (buffer-live-p buf) (markerp beg) (marker-position beg))
+      (with-current-buffer buf
+        (let ((inhibit-read-only t)
+              (end (point-max)))
+          (save-excursion
+            ;; ``` で囲まれたブロック
+            (goto-char beg)
+            (while (re-search-forward "^[ \t]*```.*$" end t)
+              (let ((fence1-beg (match-beginning 0))
+                    (fence1-end (match-end 0))
+                    body-end)
+                (if (re-search-forward "^[ \t]*```[ \t]*$" end t)
+                    (setq body-end (match-beginning 0))
+                  ;; 閉じていない (中断されたなど) ときは末尾まで
+                  (setq body-end end)
+                  (goto-char end))
+                (put-text-property fence1-beg fence1-end
+                                   'font-lock-face 'my:claude-code-fence-face)
+                (when (< fence1-end body-end)
+                  (put-text-property fence1-end body-end
+                                     'font-lock-face 'my:claude-code-face))
+                (when (< body-end end)
+                  (put-text-property body-end (min end (line-end-position))
+                                     'font-lock-face 'my:claude-code-fence-face))))
+            ;; 見出しと行中のコード。コードブロックの中は塗り直さない。
+            (goto-char beg)
+            (while (re-search-forward "^[ \t]*#\\{1,6\\} .*$" end t)
+              (unless (eq (get-text-property (match-beginning 0) 'font-lock-face)
+                          'my:claude-code-face)
+                (put-text-property (match-beginning 0) (match-end 0)
+                                   'font-lock-face 'my:claude-heading-face)))
+            (goto-char beg)
+            (while (re-search-forward "`[^`\n]+`" end t)
+              (unless (memq (get-text-property (match-beginning 0) 'font-lock-face)
+                            '(my:claude-code-face my:claude-code-fence-face
+                              my:claude-heading-face))
+                (put-text-property (match-beginning 0) (match-end 0)
+                                   'font-lock-face 'my:claude-inline-code-face)))))))))
+
+(defun my:claude--mark-text-start (session)
+  "いまの末尾に本文の開始位置を記録する。"
+  (let ((buf (my:claude-session-buffer session)))
+    (when (buffer-live-p buf)
+      (with-current-buffer buf
+        (setf (my:claude-session-text-start session)
+              (copy-marker (point-max) nil))))))
 
 (defun my:claude--end-paragraph (session)
   "会話バッファの末尾を「空行 1 つ」に整える。
@@ -629,9 +704,12 @@ delta で流し込んだ本文は末尾の改行がまちまちなので、こ�
          ;; my:claude-stream だけで飛ばすと /mcp や /context が
          ;; 何も表示されない。実際にそうなっていた。
          (unless (my:claude-session-streamed-text session)
+           (my:claude--mark-text-start session)
            (my:claude--insert session
                               (concat (string-trim-right (alist-get 'text block)) "\n\n")
-                              'my:claude-assistant-face)))
+                              'my:claude-assistant-face)
+           (my:claude--fontify-markdown session
+                                        (my:claude-session-text-start session))))
         ("tool_use"
          (let ((name (alist-get 'name block))
                (id (alist-get 'id block)))
@@ -1082,6 +1160,41 @@ Opus と Haiku を行き来してもそれまでの話は消えない。"
 
 ;;; 入力バッファ
 
+(defvar my:claude--input-history nil
+  "送信したプロンプトの履歴。新しいものが先頭。")
+
+(defvar-local my:claude--input-index -1
+  "入力バッファで履歴をたどっている位置。-1 は「たどっていない」。")
+
+(defvar-local my:claude--input-draft nil
+  "履歴をたどり始めたときに書きかけだった内容。")
+
+(defun my:claude--input-replace (text)
+  (erase-buffer)
+  (insert (or text ""))
+  (goto-char (point-max)))
+
+(defun my:claude-input-previous ()
+  "1 つ前に送ったプロンプトを呼び出す。"
+  (interactive)
+  (unless my:claude--input-history (user-error "履歴が無い"))
+  (when (< my:claude--input-index 0)
+    (setq my:claude--input-draft
+          (buffer-substring-no-properties (point-min) (point-max))))
+  (setq my:claude--input-index
+        (min (1- (length my:claude--input-history)) (1+ my:claude--input-index)))
+  (my:claude--input-replace (nth my:claude--input-index my:claude--input-history)))
+
+(defun my:claude-input-next ()
+  "1 つ後のプロンプトに戻る。先頭まで来たら書きかけの内容に戻す。"
+  (interactive)
+  (when (>= my:claude--input-index 0)
+    (setq my:claude--input-index (1- my:claude--input-index))
+    (my:claude--input-replace
+     (if (< my:claude--input-index 0)
+         my:claude--input-draft
+       (nth my:claude--input-index my:claude--input-history)))))
+
 (defun my:claude-input ()
   "送信するテキストを書くバッファを開く。"
   (interactive)
@@ -1098,7 +1211,12 @@ Opus と Haiku を行き来してもそれまでの話は消えない。"
   (let ((text (buffer-substring-no-properties (point-min) (point-max)))
         (session my:claude--session))
     (my:claude-send-string text session)
+    (unless (string-empty-p (string-trim text))
+      (setq my:claude--input-history
+            (cons text (delete text my:claude--input-history))))
     (erase-buffer)
+    (setq my:claude--input-index -1
+          my:claude--input-draft nil)
     (when-let* ((buf (and session (my:claude-session-buffer session))))
       (display-buffer buf))))
 
@@ -1147,13 +1265,15 @@ Opus と Haiku を行き来してもそれまでの話は消えない。"
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "C-c C-c") #'my:claude-input-send)
     (define-key map (kbd "C-c C-k") #'quit-window)
+    (define-key map (kbd "M-p") #'my:claude-input-previous)
+    (define-key map (kbd "M-n") #'my:claude-input-next)
     map)
   "`my:claude-input-mode' のキーマップ。")
 
 (define-derived-mode my:claude-input-mode text-mode "Claude-Input"
   "claude に送るテキストを書くモード。"
   (setq-local header-line-format
-              "C-c C-c で送信 / C-c C-k で閉じる / 行頭の / は TAB で補完")
+              "C-c C-c 送信 / C-c C-k 閉じる / 行頭 / は TAB 補完 / M-p 履歴")
   ;; cape-file が深さ 90 にいる。念のため明示的に先頭へ置く。
   (add-hook 'completion-at-point-functions #'my:claude--capf -100 t))
 

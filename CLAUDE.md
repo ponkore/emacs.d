@@ -665,7 +665,7 @@ Windows の Emacs には PTY が無いので claude の対話 TUI は動かな�
 | `C-c a t` | ワークスペースを信頼済みにする（下記） |
 | `C-c a c` | 直近の会話を継いで開く（`--continue`） |
 | `C-c a m` | モデルを変える（会話は `--resume` で継続） |
-| `C-c a i` | 入力バッファを開く（`C-c C-c` で送信） |
+| `C-c a i` | 入力バッファを開く（`C-c C-c` で送信、`M-p` / `M-n` で履歴） |
 | `C-c a s` | リージョンを送る |
 | `C-c a k` | 中断 |
 | `C-c a q` | セッション終了 |
@@ -714,6 +714,27 @@ JSON の断片は揃うまで意味を持たないため。
 
 `thinking_delta` の本文は **haiku では空文字列で届く**。`my:claude-show-thinking`
 を t にしても何も出ないことがある。
+
+### 会話バッファの markdown 装飾
+
+見出し・コードブロック・行中のコードを色づけする。
+
+**font-lock は使わない。** このバッファは `special-mode` 派生で、挿入時に
+`font-lock-face` を直に載せているため、font-lock を有効にすると
+そちらに上書きされて競合する。ブロックが確定した時点で一度だけ塗る。
+
+塗る位置は 2 か所ある。逐次表示の経路（`content_block_stop`）と、
+delta が来ない経路（スラッシュコマンドの `assistant`）。
+**どちらか片方だけだと `/context` の見出しが素のままになる。**
+
+実測（`## 見出し` と `` `inline` `` と elisp のコードブロックを返させた）:
+
+| face | 文字数 |
+|---|---|
+| `my:claude-code-face` | 16 |
+| `my:claude-code-fence-face` | 11 |
+| `my:claude-heading-face` | 10 |
+| `my:claude-inline-code-face` | 8 |
 
 ### セッションの再開とモデルの変更
 
