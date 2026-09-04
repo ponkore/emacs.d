@@ -347,13 +347,18 @@ FALLBACK が nil のときは全部 FAMILY (元に戻すときはこちら)。"
   (let ((spec (font-spec :family family))
         (fspec (and fallback (find-font (font-spec :family fallback))
                     (font-spec :family fallback))))
-    (dolist (cs '(japanese-jisx0208 japanese-jisx0212 japanese-jisx0213-1
-                  japanese-jisx0213-2 japanese-jisx0213.2004-1
-                  katakana-jisx0201))
-      (set-fontset-font nil cs spec))
-    (dolist (entry my:pty--ambiguous-ranges)
-      (set-fontset-font nil (car entry)
-                        (if (and fspec (eq (cdr entry) 'fallback)) fspec spec)))
+    ;; 【重要】フォントセットの指定先は 1 つではない。
+    ;; `nil' は選択フレームのフォントセット、`t' は既定のフォントセット。
+    ;; `fontset-font' で引くと両者が食い違って見えることがあるので、
+    ;; **両方に入れる**。片方だけだと反映されないことがあった。
+    (dolist (fontset '(nil t))
+      (dolist (cs '(japanese-jisx0208 japanese-jisx0212 japanese-jisx0213-1
+                    japanese-jisx0213-2 japanese-jisx0213.2004-1
+                    katakana-jisx0201))
+        (set-fontset-font fontset cs spec))
+      (dolist (entry my:pty--ambiguous-ranges)
+        (set-fontset-font fontset (car entry)
+                          (if (and fspec (eq (cdr entry) 'fallback)) fspec spec))))
     ;; 【重要】`set-fontset-font' だけでは表示に反映されない。
     ;; 実現済みの face が文字ごとのフォントを抱えているので、捨てさせる。
     ;; これが無いと `font-at' が古いフォント (HackGen) を返し続ける。
