@@ -759,6 +759,33 @@ C: 直下のディレクトリ一覧を出す。実際にそうなっていた�
 
 capf は深さ `-100` で入れて `cape-file`（90）より確実に先に来るようにしてある。
 
+#### 【重要】許可と拒否で control_response の形が違う
+
+claude が返してくるエラーが契約を明示している。
+
+```
+Expected {behavior: 'allow', updatedInput?: object}
+      or {behavior: 'deny', message: string}
+```
+
+**拒否に `updatedInput` を付けてはいけない。`message` は必須。**
+どちらを外しても不正な応答と判定され、claude には「拒否された」ではなく
+「許可フックでエラーが起きた」と伝わる。実測:
+
+| 送った形 | claude が受け取った tool_result |
+|---|---|
+| `{deny, updatedInput}` | `The canUseTool callback returned an invalid permission result. …` |
+| `{deny}` だけ | 同上 |
+| **`{deny, message}`** | **その message がそのまま届く** |
+
+**ツールが実行されない点はどれも同じなので気づきにくい。**
+違いは claude への伝わり方だけで、不正な形だと
+「システム側の問題です」と的外れな返事をしてくる。
+
+許可プロンプトの `r`（理由を書いて拒否）はこの `message` に載る。
+日本語もそのまま届く。「そのファイルは触らないで、代わりに…」と
+書くと claude が別の手を考える。
+
 #### 【重要】スラッシュコマンドは `stream_event` を伴わない
 
 `num_turns=0` で API を通らないため、**`assistant` で本文が来るのに

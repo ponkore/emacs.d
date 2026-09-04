@@ -715,14 +715,36 @@ delta で流し込んだ本文は末尾の改行がまちまちなので、こ�
                                            (request_id . ,rid)
                                            (response . ,(make-hash-table)))))))))
 
-(defun my:claude--respond-permission (session rid behavior input)
+(defun my:claude--respond-permission (session rid body)
+  "can_use_tool の要求 RID に BODY を返す。
+
+【重要】許可と拒否で形が違う。claude が返してくるエラーによれば
+
+  Expected {behavior: 'allow', updatedInput?: object}
+        or {behavior: 'deny', message: string}
+
+**拒否に `updatedInput' を付けてはいけない。** 付けると不正な応答と
+判定され、claude には「拒否された」ではなく「許可フックでエラーが
+起きた」と伝わる。ツールが実行されない点は同じなので気づきにくい。
+`message' も必須で、省くと同じエラーになる (どちらも実測)。"
   (my:claude--send-json
    session
    `((type . "control_response")
      (response . ((subtype . "success")
                   (request_id . ,rid)
-                  (response . ((behavior . ,behavior)
-                               (updatedInput . ,input))))))))
+                  (response . ,body))))))
+
+(defun my:claude--respond-allow (session rid input)
+  (my:claude--respond-permission session rid
+                                 `((behavior . "allow")
+                                   (updatedInput . ,input))))
+
+(defun my:claude--respond-deny (session rid message)
+  (my:claude--respond-permission session rid
+                                 `((behavior . "deny")
+                                   (message . ,(if (string-empty-p (string-trim message))
+                                                   "Denied by the user in Emacs."
+                                                 message)))))
 
 (defun my:claude--ask-permission (_obj session rid req)
   "ツール使用の可否を尋ねて control_response を返す。"
@@ -733,7 +755,7 @@ delta で流し込んだ本文は末尾の改行がまちまちなので、こ�
         (progn
           (my:claude--insert session (format "  (自動許可: %s)\n" name)
                              'my:claude-meta-face)
-          (my:claude--respond-permission session rid "allow" input))
+          (my:claude--respond-allow session rid input))
       (let (done)
         (while (not done)
           (pcase (car (read-multiple-choice
@@ -741,16 +763,24 @@ delta で流し込んだ本文は末尾の改行がまちまちなので、こ�
                                name (truncate-string-to-width desc 60 nil nil "…"))
                        '((?y "今回だけ許可")
                          (?n "拒否")
+                         (?r "理由を書いて拒否")
                          (?a "以後このツールは聞かない")
                          (?v "入力を全部見る"))))
-            (?y (my:claude--respond-permission session rid "allow" input)
+            (?y (my:claude--respond-allow session rid input)
                 (setq done t))
             (?n (my:claude--insert session (format "  (拒否: %s)\n" name)
                                    'my:claude-error-face)
-                (my:claude--respond-permission session rid "deny" input)
+                (my:claude--respond-deny session rid "Denied by the user in Emacs.")
+                (setq done t))
+            ;; 理由を渡せると claude が別の手を考えられる。
+            ;; 「そのファイルは触らないで、代わりに…」が効く。
+            (?r (let ((why (read-string "拒否する理由: ")))
+                  (my:claude--insert session (format "  (拒否: %s — %s)\n" name why)
+                                     'my:claude-error-face)
+                  (my:claude--respond-deny session rid why))
                 (setq done t))
             (?a (push name (my:claude-session-approved session))
-                (my:claude--respond-permission session rid "allow" input)
+                (my:claude--respond-allow session rid input)
                 (setq done t))
             (?v (my:claude--show-input name input))))))))
 
