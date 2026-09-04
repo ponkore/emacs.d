@@ -109,8 +109,52 @@ nil にするとブロックが確定してから一度に出る (段階 3 ま�
 その場合は非 nil にしても何も出ない。"
   :type 'boolean)
 
-(defcustom my:claude-tool-result-max-lines 12
-  "ツールの実行結果を畳まずに見せる行数。これを超えると折りたたむ。"
+(defcustom my:claude-tool-result-max-lines 0
+  "ツールの実行結果を畳まずに見せる行数。これを超えると折りたたむ。
+
+**既定は 0 = 全部畳む。** 結果の中身は読み飛ばすことのほうが多く、
+開いたままだと肝心の会話が流れてしまう。畳んだ行には 1 行要約
+ (`● Read(foo.el) … 42 行') を出し、全体は TAB
+ (`my:claude-toggle-fold') で別バッファに開く。"
+  :type 'integer)
+
+(defcustom my:claude-error-result-max-lines 30
+  "エラーになったツール出力を畳まずに見せる行数。
+
+エラーだけは既定で畳まない。畳むと「なぜ失敗したか」がその場から
+消えてしまい、`my:claude-tool-result-max-lines' を 0 にした意味
+ (雑音を減らす) とは逆に、いちばん見たいものが隠れる。
+ただしビルドの失敗などで数百行来ることがあるので上限は設ける。"
+  :type 'integer)
+
+(defcustom my:claude-fontify-code t
+  "非 nil なら ```lang のコードブロックをその言語として着色する。"
+  :type 'boolean)
+
+(defcustom my:claude-fontify-code-max-lines 300
+  "コードブロックを言語として着色する上限の行数。
+これを超えたら `my:claude-code-face' の単色のままにする。
+長い出力が続いたときに描画が詰まらないようにするための保険。"
+  :type 'integer)
+
+(defcustom my:claude-render-tables t
+  "非 nil なら markdown のパイプ表を罫線 (box-drawing) の表に組み直す。
+
+【重要】桁は **Emacs バッファの規則** (`site-lisp/eaw.el'、ambiguous は
+幅 2) で決める。claude 側の桁組みには合わせない。セルの中身だけを
+取り出して `string-width' で組み直すので、元の桁は信用しない。
+
+`my-pty' が端末の中で ambiguous を幅 1 に切り替えているのとは
+**逆の話**。あちらは桁を数えているのが conhost なので合わせにいくが、
+こちらは Emacs 自身が数えるので合わせる必要が無い。"
+  :type 'boolean)
+
+(defcustom my:claude-window-height-ratio 0.5
+  "`my:claude-layout' で会話 + 入力に使うフレーム高さの割合。"
+  :type 'number)
+
+(defcustom my:claude-input-window-height 5
+  "`my:claude-layout' で入力バッファに使う行数。"
   :type 'integer)
 
 ;;; --------------------------------------------------
@@ -197,6 +241,9 @@ nil にするとブロックが確定してから一度に出る (段階 3 ま�
   (pending "")   ; フィルタの未処理バイト
   session-id
   model
+  claude-version   ; system/init の claude_code_version
+  context-tokens   ; 直近の assistant の message.usage の合計
+  context-window   ; result の modelUsage.<model>.contextWindow
   (busy nil)     ; 応答待ちか
   (tool-names (make-hash-table :test 'equal)) ; tool_use_id -> ツール名
   (approved nil) ; このセッションで自動許可すると決めたツール名
@@ -211,15 +258,44 @@ nil にするとブロックが確定してから一度に出る (段階 3 ま�
 環境 (アカウント) を切り替えるには CLAUDE_CONFIG_DIR を変えてプロセスを
 起動し直すしかなく、同時に複数あるとどちらに送っているのか分からなくなる。")
 
+(defun my:claude--guess-directory ()
+  "claude を動かすディレクトリを自動で決める。決められなければ nil。
+
+**さかのぼりはしない。** Emacs らしく projectile の判定を最優先し、
+外れたら cwd に `.claude/' があるかだけを見る。
+
+  1. projectile のプロジェクトルート
+  2. cwd に `.claude/' があれば cwd
+
+`project.el' は見ない。projectile が既に同じ役目を負っているうえ、
+両方を並べると「どちらが決めたのか」が説明できなくなる。
+どちらも外れたときは `my:claude--project-directory' が確認を取る。
+
+cwd が変わるとセッション記録の置き場
+ (`<CLAUDE_CONFIG_DIR>/projects/<エンコードしたパス>/') も変わり、
+`C-c a r' の一覧に出る対象も変わる。黙って決めてよい範囲を
+この 2 つに絞ってあるのはそのため。"
+  (let ((here (expand-file-name default-directory)))
+    (cond
+     ((and (fboundp 'projectile-project-root)
+           (ignore-errors (projectile-project-root)))
+      (expand-file-name (projectile-project-root)))
+     ((file-directory-p (expand-file-name ".claude" here)) here))))
+
 (defun my:claude--project-directory ()
-  "claude を動かすディレクトリ。プロジェクトのルート、無ければ現在地。"
-  (expand-file-name
-   (or (and (fboundp 'projectile-project-root)
-            (ignore-errors (projectile-project-root)))
-       (and (fboundp 'project-current)
-            (let ((p (project-current)))
-              (and p (project-root p))))
-       default-directory)))
+  "claude を動かすディレクトリ。自動で決まらなければ確認して決める。
+
+`my:claude--guess-directory' が nil を返したときは `default-directory'
+を候補にして `y/n' で聞く。拒否されたらディレクトリを読ませる
+ (起動そのものは中止しない)。"
+  (or (my:claude--guess-directory)
+      (let ((here (expand-file-name default-directory)))
+        (if (y-or-n-p (format "%s で claude を起動する? "
+                              (abbreviate-file-name here)))
+            here
+          (expand-file-name
+           (read-directory-name "claude を起動するディレクトリ: "
+                                here nil t))))))
 
 (defun my:claude--session-for-buffer ()
   "いま使うセッション。無ければ nil。"
@@ -465,21 +541,32 @@ RESUME は `my:claude--command' に渡す (t で --continue、文字列で --res
 ;;; --------------------------------------------------
 
 (defun my:claude--insert (session text &optional face)
-  "SESSION の会話バッファの末尾に TEXT を挿入する。"
+  "SESSION の会話バッファの末尾に TEXT を挿入する。
+
+**末尾を見ているときだけ追従する。** 読み返している最中に飛ばされるのは
+鬱陶しいため。判定は **ウィンドウごとに `window-point\' で行う**。
+バッファの `point\' 1 つで決めていると、`my:claude-layout\' のように
+会話バッファが複数のウィンドウに出たとき、片方が末尾にいるだけで
+読み返している側まで飛ばされる (あるいはその逆)。
+
+バッファ自身の `point\' も別に見る。ウィンドウに出ていない間に届いた
+ぶんで追従が切れると、次に表示したときに古い位置から始まってしまう。"
   (let ((buf (my:claude-session-buffer session)))
     (when (buffer-live-p buf)
       (with-current-buffer buf
-        (let ((inhibit-read-only t)
-              (at-end (and (get-buffer-window buf)
-                           (>= (point) (point-max)))))
+        (let* ((inhibit-read-only t)
+               (max (point-max))
+               (buffer-at-end (>= (point) max))
+               (following (seq-filter (lambda (w) (>= (window-point w) max))
+                                      (get-buffer-window-list buf nil t))))
           (save-excursion
             (goto-char (point-max))
             (insert (if face (propertize text 'font-lock-face face) text)))
-          ;; 末尾を見ていたときだけ追従する。読み返している最中に
-          ;; 飛ばされるのは鬱陶しいため。
-          (when at-end
-            (dolist (w (get-buffer-window-list buf nil t))
-              (with-selected-window w (goto-char (point-max))))))))))
+          ;; save-excursion は挿入前の位置に戻すので、末尾にいたぶんは
+          ;; 明示的に進める (マーカーの insertion-type が nil のため)。
+          (when buffer-at-end (goto-char (point-max)))
+          (dolist (w following)
+            (set-window-point w (point-max))))))))
 
 (defun my:claude--insert-block (session text face)
   "TEXT を字下げして挿入する。"
@@ -491,26 +578,34 @@ RESUME は `my:claude--command' に渡す (t で --continue、文字列で --res
    face)
   (my:claude--insert session "\n"))
 
-(defun my:claude--fold (session text face)
-  "長い TEXT は先頭だけ見せて残りを隠す。"
+(defun my:claude--fold (session text face &optional label)
+  "ツールの実行結果 TEXT を畳んで 1 行にまとめる。
+
+LABEL は `Read(foo.el)\' のような呼び出しの要約 (`my:claude--tool-summary\')。
+
+**既定では全部畳む** (`my:claude-tool-result-max-lines\' が 0)。
+`my:claude-error-result-max-lines\' 行までのエラーだけは畳まない。
+全文はテキストプロパティに持たせ、TAB (`my:claude-toggle-fold\') で
+別バッファに開く。"
   (let* ((lines (split-string (string-trim-right text) "\n"))
-         (n (length lines)))
-    (if (<= n my:claude-tool-result-max-lines)
+         (n (length lines))
+         (keep (if (eq face 'my:claude-error-face)
+                   my:claude-error-result-max-lines
+                 my:claude-tool-result-max-lines)))
+    (if (<= n keep)
         (my:claude--insert-block session text face)
-      (my:claude--insert-block
-       session
-       (string-join (seq-take lines my:claude-tool-result-max-lines) "\n")
-       face)
       (my:claude--insert
        session
-       (format "  … 残り %d 行 (TAB で全体を表示)\n"
-               (- n my:claude-tool-result-max-lines))
-       'my:claude-meta-face)
-      ;; 全文はテキストプロパティに持たせておく。
+       (format "  ● %s … %d 行\n" (or label "出力") n)
+       (if (eq face 'my:claude-error-face) 'my:claude-error-face
+         'my:claude-meta-face))
+      ;; 全文はテキストプロパティに持たせておく。載せる範囲はいま書いた
+      ;; 1 行だけ。point-max は挿入した改行の**次**の行頭にあるので、
+      ;; そこから 1 行戻ったところが要約行の先頭になる。
       (with-current-buffer (my:claude-session-buffer session)
-        (let ((inhibit-read-only t))
-          (put-text-property (line-beginning-position 0) (point-max)
-                             'my:claude-full text))))))
+        (let* ((inhibit-read-only t)
+               (beg (save-excursion (goto-char (point-max)) (forward-line -1) (point))))
+          (put-text-property beg (point-max) 'my:claude-full text))))))
 
 ;;; --------------------------------------------------
 ;;; イベントの処理
@@ -545,22 +640,60 @@ RESUME は `my:claude--command' に渡す (t で --continue、文字列で --res
      (my:claude--update-header session))
     (_ nil)))
 
+(defun my:claude--format-tokens (n)
+  "トークン数 N を 103.2k のように短く書く。"
+  (cond ((not (numberp n)) "?")
+        ((>= n 1000) (format "%.1fk" (/ n 1000.0)))
+        (t (format "%d" n))))
+
 (defun my:claude--header (session)
-  "会話バッファのヘッダ行。どのアカウントに繋いでいるかを常に見せる。"
+  "会話バッファのヘッダ行。
+
+**ヘッダ行を主に使う。** モードラインは幅が狭いので
+プロジェクト名とコストだけに留める (`my:claude--mode-line\')。
+ディレクトリはモードラインに移したのでここには出さない
+ (フルパスはモードラインの help-echo で見られる)。
+
+出す項目は `~/.claude/statusline-command.sh\' が端末の TUI に出して
+いるものに合わせてある。ただし **statusLine は端末 TUI の機能で、
+`-p\' (stream-json) 経路では発火しない** (実測: 出力に一切現れない)。
+スクリプトの出力をもらうのではなく、同じ情報を stream-json から
+自前で組み立てている。
+
+  claude のバージョン  system/init の claude_code_version
+  コンテキスト使用量   assistant の message.usage の合計 /
+                       result の modelUsage.<model>.contextWindow
+  レート上限とリセット rate_limit_event の unifiedWindows
+
+git ブランチは載せない (プロセス起動のコストに見合わない)。
+effort level は **stream-json に出てこない** ので載せられない。"
   (let* ((auth (gethash (my:claude-session-name session) my:claude--auth-cache))
-         (rl (my:claude-session-rate-limit session)))
-    (concat
-     (format "%s(%s)"
-             (my:claude-session-name session)
-             (or (alist-get 'subscriptionType auth) "?"))
-     (when-let* ((m (my:claude-session-model session))) (format " | %s" m))
-     (when rl
-       (let ((w (alist-get 'unifiedWindows rl)))
-         (format " | 5h %d%% 7d %d%%"
-                 (round (* 100 (or (alist-get 'utilization (alist-get 'five_hour w)) 0)))
-                 (round (* 100 (or (alist-get 'utilization (alist-get 'seven_day w)) 0))))))
-     (format " | %s" (abbreviate-file-name
-                      (directory-file-name (my:claude-session-directory session)))))))
+         (rl (my:claude-session-rate-limit session))
+         (w (and rl (alist-get 'unifiedWindows rl)))
+         (used (my:claude-session-context-tokens session))
+         (limit (or (my:claude-session-context-window session) 200000))
+         (segs nil))
+    (push (format "%s(%s)%s"
+                  (my:claude-session-name session)
+                  (or (alist-get 'subscriptionType auth) "?")
+                  (if-let* ((v (my:claude-session-claude-version session)))
+                      (format " v%s" v) ""))
+          segs)
+    (when-let* ((m (my:claude-session-model session))) (push m segs))
+    (when (numberp used)
+      (push (format "ctx %s %d%%" (my:claude--format-tokens used)
+                    (round (* 100.0 (/ (float used) (max 1 limit)))))
+            segs))
+    (when w
+      (let ((r (alist-get 'resetsAt (alist-get 'five_hour w))))
+        (push (format "5h %d%% 7d %d%%%s"
+                      (round (* 100 (or (alist-get 'utilization
+                                                   (alist-get 'five_hour w)) 0)))
+                      (round (* 100 (or (alist-get 'utilization
+                                                   (alist-get 'seven_day w)) 0)))
+                      (if (numberp r) (format-time-string " (reset %m/%d %H:%M)" r) ""))
+              segs)))
+    (mapconcat #'identity (nreverse segs) " | ")))
 
 (defun my:claude--update-header (session)
   (when (buffer-live-p (my:claude-session-buffer session))
@@ -574,6 +707,9 @@ RESUME は `my:claude--command' に渡す (t で --continue、文字列で --res
      ;; 見出しが混ざるので、ヘッダ行に出す。
      (setf (my:claude-session-session-id session) (alist-get 'session_id obj)
            (my:claude-session-model session) (alist-get 'model obj)
+           ;; ヘッダ行に出す。`claude --version' を別に呼ぶ必要は無い。
+           (my:claude-session-claude-version session)
+           (alist-get 'claude_code_version obj)
            ;; 端末が要るコマンド (doctor / color / reload-plugins)。
            ;; 補完の注釈で分かるようにする。
            (my:claude-session-terminal-only session)
@@ -642,51 +778,323 @@ tool_use は逆に delta を捨てて `assistant' の確定版だけを使う。
              (my:claude-session-streamed-text session) nil))
       (_ nil))))
 
+(defvar my:claude-lang-mode-alist
+  '(("elisp"         . emacs-lisp-mode)
+    ("emacs-lisp"    . emacs-lisp-mode)
+    ("el"            . emacs-lisp-mode)
+    ("lisp"          . lisp-mode)
+    ("sh"            . sh-mode)
+    ("shell"         . sh-mode)
+    ("bash"          . sh-mode)
+    ("zsh"           . sh-mode)
+    ("console"       . sh-mode)
+    ("shell-session" . sh-mode)
+    ("js"            . js-mode)
+    ("javascript"    . js-mode)
+    ("json"          . js-json-mode)
+    ("jsonc"         . js-json-mode)
+    ("md"            . markdown-mode)
+    ("markdown"      . markdown-mode)
+    ("diff"          . diff-mode)
+    ("patch"         . diff-mode)
+    ("text"          . fundamental-mode)
+    ("txt"           . fundamental-mode)
+    ("ps1"           . powershell-mode)
+    ("powershell"    . powershell-mode))
+  "言語名 → メジャーモード。`markdown-get-lang-mode' より先に引く。
+
+`markdown-get-lang-mode' は `<lang>-mode' と `<lang>-ts-mode' を
+自動で試すので、素直な名前 (rust / python / go / yaml …) はここに
+書かなくてよい。ここに置くのは名前が一致しないものと、
+このリポジトリの都合で別のモードに寄せたいものだけ。")
+
+(defun my:claude--lang-mode (lang)
+  "LANG に対応する、実際にロードできるメジャーモードを返す。無ければ nil。
+
+対応表は `markdown-mode' のものを流用する (`markdown-get-lang-mode')。
+あちらは `<lang>-mode' / `<lang>-ts-mode' の推測と `fboundp' の確認まで
+やってくれるので、自前で持つのは名前が一致しないものだけで済む。
+markdown-mode は autoload 済みなので、必要になった時点で読み込まれる。"
+  (when (and (stringp lang) (not (string-empty-p lang)))
+    (let* ((key (downcase lang))
+           (mode (or (cdr (assoc key my:claude-lang-mode-alist))
+                     (and (require 'markdown-mode nil t)
+                          (fboundp 'markdown-get-lang-mode)
+                          (markdown-get-lang-mode key)))))
+      (and mode (fboundp mode) mode))))
+
+(defun my:claude--face-list (f)
+  "テキストプロパティの face の値 F を face のリストにする。
+無名 face (`(:foreground \"red\")' のような plist) は 1 つとして扱う。"
+  (cond ((null f) nil)
+        ((and (consp f) (keywordp (car f))) (list f))
+        ((consp f) (copy-sequence f))
+        (t (list f))))
+
+(defun my:claude--code-face-p (pos)
+  "POS がコードブロック (フェンス行を含む) の中か。
+
+C-1 で構文の face を重ねると `font-lock-face' が **リストになる** ので、
+`eq' で単一の face と比べる書き方は使えない。"
+  (let ((f (get-text-property pos 'font-lock-face)))
+    (cond ((memq f '(my:claude-code-face my:claude-code-fence-face)) t)
+          ((and (consp f) (not (keywordp (car f))))
+           (or (memq 'my:claude-code-face f)
+               (memq 'my:claude-code-fence-face f)))
+          (t nil))))
+
+(defun my:claude--fontify-code (beg end lang)
+  "BEG..END を LANG のメジャーモードとして着色する。
+
+一時バッファで該当モードを立てて `font-lock-ensure' し、付いた `face' を
+`font-lock-face' としてコピーする。org の
+`org-src-font-lock-fontify-block' と同じやり方。このバッファでは
+font-lock を有効にできない (`my:claude--fontify-markdown' 参照) ため、
+描画済みの結果だけを貼り付ける形になる。
+
+**背景色を消さないこと。** `my:claude-code-face' は背景しか持たないので、
+構文の face と **並べてリストで** 載せる。上書きするとブロックの
+地の色が消える。
+
+一時バッファではモードフックを走らせない (`delay-mode-hooks')。
+他人の設定 (flycheck / lsp / 自動整形) がここで動く道理が無いうえ、
+`funcall' がエラーになると会話の表示ごと止まってしまう。"
+  (when-let* ((mode (and my:claude-fontify-code (my:claude--lang-mode lang))))
+    (let ((text (buffer-substring-no-properties beg end))
+          (spans nil))
+      (condition-case nil
+          (with-temp-buffer
+            (insert text)
+            (delay-mode-hooks (funcall mode))
+            (font-lock-ensure)
+            (let ((pos (point-min)))
+              (while (< pos (point-max))
+                (let ((next (next-single-property-change pos 'face nil (point-max)))
+                      (f (get-text-property pos 'face)))
+                  (when f (push (list (1- pos) (1- next) f) spans))
+                  (setq pos next)))))
+        ;; モードが壊れていても会話の表示は続ける。単色のままになるだけ。
+        (error (setq spans nil)))
+      (dolist (sp spans)
+        (put-text-property (+ beg (nth 0 sp)) (+ beg (nth 1 sp))
+                           'font-lock-face
+                           (append (my:claude--face-list (nth 2 sp))
+                                   (list 'my:claude-code-face)))))))
+
+;;; markdown の表を罫線に組み直す
+
+(defun my:claude--table-row-p ()
+  "いまの行が `| a | b |' の形なら非 nil。"
+  (string-match-p "\\`[ \t]*|.*|[ \t]*\\'"
+                  (buffer-substring-no-properties
+                   (line-beginning-position) (line-end-position))))
+
+(defun my:claude--table-separator-p (line)
+  "LINE が `|---|:---:|' のような区切り行なら非 nil。"
+  (string-match-p "\\`[ \t]*|\\([ \t]*:?-+:?[ \t]*|\\)+[ \t]*\\'" line))
+
+(defun my:claude--split-row (line)
+  "`| a | b |' の LINE をセルのリストにする。
+`\\|' でエスケープされた `|' はセルの区切りにしない。"
+  (let* ((body (string-remove-suffix
+                "|" (string-remove-prefix "|" (string-trim line))))
+         (n (length body))
+         (cells nil) (cur nil) (i 0))
+    (while (< i n)
+      (let ((c (aref body i)))
+        (cond ((and (eq c ?\\) (< (1+ i) n) (eq (aref body (1+ i)) ?|))
+               (push ?| cur) (setq i (+ i 2)))
+              ((eq c ?|) (push (nreverse cur) cells) (setq cur nil) (setq i (1+ i)))
+              (t (push c cur) (setq i (1+ i))))))
+    (push (nreverse cur) cells)
+    (mapcar (lambda (cs) (string-trim (apply #'string cs))) (nreverse cells))))
+
+(defun my:claude--table-align (cells)
+  "区切り行のセル CELLS から、列ごとの寄せ方 (left/right/center) を返す。"
+  (mapcar (lambda (c)
+            (let ((l (string-prefix-p ":" c))
+                  (r (string-suffix-p ":" c)))
+              (cond ((and l r) 'center) (r 'right) (t 'left))))
+          cells))
+
+(defun my:claude--pad (s width align)
+  "S を WIDTH 桁に ALIGN で詰める。桁は `string-width' で数える。"
+  (let ((d (max 0 (- width (string-width s)))))
+    (pcase align
+      ('right  (concat (make-string d ?\s) s))
+      ('center (let ((l (/ d 2)))
+                 (concat (make-string l ?\s) s (make-string (- d l) ?\s))))
+      (_       (concat s (make-string d ?\s))))))
+
+(defun my:claude--table-string (rows aligns header indent)
+  "ROWS を罫線の表にした文字列を返す。
+
+ALIGNS は列ごとの寄せ方、HEADER は見出し行の数、INDENT は行頭に付ける空白。
+桁は `string-width' で数えるので、East Asian Ambiguous は
+`site-lisp/eaw.el' が与える幅 2 になる。**元の桁は使わない**
+ (claude は幅 1 で組んでいることがある)。"
+  (let* ((ncol (apply #'max 1 (mapcar #'length rows)))
+         (rows (mapcar (lambda (r)
+                         (append r (make-list (- ncol (length r)) "")))
+                       rows))
+         (aligns (append aligns
+                         (make-list (max 0 (- ncol (length aligns))) 'left)))
+         ;; 【重要】罫線素片は 1 文字で 2 桁ある。
+         ;; `─' は JIS X 0208 の罫線素片なので `site-lisp/eaw.el' が
+         ;; 幅 2 を与え、HackGen も全角 (16px) で描く。つまり
+         ;; `(make-string (+ w 2) ?─)' は **w+2 桁ではなく 2(w+2) 桁**
+         ;; になり、罫線の行だけが倍の長さになる。実際にそうなっていた。
+         ;;
+         ;;   幅= 44 |┌─────┬────────┬─────┐|
+         ;;   幅= 26 |│ 列  │ 説明   │  値 │|
+         ;;
+         ;; セルの中身の詰め物は半角空白 (1 桁) なので列幅はどんな値でも
+         ;; 組めるが、罫線側は 2 桁単位でしか刻めない。そこで
+         ;; **列幅を「w+2 が罫線 1 文字の桁数の倍数」になるまで広げる**。
+         ;; eaw を外した Emacs では `─' が幅 1 になるので、その場合は
+         ;; 何も広げない (`rw' を実測しているのはそのため)。
+         (rw (max 1 (char-width ?─)))
+         (widths (mapcar (lambda (i)
+                           (let ((w (apply #'max 1
+                                           (mapcar (lambda (r)
+                                                     (string-width (nth i r)))
+                                                   rows))))
+                             (+ w (mod (- rw (mod (+ w 2) rw)) rw))))
+                         (number-sequence 0 (1- ncol))))
+         (rule (lambda (l m r)
+                 (concat indent l
+                         (mapconcat (lambda (w) (make-string (/ (+ w 2) rw) ?─))
+                                    widths m)
+                         r "\n")))
+         (row (lambda (r)
+                (concat indent "│"
+                        (mapconcat
+                         (lambda (i)
+                           (concat " " (my:claude--pad (nth i r) (nth i widths)
+                                                       (nth i aligns))
+                                   " "))
+                         (number-sequence 0 (1- ncol)) "│")
+                        "│\n"))))
+    (concat (funcall rule "┌" "┬" "┐")
+            (mapconcat row (seq-take rows header) "")
+            (if (> header 0) (funcall rule "├" "┼" "┤") "")
+            (mapconcat row (seq-drop rows header) "")
+            (funcall rule "└" "┴" "┘"))))
+
+(defun my:claude--render-table-at-point (end)
+  "point の行から続くパイプ表を罫線の表に置き換える。END を越えない。"
+  (let* ((start (line-beginning-position))
+         (indent (progn (goto-char start) (looking-at "[ \t]*") (match-string 0)))
+         (lines nil))
+    (while (and (< (point) end) (my:claude--table-row-p))
+      (push (buffer-substring-no-properties
+             (line-beginning-position) (line-end-position))
+            lines)
+      (forward-line 1))
+    (setq lines (nreverse lines))
+    (let* ((sep (seq-position lines nil
+                              (lambda (l _) (my:claude--table-separator-p l))))
+           (rows (mapcar #'my:claude--split-row lines)))
+      (when sep
+        (let* ((aligns (my:claude--table-align (nth sep rows)))
+               (body (append (seq-take rows sep) (seq-drop rows (1+ sep))))
+               (text (my:claude--table-string body aligns sep indent))
+               (finish (point)))
+          (delete-region start finish)
+          (goto-char start)
+          (insert text))))))
+
+(defun my:claude--render-tables (beg end)
+  "BEG..END にある markdown のパイプ表を罫線の表に組み直す。
+
+【重要】**元の桁は信用しない。** claude は East Asian Ambiguous を
+幅 1 として桁を組んでいることがあるが、この Emacs では
+`site-lisp/eaw.el' が幅 2 にする。セルの中身だけを取り出して
+`string-width' で組み直せば、論理幅と実描画幅が一致する
+ (罫線素片は JIS X 0208 にあり `my-appearance.el' が HackGen に
+割り当てるので全角 = 2 桁で描かれる)。
+
+区切り行 (`|---|---|') が続く場合だけ表とみなす。これが無いと
+`a | b' のような何気ない行まで拾ってしまう。コードブロックの中は
+触らない。"
+  (when my:claude-render-tables
+    (goto-char beg)
+    (forward-line 0)
+    (while (< (point) end)
+      (if (and (not (my:claude--code-face-p (line-beginning-position)))
+               (my:claude--table-row-p)
+               (save-excursion
+                 (forward-line 1)
+                 (and (< (point) end)
+                      (my:claude--table-separator-p
+                       (buffer-substring-no-properties
+                        (line-beginning-position) (line-end-position))))))
+          (my:claude--render-table-at-point end)
+        (forward-line 1)))))
+
 (defun my:claude--fontify-markdown (session beg)
-  "SESSION の会話バッファの BEG から末尾までを markdown として色づけする。
+  "SESSION の会話バッファの BEG から末尾までを markdown として整える。
 
 font-lock は使わない。このバッファは `special-mode' 派生で、挿入時に
 `font-lock-face' を直に載せているため、font-lock を有効にすると
-そちらに上書きされて競合する。ブロックが確定した時点で一度だけ塗る。"
+そちらに上書きされて競合する。ブロックが確定した時点で一度だけ塗る。
+
+やることは 3 つ。**この順でなければならない。**
+
+  1. ``` のブロックを塗る (言語指定があればその言語として着色する)
+  2. `|' の表を罫線に組み直す。1 の結果を見てコードブロックの中を避ける
+  3. 見出しと行中のコード
+
+呼ばれる場所は 2 か所ある (逐次表示の `content_block_stop' と、
+delta が来ないスラッシュコマンドの `assistant')。**片方だけだと
+`/context' の見出しが素のままになる。**"
   (let ((buf (my:claude-session-buffer session)))
     (when (and (buffer-live-p buf) (markerp beg) (marker-position beg))
       (with-current-buffer buf
         (let ((inhibit-read-only t)
-              (end (point-max)))
+              ;; 表の組み直しで長さが変わるのでマーカーで持つ。
+              (end (copy-marker (point-max) t)))
           (save-excursion
-            ;; ``` で囲まれたブロック
+            ;; [1] ``` で囲まれたブロック
             (goto-char beg)
-            (while (re-search-forward "^[ \t]*```.*$" end t)
+            (while (re-search-forward "^[ \t]*```[ \t]*\\([^ \t\n]*\\).*$" end t)
               (let ((fence1-beg (match-beginning 0))
                     (fence1-end (match-end 0))
+                    (lang (match-string 1))
                     body-end)
                 (if (re-search-forward "^[ \t]*```[ \t]*$" end t)
                     (setq body-end (match-beginning 0))
                   ;; 閉じていない (中断されたなど) ときは末尾まで
-                  (setq body-end end)
+                  (setq body-end (marker-position end))
                   (goto-char end))
                 (put-text-property fence1-beg fence1-end
                                    'font-lock-face 'my:claude-code-fence-face)
                 (when (< fence1-end body-end)
                   (put-text-property fence1-end body-end
-                                     'font-lock-face 'my:claude-code-face))
-                (when (< body-end end)
-                  (put-text-property body-end (min end (line-end-position))
+                                     'font-lock-face 'my:claude-code-face)
+                  (when (<= (count-lines fence1-end body-end)
+                            my:claude-fontify-code-max-lines)
+                    (my:claude--fontify-code fence1-end body-end lang)))
+                (when (< body-end (marker-position end))
+                  (put-text-property body-end (min (marker-position end)
+                                                   (line-end-position))
                                      'font-lock-face 'my:claude-code-fence-face))))
-            ;; 見出しと行中のコード。コードブロックの中は塗り直さない。
+            ;; [2] パイプ表を罫線に
+            (my:claude--render-tables beg end)
+            ;; [3] 見出しと行中のコード。コードブロックの中は塗り直さない。
             (goto-char beg)
             (while (re-search-forward "^[ \t]*#\\{1,6\\} .*$" end t)
-              (unless (eq (get-text-property (match-beginning 0) 'font-lock-face)
-                          'my:claude-code-face)
+              (unless (my:claude--code-face-p (match-beginning 0))
                 (put-text-property (match-beginning 0) (match-end 0)
                                    'font-lock-face 'my:claude-heading-face)))
             (goto-char beg)
             (while (re-search-forward "`[^`\n]+`" end t)
-              (unless (memq (get-text-property (match-beginning 0) 'font-lock-face)
-                            '(my:claude-code-face my:claude-code-fence-face
-                              my:claude-heading-face))
+              (unless (or (my:claude--code-face-p (match-beginning 0))
+                          (eq (get-text-property (match-beginning 0) 'font-lock-face)
+                              'my:claude-heading-face))
                 (put-text-property (match-beginning 0) (match-end 0)
-                                   'font-lock-face 'my:claude-inline-code-face)))))))))
+                                   'font-lock-face 'my:claude-inline-code-face))))
+          (set-marker end nil))))))
 
 (defun my:claude--mark-text-start (session)
   "いまの末尾に本文の開始位置を記録する。"
@@ -724,6 +1132,16 @@ JSON の null は `:null' で来るので `alist-get' の結果をそのまま�
 (defun my:claude--handle-assistant (obj session)
   (let ((content (alist-get 'content (alist-get 'message obj)))
         (sub (my:claude--parent-id obj)))
+    ;; コンテキスト使用量。statusline-command.sh が transcript から
+    ;; 集計しているのと同じ 3 つの和。サブエージェントの usage は
+    ;; 別の文脈なので混ぜない。
+    (unless sub
+      (when-let* ((usage (alist-get 'usage (alist-get 'message obj))))
+        (setf (my:claude-session-context-tokens session)
+              (+ (or (alist-get 'input_tokens usage) 0)
+                 (or (alist-get 'cache_read_input_tokens usage) 0)
+                 (or (alist-get 'cache_creation_input_tokens usage) 0)))
+        (my:claude--update-header session)))
     (seq-doseq (block content)
       (pcase (alist-get 'type block)
         ("text"
@@ -750,13 +1168,15 @@ JSON の null は `:null' で来るので `alist-get' の結果をそのまま�
            (my:claude--fontify-markdown session
                                         (my:claude-session-text-start session)))))
         ("tool_use"
-         (let ((name (alist-get 'name block))
-               (id (alist-get 'id block)))
-           (puthash id name (my:claude-session-tool-names session))
+         (let* ((name (alist-get 'name block))
+                (id (alist-get 'id block))
+                (summary (my:claude--tool-summary block)))
+           ;; 折りたたんだ結果に出す 1 行要約でも使うので、名前と一緒に
+           ;; 引数の要約も覚えておく。tool_result には入力が入っていない。
+           (puthash id (cons name summary) (my:claude-session-tool-names session))
            (my:claude--insert
             session
-            (format "%s▶ %s %s\n" (if sub "  " "") name
-                    (my:claude--tool-summary block))
+            (format "%s▶ %s %s\n" (if sub "  " "") name summary)
             (if sub 'my:claude-subagent-face 'my:claude-tool-face))
            ;; Edit / Write は入力そのものが差分なので、その場で見せる。
            (my:claude--show-edit session name (alist-get 'input block))))
@@ -797,8 +1217,11 @@ Windows に diff が入っている保証も無い。"
     (when (and (member name '("Edit" "Write" "NotebookEdit"))
                (or (stringp old) (stringp new)))
       (if (> lines my:claude-diff-max-lines)
+          ;; 【重要】TAB は案内しない。この関数は `my:claude-full' を
+          ;; 設定しないので、押しても「ここには折りたたまれた出力が無い」
+          ;; になるだけだった。全体が見たければ git diff を使う。
           (my:claude--insert session
-                             (format "    (差分 %d 行。TAB で全体を表示)\n" lines)
+                             (format "    (差分 %d 行。git diff で確認)\n" lines)
                              'my:claude-meta-face)
         (my:claude--insert-diff session old new)))))
 
@@ -819,22 +1242,35 @@ Windows に diff が入っている保証も無い。"
     (seq-doseq (block content)
       (when (equal (alist-get 'type block) "tool_result")
         (let* ((id (alist-get 'tool_use_id block))
-               (name (gethash id (my:claude-session-tool-names session) "?"))
+               (entry (gethash id (my:claude-session-tool-names session)))
+               (name (or (car-safe entry) "?"))
+               (summary (or (cdr-safe entry) ""))
+               (label (if (string-empty-p summary) name
+                        (format "%s(%s)" name summary)))
                (err (eq t (alist-get 'is_error block)))
                (text (my:claude--content-string (alist-get 'content block))))
-          (my:claude--fold session
-                           (if (string-empty-p (string-trim text))
-                               (format "(%s: 出力なし)" name)
-                             text)
-                           (cond (err 'my:claude-error-face)
-                                 (sub 'my:claude-subagent-face)
-                                 (t 'my:claude-tool-result-face))))))))
+          (if (string-empty-p (string-trim text))
+              ;; 出力が無いものを畳んでも意味が無い。
+              (my:claude--insert session (format "  ● %s … 出力なし\n" label)
+                                 'my:claude-meta-face)
+            (my:claude--fold session text
+                             (cond (err 'my:claude-error-face)
+                                   (sub 'my:claude-subagent-face)
+                                   (t 'my:claude-tool-result-face))
+                             label)))))))
 
 (defun my:claude--handle-result (obj session)
   ;; 中断されると content_block_stop が来ないことがある。
   (my:claude--close-stream-block session)
   (setf (my:claude-session-last-result session) obj
         (my:claude-session-busy session) nil)
+  ;; コンテキストの上限。モデルごとに入っている (1M 版なら 1000000)。
+  ;; ここでしか来ないので、来たときに覚えておく。
+  (dolist (e (alist-get 'modelUsage obj))
+    (let ((cw (alist-get 'contextWindow (cdr e))))
+      (when (numberp cw)
+        (setf (my:claude-session-context-window session) cw))))
+  (my:claude--update-header session)
   (let* ((usage (alist-get 'usage obj))
          (cost (alist-get 'total_cost_usd obj))
          (ms (alist-get 'duration_ms obj))
@@ -995,17 +1431,15 @@ Windows に diff が入っている保証も無い。"
 ;;; --------------------------------------------------
 
 ;;;###autoload
-(defun my:claude (&optional arg)
-  "claude セッションを開く。無ければ環境を選んで起動する。
+(defun my:claude--ensure-session (&optional arg)
+  "セッションを返す。無ければ環境を選んで起動する。ウィンドウは触らない。
 
 セッションは Emacs 全体で 1 つだけ持つ。アカウントの切り替えは
 CLAUDE_CONFIG_DIR をプロセス起動時に渡すことでしか行えないため、
 複数あるとどちらに送っているのか分からなくなるので増やさない。
 
-ARG (`C-u') を付けると、生きているセッションがあっても畳んで、
-環境と作業ディレクトリを選び直す。Pro の残量が尽きたときに
-その場で Max へ逃がすのがこの操作。"
-  (interactive "P")
+ARG が非 nil なら、生きているセッションがあっても畳んで環境と
+作業ディレクトリを選び直す。"
   (let ((session (my:claude--live-session)))
     (when (and session arg)
       (my:claude-quit-session session)
@@ -1016,13 +1450,105 @@ ARG (`C-u') を付けると、生きているセッションがあっても畳�
         (setq session (my:claude--start dir env))))
     ;; 起動済みのセッションを別プロジェクトから呼んだときは黙って
     ;; 使い回すが、cwd が違うことは知らせる (claude はそちらを見る)。
-    (let ((here (my:claude--project-directory)))
-      (unless (equal here (my:claude-session-directory session))
+    ;; **ここでは `my:claude--guess-directory' を使う。**
+    ;; `my:claude--project-directory' だと y/n を聞いてしまい、
+    ;; 使い回すだけの場面で確認が出る。
+    (let ((here (my:claude--guess-directory)))
+      (when (and here (not (equal here (my:claude-session-directory session))))
         (message "claude のセッションは %s のまま (C-u C-c a a で立て直す)"
                  (abbreviate-file-name
                   (directory-file-name (my:claude-session-directory session))))))
-    (pop-to-buffer (my:claude-session-buffer session))
     session))
+
+;;;###autoload
+(defun my:claude (&optional arg)
+  "claude セッションを開き、`my:claude-layout' の形に画面を整える。
+
+上半分は編集中のバッファ、下半分が会話と入力。**カーソルは入力
+バッファに入る。** 開いてすぐ書き始められるのが `C-c a a' の役目。
+
+ARG (`C-u') を付けると、生きているセッションがあっても畳んで、
+環境と作業ディレクトリを選び直す。Pro の残量が尽きたときに
+その場で Max へ逃がすのがこの操作。"
+  (interactive "P")
+  (let ((session (my:claude--ensure-session arg)))
+    (my:claude-layout)
+    session))
+
+;;; ウィンドウのレイアウト
+
+(defun my:claude--buffer-p (buf)
+  "BUF が claude の会話 / 入力バッファなら非 nil。"
+  (and (bufferp buf)
+       (member (buffer-name buf) '("*claude*" "*claude-input*"))
+       t))
+
+(defun my:claude--keep-buffer ()
+  "レイアウトの上半分に残すバッファ。claude 系でないものを選ぶ。
+
+いま見ているバッファが claude 系でなければそれ。claude 系なら、
+表示中の他のウィンドウ、それも無ければ直近のバッファ。"
+  (or (and (not (my:claude--buffer-p (current-buffer))) (current-buffer))
+      (seq-some (lambda (w)
+                  (let ((b (window-buffer w)))
+                    (and (not (my:claude--buffer-p b)) b)))
+                (window-list nil 'no-mini))
+      (seq-find (lambda (b)
+                  (and (not (my:claude--buffer-p b))
+                       (not (string-prefix-p " " (buffer-name b)))))
+                (buffer-list))
+      (get-buffer-create "*scratch*")))
+
+;;;###autoload
+(defun my:claude-layout ()
+  "画面を上下 2 分割し、下半分に会話バッファと入力バッファを出す。
+
+  上半分  編集中のバッファ
+  下半分  上が *claude* (出力)、下が *claude-input* (入力)
+
+下半分の高さはフレームの `my:claude-window-height-ratio' 倍、
+入力バッファは `my:claude-input-window-height' 行。最後にカーソルを
+入力バッファへ置く。
+
+いつでもこの形に戻せるように `C-c a l' に割り当ててある。
+`my:claude-toggle-maximize' の復帰先でもある
+ (トグル前の `window-configuration' は退避しない)。"
+  (interactive)
+  (let* ((session (my:claude--session-for-buffer))
+         (conv (if session (my:claude-session-buffer session)
+                 (get-buffer-create "*claude*")))
+         (input (get-buffer-create "*claude-input*"))
+         (keep (my:claude--keep-buffer))
+         (total (window-total-height (frame-root-window)))
+         (bottom (max 8 (round (* total my:claude-window-height-ratio))))
+         (ih (max 3 my:claude-input-window-height)))
+    (with-current-buffer input
+      (unless (derived-mode-p 'my:claude-input-mode) (my:claude-input-mode))
+      (when session (setq my:claude--session session)))
+    (if (< total (+ bottom ih 4))
+        ;; フレームが低すぎて 3 分割できない。壊すより諦める。
+        (pop-to-buffer input)
+      (delete-other-windows)
+      (switch-to-buffer keep nil t)
+      (let ((cw (split-window-below (- total bottom))))
+        (set-window-buffer cw conv)
+        (let ((iw (with-selected-window cw (split-window-below (- bottom ih)))))
+          (set-window-buffer iw input)
+          (select-window iw)
+          (goto-char (point-max)))))))
+
+;;;###autoload
+(defun my:claude-toggle-maximize ()
+  "claude のウィンドウを最大化する。もう一度押すと元に戻す。
+
+**戻り先はトグル前の状態ではなく `my:claude-layout' の正規レイアウト。**
+`window-configuration' を退避しないので、どこから何度押しても同じ形に
+落ち着く。出力を読み込みたいとき、長い入力を書きたいときに使う。"
+  (interactive)
+  (cond
+   ((one-window-p 'no-mini) (my:claude-layout))
+   ((my:claude--buffer-p (current-buffer)) (delete-other-windows))
+   (t (user-error "claude のバッファではない"))))
 
 ;;; スラッシュコマンド
 
@@ -1170,7 +1696,7 @@ RESUME は `my:claude--command' に渡す。ENV を省くと今の環境のま�
                     (< (float-time) d))
           (accept-process-output (my:claude-session-process old) 0.2))))
     (let ((session (my:claude--start dir env resume)))
-      (pop-to-buffer (my:claude-session-buffer session))
+      (my:claude-layout)
       session)))
 
 (defun my:claude--projects-directory (env)
@@ -1282,8 +1808,8 @@ claude はワークスペースのパスの **英数字以外をすべて `-' �
         (my:claude--restart t)
       (let ((dir (my:claude--project-directory))
             (env (my:claude--read-environment)))
-        (pop-to-buffer
-         (my:claude-session-buffer (my:claude--start dir env t)))))))
+        (my:claude--start dir env t)
+        (my:claude-layout)))))
 
 ;;;###autoload
 (defun my:claude-set-model (model)
@@ -1315,13 +1841,15 @@ Opus と Haiku を行き来してもそれまでの話は消えない。"
          (env (my:claude--read-environment)))
     (when old (my:claude-quit-session old))
     (let ((session (my:claude--start dir env)))
-      (pop-to-buffer (my:claude-session-buffer session))
+      (my:claude-layout)
       session)))
 
 (defun my:claude-send-string (text &optional session)
   "TEXT を claude に送る。"
+  ;; リージョン送信など、他所から呼ばれることがある。ここで
+  ;; `my:claude' を呼ぶとウィンドウを組み替えてしまうので使わない。
   (let ((session (or session (my:claude--session-for-buffer)
-                     (my:claude))))
+                     (my:claude--ensure-session))))
     (unless (string-empty-p (string-trim text))
       (my:claude--insert session (format "\n> %s\n\n" (string-trim text))
                          'my:claude-user-face)
@@ -1408,14 +1936,10 @@ Opus と Haiku を行き来してもそれまでの話は消えない。"
        (nth my:claude--input-index my:claude--input-history)))))
 
 (defun my:claude-input ()
-  "送信するテキストを書くバッファを開く。"
+  "送信するテキストを書くバッファを開く。画面は `my:claude-layout' にする。"
   (interactive)
-  (let* ((session (or (my:claude--session-for-buffer) (my:claude)))
-         (buf (get-buffer-create "*claude-input*")))
-    (with-current-buffer buf
-      (my:claude-input-mode)
-      (setq my:claude--session session))
-    (pop-to-buffer buf)))
+  (my:claude--ensure-session)
+  (my:claude-layout))
 
 (defun my:claude-input-send ()
   "入力バッファの内容を送って空にする。"
@@ -1456,36 +1980,76 @@ Opus と Haiku を行き来してもそれまでの話は消えない。"
     (define-key map (kbd "C-c C-i") #'my:claude-input)
     (define-key map (kbd "TAB") #'my:claude-toggle-fold)
     (define-key map (kbd "C-c C-k") #'my:claude-interrupt)
+    (define-key map (kbd "C-c C-z") #'my:claude-toggle-maximize)
+    (define-key map (kbd "z") #'my:claude-toggle-maximize)
     (define-key map (kbd "q") #'quit-window)
     map)
   "`my:claude-mode' のキーマップ。")
 
 (define-derived-mode my:claude-mode special-mode "Claude"
-  "claude との会話を表示するモード。"
+  "claude との会話を表示するモード。
+
+TAB で折りたたんだツール出力の全体を別バッファに出す。
+z / C-c C-z でこのウィンドウを最大化 (もう一度で元のレイアウト)。"
   (setq-local truncate-lines nil)
   (setq-local mode-line-process '(:eval (my:claude--mode-line))))
 
 (defun my:claude--mode-line ()
+  "モードラインに出す `[プロジェクト名 ... $0.12]\'。
+
+幅が狭いのでここは 3 項目まで。詳細はヘッダ行 (`my:claude--header\')。
+プロジェクト名はディレクトリの basename で、フルパスは help-echo に
+入れてある。"
   (let ((s my:claude--session))
     (if (null s) ""
-      (format " [%s%s]"
-              (if (my:claude-session-busy s) "..." "-")
-              (let ((r (my:claude-session-last-result s)))
-                (if r (format " $%.2f" (or (alist-get 'total_cost_usd r) 0.0)) ""))))))
+      (let ((dir (my:claude-session-directory s)))
+        (concat
+         " ["
+         (propertize (file-name-nondirectory (directory-file-name dir))
+                     'help-echo (abbreviate-file-name dir))
+         (if (my:claude-session-busy s) " ..." "")
+         (let ((r (my:claude-session-last-result s)))
+           (if r (format " $%.2f" (or (alist-get 'total_cost_usd r) 0.0)) ""))
+         "]")))))
 
 (defvar my:claude-input-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "C-c C-c") #'my:claude-input-send)
     (define-key map (kbd "C-c C-k") #'quit-window)
+    (define-key map (kbd "C-c C-z") #'my:claude-toggle-maximize)
     (define-key map (kbd "M-p") #'my:claude-input-previous)
     (define-key map (kbd "M-n") #'my:claude-input-next)
     map)
-  "`my:claude-input-mode' のキーマップ。")
+  "`my:claude-input-mode' のキーマップ。
 
-(define-derived-mode my:claude-input-mode text-mode "Claude-Input"
-  "claude に送るテキストを書くモード。"
+`markdown-mode-map' が親になるが、ここに書いたものが優先される。
+とくに `C-c C-c' は markdown 側では prefix (`markdown-mode-command-map')
+なので、この束縛が無いと送信できなくなる。")
+
+(define-derived-mode my:claude-input-mode markdown-mode "Claude-Input"
+  "claude に送るテキストを書くモード。
+
+markdown として書くので `markdown-mode' から派生させる。会話バッファ
+ (`my:claude-mode') と違って **font-lock をそのまま使える** ので、
+C-1 のようにテキストプロパティを貼る仕掛けは要らない。コードブロックの
+言語判別は `markdown-fontify-code-blocks-natively' に任せる。
+
+【重要】`markdown-mode-hook' は走らせない。`my-text.el' の
+`my:setup-markdown-mode' は「.md ファイルを編集する」前提の設定
+ (`electric-indent-local-mode' を切るなど) で、送信用の一時バッファに
+持ち込む理由が無い。将来 `my-text.el' を触ったときにこちらの挙動が
+黙って変わるのも避けたい。`delay-mode-hooks' で溜められたフックは
+`run-mode-hooks' が `run-hooks' で回すので、**バッファローカルに nil に
+すれば走らない** (ローカル値に t が無ければグローバル値も見ない)。
+
+【重要】`completion-at-point-functions' の `my:claude--capf' を落とさない
+こと。落とすと行頭の `/' が `cape-file' に食われて C: 直下の
+ディレクトリ一覧が出る。"
+  (setq-local markdown-mode-hook nil)
+  (setq-local markdown-fontify-code-blocks-natively t)
   (setq-local header-line-format
-              "C-c C-c 送信 / C-c C-k 閉じる / 行頭 / は TAB 補完 / M-p 履歴")
+              "C-c C-c 送信 / C-c C-k 閉じる / C-c C-z 最大化 / 行頭 / は TAB 補完 / M-p 履歴")
+  (setq-local mode-line-process '(:eval (my:claude--mode-line)))
   ;; cape-file が深さ 90 にいる。念のため明示的に先頭へ置く。
   (add-hook 'completion-at-point-functions #'my:claude--capf -100 t))
 
@@ -1497,6 +2061,7 @@ Opus と Haiku を行き来してもそれまでの話は消えない。"
 ;; p は projectile、! は flymake で埋まっている。
 (use-package emacs
   :bind (("C-c a a" . my:claude)
+         ("C-c a l" . my:claude-layout)
          ("C-c a e" . my:claude-switch-environment)
          ("C-c a t" . my:claude-trust-workspace)
          ("C-c a c" . my:claude-continue)

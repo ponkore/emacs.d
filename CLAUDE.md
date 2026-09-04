@@ -661,18 +661,59 @@ Windows の Emacs には PTY が無いので claude の対話 TUI は動かな�
 `docs/claude/emacs-claude-pty-proxy-study.md`、設計は
 `docs/claude/emacs-claude-stream-json-plan.md`。
 
+改善の第 1 弾（作業ディレクトリ・レイアウト・整形・ステータス）は
+`docs/claude/emacs-claude-improve-01.md` にまとめてある。
+
 | キー | |
 |---|---|
-| `C-c a a` | セッションを開く。無ければ環境を選んで起動（`C-u` で立て直す） |
+| `C-c a a` | セッションを開き、画面をレイアウトする（`C-u` で立て直す） |
+| `C-c a l` | いつでも同じレイアウトに戻す |
 | `C-c a e` | 環境（アカウント）を切り替える |
 | `C-c a t` | ワークスペースを信頼済みにする（下記） |
 | `C-c a c` | 直近の会話を継いで開く（`--continue`） |
 | `C-c a r` | 過去のセッションを一覧から選んで再開（`--resume`） |
 | `C-c a m` | モデルを変える（会話は `--resume` で継続） |
-| `C-c a i` | 入力バッファを開く（`C-c C-c` で送信、`M-p` / `M-n` で履歴） |
-| `C-c a s` | リージョンを送る |
+| `C-c a i` | 入力バッファを開く（レイアウトも組む） |
+| `C-c a s` | リージョンを送る（**レイアウトは変えない**） |
 | `C-c a k` | 中断 |
 | `C-c a q` | セッション終了 |
+| `C-c C-z` / `z` | 会話・入力ウィンドウの最大化トグル（`z` は `*claude*` のみ） |
+| `TAB` | 畳んだツール出力の全体を別バッファに出す（`*claude*`） |
+| `C-c C-c` | 送信（`*claude-input*`。`M-p` / `M-n` で履歴） |
+
+### 作業ディレクトリの決め方
+
+**さかのぼりはしない。**
+
+1. projectile のプロジェクトルート
+2. 取れなければ、cwd に `.claude/` があれば cwd
+3. どちらも外れたら `y/n` で確認し、拒否されたら `read-directory-name`
+
+`project.el` は見ない（projectile と役目が重なる）。判定は 2 つの関数に
+分けてある。**`my:claude--guess-directory` は確認を出さない**版で、
+「起動済みのセッションを使い回すだけ」の場面ではこちらを使う。
+分けないと `.claude/` の無いディレクトリから `C-c a a` するたびに
+`y/n` が出る。
+
+### ウィンドウのレイアウト（`my:claude-layout`）
+
+```
+┌──────────────┐
+│ 編集中のバッファ │  フレームの 1/2
+├──────────────┤
+│ *claude*      │  残り − 5 行
+├──────────────┤
+│ *claude-input*│  5 行（カーソルはここ）
+└──────────────┘
+```
+
+`my:claude-window-height-ratio`（既定 0.5）と
+`my:claude-input-window-height`（既定 5）で変えられる。
+
+**`window-configuration` は退避しない。** 最大化トグルの復帰先も
+`C-c a l` も同じ関数を呼ぶだけなので、どこから何度押しても同じ形に
+落ち着く。高さは `window-total-height` から採る（`window-body-height`
+だとモードラインとヘッダ行を数え落とす）。
 
 ### 環境（アカウント）の切り替え
 
@@ -691,9 +732,41 @@ jighead    max         masao.kato@jighead.co.jp's Organization
 ESC-Web    enterprise  株式会社　熾火
 ```
 
-ヘッダ行に `jighead(max) | claude-opus-5 | 5h 0% 7d 6% | ~/.emacs.d` を出す。
-残量は `rate_limit_event` から取っている。**アカウントを切り替える判断は
-この数字で行う**ので、常に見えるようにしてある。
+ヘッダ行に
+`jighead(max) v2.1.260 | claude-opus-5 | ctx 103.2k 52% | 5h 0% 7d 6% (reset 09/05 03:00)`
+を出す。残量は `rate_limit_event` から取っている。**アカウントを
+切り替える判断はこの数字で行う**ので、常に見えるようにしてある。
+
+### ステータスの表示は「ヘッダ行が主、モードラインは控えめ」
+
+`~/.claude/statusline-command.sh` が端末の TUI に出している項目を
+Emacs 側で再現してある。**`statusLine` は端末 TUI の機能で、`-p`
+（stream-json）経路では発火しない**（実測でイベントに一切現れない）ので、
+スクリプトの出力をもらうのではなく同じ情報を stream-json から自前で
+組み立てている。
+
+| 項目 | 取得元 |
+|---|---|
+| claude のバージョン | `system/init` の `claude_code_version` |
+| コンテキスト使用量 | `assistant` の `message.usage` の `input_tokens` + `cache_read_input_tokens` + `cache_creation_input_tokens` |
+| コンテキスト上限 | `result` の `modelUsage.<model>.contextWindow`（1M 版なら 1000000 が来る） |
+| レート上限とリセット | `rate_limit_event` の `unifiedWindows` |
+
+**`claude --version` を別に呼ぶ必要は無い。** statusline スクリプトが
+1 時間キャッシュまでして避けていたプロセス起動が、`system/init` に
+最初から入っている。
+
+**effort level は stream-json に出てこない**（全イベントの全キーを
+列挙して確認）。`permissionMode` / `output_style` / `fast_mode_state` は
+あるが `effort` は無い。git ブランチも載せていない（プロセス起動の
+コストに見合わない。「`call-process` が Windows で遅い」の節を参照）。
+
+モードラインは `[.emacs.d ... $0.12]`（プロジェクト名 / 応答待ち /
+累計コスト）だけ。フルパスは `help-echo` に入れてある。ディレクトリを
+ヘッダ行とモードラインの両方に出すと、いちばん幅を食う項目が二重に
+なるのでヘッダ行から外した。`doom-modeline` は `mode-line-process` を
+`process` セグメントでそのまま拾うので、`doom-modeline-def-segment` を
+書く必要は無い（セグメント名がバージョンで変わる問題も踏まない）。
 
 ### 逐次表示（`my:claude-stream`、既定 t）
 
@@ -754,6 +827,24 @@ JSON の断片は揃うまで意味を持たないため。
 
 表示は字下げ + `my:claude-subagent-face` で本体と区別する。
 
+### ツールの実行結果は既定で全部畳む
+
+`my:claude-tool-result-max-lines` の既定は **0**（= 常に畳む）。
+畳んだ行は 1 行の要約になり、`TAB` で全体を `*claude tool output*` に出す。
+
+```
+  ● Read(user-lisp/my-claude.el) … 42 行
+```
+
+`Read(...)` の中身は `my:claude--tool-summary` の結果だが、
+**`tool_result` には入力が入っていない**。`tool_use` を受けた時点で
+名前と一緒に要約も覚えておく必要があるので、`tool-names` ハッシュの値は
+`(NAME . SUMMARY)` の cons にしてある。
+
+**エラーだけは畳まない**（`my:claude-error-result-max-lines`、既定 30 行まで）。
+一律に畳むと「なぜ失敗したか」がその場から消え、雑音を減らすという
+目的とは逆にいちばん見たいものが隠れる。
+
 ### Edit / Write の差分表示
 
 `tool_use` の入力に `old_string` と `new_string`（Write は `content`）が
@@ -762,6 +853,11 @@ JSON の断片は揃うまで意味を持たないため。
 
 **外部の diff は呼ばない。** Windows に入っている保証が無いうえ、
 Edit の入力は置換前と置換後がそのまま来るので、行単位で並べれば足りる。
+
+差分に `TAB` は効かない。**「TAB で全体を表示」と案内していたのは嘘**
+だった（`my:claude--show-edit` は `my:claude-full` を設定しないので
+`ここには折りたたまれた出力が無い` になるだけ）。案内は
+`(差分 %d 行。git diff で確認)` に直してある。
 
 ### 許可の `permission_suggestions`
 
@@ -775,7 +871,12 @@ Emacs 側で覚える従来動作に落ちる。
 
 ### 会話バッファの markdown 装飾
 
-見出し・コードブロック・行中のコードを色づけする。
+`my:claude--fontify-markdown` が 3 つを順に行う。**この順でなければ
+ならない。**
+
+1. ``` のブロックを塗る。言語指定があればその言語として着色する
+2. `|` の表を罫線に組み直す。1 の結果を見てコードブロックの中を避ける
+3. 見出しと行中のコード
 
 **font-lock は使わない。** このバッファは `special-mode` 派生で、挿入時に
 `font-lock-face` を直に載せているため、font-lock を有効にすると
@@ -785,14 +886,110 @@ Emacs 側で覚える従来動作に落ちる。
 delta が来ない経路（スラッシュコマンドの `assistant`）。
 **どちらか片方だけだと `/context` の見出しが素のままになる。**
 
-実測（`## 見出し` と `` `inline` `` と elisp のコードブロックを返させた）:
+#### コードブロックの言語別着色
 
-| face | 文字数 |
-|---|---|
-| `my:claude-code-face` | 16 |
-| `my:claude-code-fence-face` | 11 |
-| `my:claude-heading-face` | 10 |
-| `my:claude-inline-code-face` | 8 |
+一時バッファで該当モードを立てて `font-lock-ensure` し、付いた `face` を
+`font-lock-face` としてコピーする（org の
+`org-src-font-lock-fontify-block` と同じ手口）。フックは
+`delay-mode-hooks` で走らせず、全体を `condition-case` で囲んである。
+
+言語 → メジャーモードは **`markdown-get-lang-mode` を流用**する。
+`<lang>-mode` / `<lang>-ts-mode` の推測と `fboundp` の確認までやって
+くれるので、自前の `my:claude-lang-mode-alist` に書くのは名前が
+一致しないもの（`elisp` `sh` `console` `json` …）だけで済む。
+
+**背景色を消さないこと。** `my:claude-code-face` は背景しか持たないので、
+構文の face と**並べてリストで**載せる。帰結として `font-lock-face` の
+値がリストになるため、「コードブロックの中か」の判定を `eq` で
+書けなくなる（`my:claude--code-face-p` を使う）。旧コードのまま
+`(eq (get-text-property …) 'my:claude-code-face)` にしておくと、
+**コードブロックの中の `# …` が見出しとして塗り直される。**
+
+描画コストは GUI 実測で **250 行のコードブロック 1 個につき 15.8 ms**。
+ブロックが確定した時点で 1 回だけなので詰まらない。上限は
+`my:claude-fontify-code-max-lines`（既定 300）で押さえてある。
+
+#### 【重要】罫線の表は「罫線素片が 1 文字 2 桁」を勘定に入れる
+
+markdown のパイプ表は罫線（box-drawing）の表に組み直す
+（`my:claude-render-tables`、既定 t）。**桁は Emacs の規則で決める。**
+`site-lisp/eaw.el` が ambiguous を幅 2 にし、`my-appearance.el` が
+罫線素片（JIS X 0208）を HackGen に割り当てるので、**論理幅と実描画幅が
+一致する**。claude 側の桁組みには合わせず、セルの中身だけを取り出して
+`string-width` で組み直す。
+
+> `my-pty`（端末）で ambiguous を幅 1 に切り替えているのとは**逆の話**。
+> あちらは桁を数えているのが conhost なので合わせにいくが、
+> こちらは Emacs 自身が数えるので合わせる必要が無い。
+
+罠は列幅の刻み方にある。**セルの詰め物は半角空白（1 桁）だが、罫線は
+1 文字で 2 桁ある。** 列幅 `w` に対して `(make-string (+ w 2) ?─)` と
+書くと罫線の行だけが倍の長さになる。
+
+```
+幅= 44 |┌─────┬────────┬─────┐|   ← 5 文字 = 10 桁
+幅= 26 |│ 列  │ 説明   │  値 │|   ← セルは 5 桁
+```
+
+`w + 2` が罫線 1 文字の桁数の倍数になるまで列幅を広げて直した。
+倍数の判定に使う値は決め打ちせず `(char-width ?─)` を実測する
+（eaw を外した Emacs では 1 になる）。
+
+GUI 実測（`string-width` だけでは検算にならないので
+`string-pixel-width` も見る）:
+
+```
+幅= 28 px= 224 |┌───┬────┬───┐|
+幅= 28 px= 224 |│ 列   │ 説明   │   値 │|
+幅= 28 px= 224 |├───┼────┼───┤|
+幅= 28 px= 224 |│ a    │ あいう │    1 │|
+幅= 28 px= 224 |│ bb   │ ○△□ │   22 │|
+幅= 28 px= 224 |│ ccc  │ ─│   │  333 │|
+幅= 28 px= 224 |└───┴────┴───┘|
+```
+
+全角・ambiguous・罫線素片を混ぜても全 7 行が一致する。
+`┌┬┐├┼┤└┴┘│─` はすべて `char-width` 2 / 16px。
+
+変換するのは**区切り行（`|---|:---:|`）を伴う表だけ**。無いと
+`a | b` のような何気ない行まで拾う。
+
+#### 追従（自動スクロール）はウィンドウごとに判定する
+
+`my:claude--insert` は「末尾を見ているときだけ追従する」。判定は
+**`window-point` でウィンドウごとに**行う。バッファの `point` 1 つで
+決めていると、会話バッファが 2 つのウィンドウに出たときに
+**読み返し中の窓まで末尾へ飛ぶ**（あるいはその逆で、末尾を見ている窓が
+追従しない）。レイアウトの最大化トグルや `display-buffer` の再利用で
+普通に起きる。
+
+バッファ自身の `point` も別に見る。`save-excursion` は挿入前の位置に
+戻す（マーカーの `insertion-type` が nil）ので、末尾にいたぶんは
+明示的に `goto-char` しないと追従が切れる。
+
+#### 入力バッファは markdown-mode 派生
+
+`my:claude-input-mode` は `markdown-mode` から派生させ、着色は
+`markdown-fontify-code-blocks-natively` に任せる（会話バッファと違って
+font-lock をそのまま使える）。
+
+**`markdown-mode-hook` は走らせない。** `my-text.el` の
+`my:setup-markdown-mode` は `.md` ファイルを編集する前提の設定で、
+送信用のバッファに持ち込む理由が無い。`define-derived-mode` は親を
+`delay-mode-hooks` で包み、最後に `run-mode-hooks` が `run-hooks` で
+回すので、モード本体で `(setq-local markdown-mode-hook nil)` すれば
+親のフックだけを外せる。
+
+`C-c C-c` は markdown 側では prefix だが、子のキーマップが先に引かれる
+ので `my:claude-input-send` が勝つ。`completion-at-point-functions` の
+`my:claude--capf`（深さ -100）は**必ず張り直すこと**（落とすと行頭の
+`/` が `cape-file` に食われて C: 直下の一覧が出る）。
+
+`markdown-mode` は autoload なので `my-claude.el` から
+`(require 'markdown-mode)` する必要は無い。`define-derived-mode` は
+親のキーマップを**モード関数の中で** `set-keymap-parent` する
+（`derived.el` のコメントが「親がまだロードされていないことがある」と
+明記している）。
 
 ### セッションの再開とモデルの変更
 
@@ -1287,7 +1484,8 @@ term.el はキーを `process-send-string` で送るので、最初はそれを 
 
 `term.eln`（native-compile 済み）は**プリミティブを直接呼ぶ**ので、
 symbol の function cell に張った advice を素通りする。実際、生の
-`echo …` がそのまま ptyd に届いて
+`echo …
+` がそのまま ptyd に届いて
 `bad line: invalid character 'e'` になった。
 
 包むなら **Lisp の関数**にする。そちらは symbol 経由で呼ばれる。
