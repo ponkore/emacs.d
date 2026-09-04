@@ -10,6 +10,8 @@
 - 起草: 2026-09-04
 - 2026-09-04: 論点への回答を反映（各項目の **決定** 行）。未決の論点は `論点` のまま残す
 - 2026-09-04: **A〜E をすべて実装した。** 各項目の「実装メモ」に実測値と踏んだ罠を残した
+- 2026-09-05: ヘッダ行を **5 列 + 色**にした。プロジェクト名を 2 列目に戻し、
+  モデルの列に effort を出すようにした（A-2 / E-1 の実装メモに追記）
 - 対象: `user-lisp/my-claude.el`
 - 関連: `docs/claude/emacs-claude-stream-json-plan.md`（設計）、
   `docs/claude/emacs-claude-pty-proxy-study.md`（方式の比較検討）
@@ -82,7 +84,8 @@ GUI 実測:
 | 現状 | `my:claude--mode-line`（`my-claude.el:1468`）は `mode-line-process` に `[- $0.12]`（busy と累計コスト）だけを出している |
 | 現状 | ディレクトリは**ヘッダ行**に出ている。`my:claude--header`（`my-claude.el:548`）が `jighead(max) \| claude-opus-5 \| 5h 0% 7d 6% \| ~/.emacs.d` を組む |
 | **決定** | **E-1 とセットで検討する**。この項目単独では決めない（表示場所が競合するため） |
-| **決定** | **ヘッダ行からディレクトリを外し、モードラインに移した**。重複させない |
+| 2026-09-04 | ヘッダ行からディレクトリを外し、モードラインに移した |
+| **2026-09-05** | **ヘッダ行の 2 列目にもプロジェクト名を出す**（下記） |
 
 実装メモ:
 
@@ -90,12 +93,17 @@ GUI 実測:
 `[.emacs.d ... $0.12]`。**フルパスは `help-echo`** に入れてあるので、
 マウスを載せれば分かる。
 
-ヘッダ行に残したのはアカウント / モデル / ctx / レート上限（E-1）。
-ディレクトリを両方に出すと、いちばん幅を食う項目が二重になる。
+### 2026-09-05: ヘッダ行の 2 列目にもプロジェクト名を出す
 
-入力バッファ（`*claude-input*`）にも同じモードラインを出している。
-B-1 のレイアウトでは入力バッファにカーソルがあることが多く、
-そこから会話バッファのモードラインは見えないため。
+当初は「ディレクトリを両方に出すと、いちばん幅を食う項目が二重になる」
+という理由でヘッダ行から外していたが、**フルパスではなくフォルダ名だけ**
+にすれば幅は 10 桁前後で済む。E-1 の 5 列（色付き）に組み込んだ。
+
+モードライン側は残してある。**入力バッファ（`*claude-input*`）の
+ヘッダ行はキーの案内**なので、そちらではモードラインが唯一の表示場所に
+なる。B-1 のレイアウトでは入力バッファにカーソルがあることが多い。
+
+どちらもフルパスは `help-echo` に入れてある。
 
 ### - [x] A-3. `C-c a a` で `*claude*` を裏に回し、`*claude-input*` を前面に出す
 
@@ -592,7 +600,8 @@ Emacs 側のモードライン（またはヘッダ行）で再現できるか�
 | **決定** | **ヘッダ行を主に使う**。モードラインは幅が狭いので**あまり使わない**方向で設計する |
 | **決定** | **git ブランチは載せない**。載せたくなったら別途検討する |
 | **決定** | A-2（プロジェクト名の表示）は**この項目と一緒に設計する** |
-| **決定** | ヘッダ行は 4 項目（アカウント + バージョン / モデル / ctx / レート上限）。**ディレクトリはモードラインへ移した**（A-2） |
+| 2026-09-04 | ヘッダ行は 4 項目（アカウント + バージョン / モデル / ctx / レート上限） |
+| **2026-09-05** | **5 列にして色を付けた**。2 列目にプロジェクト名、3 列目に effort（下記） |
 | **決定** | モードラインは `mode-line-process` のまま。`doom-modeline-def-segment` は書かない |
 
 実装メモ:
@@ -636,20 +645,113 @@ statusline スクリプトのようにモデル名から `*1M*` を判定する�
 再帰的に列挙して確認した。`system/init` には `permissionMode` /
 `output_style` / `fast_mode_state` はあるが `effort` は無い。
 
-### できあがり
+→ **2026-09-05 に別経路で出せるようにした。** 下の「effort level」を参照。
+
+### モードライン
+
+`[.emacs.d ... $0.12]`。doom-modeline はモードラインをまるごと差し替える
+が、`mode-line-process` は `doom-modeline` の `process` セグメントが
+そのまま拾うので、素の変数に載せるだけでよい。セグメント名がバージョンで
+変わる問題（CLAUDE.md 既出）も踏まない。
+
+---
+
+## 2026-09-05 の追加（E-1 の続き）
+
+### ヘッダ行を 5 列にして色を付けた
 
 ```
-personal(pro) v2.1.260 | claude-opus-5 | ctx 103.2k 52% | 5h 0% 7d 6% (reset 09/05 03:00)
+jighead(max) v2.1.260 | .emacs.d | claude-opus-5 (high) | ctx 103.2k 52% | (5h 4%)(7d 8%)(reset 09/05 03:00)
 ```
 
-GUI 実測で **89 桁**。B-1 のレイアウトは上下 2 分割なのでウィンドウの
-幅はフレームいっぱいあり、溢れない（`論点` にあった「半分の幅」は
-左右分割を想定した心配で、実際の分割方向では起きない）。
+| 列 | 内容 | 色 | face |
+|---|---|---|---|
+| 1 | アカウント（プラン）と claude のバージョン | マゼンタ | `my:claude-header-plan-face` |
+| 2 | プロジェクト名（フルパスは `help-echo`） | シアン | `my:claude-header-dir-face` |
+| 3 | モデルと effort | イエロー | `my:claude-header-model-face` |
+| 4 | コンテキスト使用量 | グリーン | `my:claude-header-context-face` |
+| 5 | レート上限とリセット時刻 | シアン | `my:claude-header-limit-face` |
 
-モードラインは `[.emacs.d $0.12]`。doom-modeline はモードラインを
-まるごと差し替えるが、`mode-line-process` は `doom-modeline` の
-`process` セグメントがそのまま拾うので、素の変数に載せるだけでよい。
-セグメント名がバージョンで変わる問題（CLAUDE.md 既出）も踏まない。
+色は `~/.claude/statusline-command.sh` が端末の TUI で使っている ANSI 色に
+合わせた。`:foreground` だけを指定する。ヘッダ行では `header-line` face が
+下地になり、テキストプロパティの face はその上に重なるので、背景は
+テーマのものがそのまま残る。GUI 実測で 108 桁。
+
+### 【重要】`%` の escape は列ごとに、色を付ける前に済ませる
+
+`header-line-format` に素の文字列を渡しているので `%` は mode-line の
+書式指定子として解釈される（`0e8badd` で踏んだ。`5h 4% 7d 8%` が
+`5h 47d 8` になっていた）。escape 自体はやめられない。
+
+問題は**掛ける場所**。組み立てた全体に `replace-regexp-in-string` を
+掛けると、**差し込まれる `%%` だけが face を持たない**素の文字列になり、
+その桁で色が切れる。`my:claude--header-segment` が
+「escape してから `propertize`」の順で 1 列を作る。
+
+検算は `format-mode-line` で行う。**「組み立てた文字列」ではなく
+「実際に表示される文字列」を見ないと、`%` の扱いも face の生き死にも
+分からない。** GUI 実測:
+
+```
+組み立て: … | ctx 103.2k 52%% | (5h 4%%)(7d 8%%)(reset 09/05 03:00)
+表示後  : … | ctx 103.2k 52%  | (5h 4%)(7d 8%)(reset 09/05 03:00)
+
+my:claude-header-plan-face       |jighead(max) v2.1.260|
+nil                              | | |
+my:claude-header-dir-face        |.emacs.d|
+nil                              | | |
+my:claude-header-model-face      |claude-opus-5 (high)|
+nil                              | | |
+my:claude-header-context-face    |ctx 103.2k 52%|
+nil                              | | |
+my:claude-header-limit-face      |(5h 4%)(7d 8%)(reset 09/05 03:00)|
+```
+
+色の付かない区間は区切りの ` | ` だけ（これは `header-line` の色で
+出るのが正しい）。`help-echo` も `format-mode-line` を通って残る。
+
+### effort level
+
+**stream-json は effort を返さない**ので、次の順で求める
+（`my:claude--effort`）。
+
+1. `my:claude-effort`（defcustom）。非 nil なら `--effort` で明示するので
+   その値がそのまま効く
+2. `settings.json` の `modelSettings.<model>.effortLevel`
+3. `settings.json` の `effortLevel`
+
+`settings.json` は claude 自身の優先順位に合わせて 3 つ見る。
+
+```
+<プロジェクト>/.claude/settings.local.json
+<プロジェクト>/.claude/settings.json
+<CLAUDE_CONFIG_DIR>/settings.json     ← 既定なら ~/.claude/settings.json
+```
+
+**`.claude.json`（信頼判定などが入るファイル）とは置き場が違う。**
+あちらは `~/.claude.json` だが、`settings.json` は
+`~/.claude/settings.json`。`my:claude--config-json` と
+`my:claude--settings-files` で組み立て方を分けてある。
+
+**`modelSettings` のキーは前方一致で突き合わせる。** キーは
+`claude-opus-5` のように日付が付かないが、`system/init` が返すモデル名は
+`claude-haiku-4-5-20251001` のように日付付きのことがある。
+
+GUI 実測（`~/.claude-config/jighead/settings.json` は
+`effortLevel: high` と `modelSettings.claude-fable-5.effortLevel: xhigh`）:
+
+| `model` | 結果 |
+|---|---|
+| `claude-opus-5` | `high`（`modelSettings` が一致） |
+| `claude-fable-5` | **`xhigh`**（`modelSettings` が一致） |
+| `claude-haiku-4-5-20251001` | `high`（一致せず、上位の `effortLevel`） |
+| `nil` | `high`（同上） |
+| `my:claude-effort` = `"max"` | **`max`**（defcustom が最優先） |
+
+effort は**毎ターン求め直さない**。`system/init` はターンごとに来るが、
+settings.json を 3 つまで読むファイル I/O が要るのに対し、モデルが
+変わらない限り結果は変わらない。**判定はモデルを更新するより先に
+行うこと**（更新してしまうと「変わったかどうか」が分からなくなる）。
 
 ---
 

@@ -733,7 +733,7 @@ ESC-Web    enterprise  株式会社　熾火
 ```
 
 ヘッダ行に
-`jighead(max) v2.1.260 | claude-opus-5 | ctx 103.2k 52% | (5h 0%)(7d 6%)(reset 09/05 03:00)`
+`jighead(max) v2.1.260 | .emacs.d | claude-opus-5 (high) | ctx 103.2k 52% | (5h 4%)(7d 8%)(reset 09/05 03:00)`
 を出す。残量は `rate_limit_event` から取っている。**アカウントを
 切り替える判断はこの数字で行う**ので、常に見えるようにしてある。
 
@@ -745,21 +745,60 @@ Emacs 側で再現してある。**`statusLine` は端末 TUI の機能で、`-p
 スクリプトの出力をもらうのではなく同じ情報を stream-json から自前で
 組み立てている。
 
-| 項目 | 取得元 |
-|---|---|
-| claude のバージョン | `system/init` の `claude_code_version` |
-| コンテキスト使用量 | `assistant` の `message.usage` の `input_tokens` + `cache_read_input_tokens` + `cache_creation_input_tokens` |
-| コンテキスト上限 | `result` の `modelUsage.<model>.contextWindow`（1M 版なら 1000000 が来る） |
-| レート上限とリセット | `rate_limit_event` の `unifiedWindows` |
+ヘッダ行は 5 列で、色は statusline スクリプトが使っている ANSI 色に
+合わせてある。
+
+| 列 | 内容 | 色 | 取得元 |
+|---|---|---|---|
+| 1 | アカウント（プラン）と claude のバージョン | マゼンタ | auth cache と `system/init` の `claude_code_version` |
+| 2 | プロジェクト名（フルパスは `help-echo`） | シアン | セッションの cwd |
+| 3 | モデルと effort | イエロー | `system/init` の `model` と `my:claude--effort` |
+| 4 | コンテキスト使用量 | グリーン | `assistant` の `message.usage` の `input_tokens` + `cache_read_input_tokens` + `cache_creation_input_tokens` / `result` の `modelUsage.<model>.contextWindow`（1M 版なら 1000000 が来る） |
+| 5 | レート上限とリセット時刻 | シアン | `rate_limit_event` の `unifiedWindows` |
+
+face は `my:claude-header-{plan,dir,model,context,limit}-face`。
+**`:foreground` だけを指定する。** ヘッダ行では `header-line` face が
+下地になり、テキストプロパティの face はその上に重なるので、背景は
+テーマのものがそのまま残る。
 
 **`claude --version` を別に呼ぶ必要は無い。** statusline スクリプトが
 1 時間キャッシュまでして避けていたプロセス起動が、`system/init` に
 最初から入っている。
 
-**effort level は stream-json に出てこない**（全イベントの全キーを
-列挙して確認）。`permissionMode` / `output_style` / `fast_mode_state` は
-あるが `effort` は無い。git ブランチも載せていない（プロセス起動の
-コストに見合わない。「`call-process` が Windows で遅い」の節を参照）。
+git ブランチは載せていない（プロセス起動のコストに見合わない。
+「`call-process` が Windows で遅い」の節を参照）。
+
+#### effort level は stream-json に出てこない
+
+全イベントの全キーを列挙して確認した。`system/init` には
+`permissionMode` / `output_style` / `fast_mode_state` はあるが
+`effort` は無い。そこで `my:claude--effort` が次の順で求める。
+
+1. `my:claude-effort`（defcustom）。非 nil なら `--effort` で明示するので
+   その値がそのまま効く
+2. `settings.json` の `modelSettings.<model>.effortLevel`
+3. `settings.json` の `effortLevel`
+
+`settings.json` は claude 自身の優先順位に合わせて 3 つ見る。
+
+```
+<プロジェクト>/.claude/settings.local.json
+<プロジェクト>/.claude/settings.json
+<CLAUDE_CONFIG_DIR>/settings.json     ← 既定なら ~/.claude/settings.json
+```
+
+**`.claude.json` とは置き場が違う。** 信頼判定などが入る `.claude.json`
+は `~/.claude.json` だが、`settings.json` は `~/.claude/settings.json`。
+`my:claude--config-json` と `my:claude--settings-files` で組み立て方を
+分けてある。
+
+**`modelSettings` のキーは前方一致で突き合わせる。** キーは
+`claude-opus-5` のように日付が付かないのに対し、`system/init` が返す
+モデル名は `claude-haiku-4-5-20251001` のように日付付きのことがある。
+
+effort は毎ターン求め直さない（`system/init` はターンごとに来る）。
+モデルが変わったときだけ取り直す。**判定はモデルを更新するより先に
+行うこと。**
 
 #### 【重要】`header-line-format` に出す `%` は `%%` に escape する
 
@@ -772,24 +811,29 @@ raw       : ... ctx 103.2k 52% | (5h 5%)(7d 8%)(reset 09/04 23:10)
 displayed : ... ctx 103.2k 52| (5h 5(7d 8(reset 09/04 23:10)
 ```
 
-`my:claude--header` は組み立てた**全体**に
-`(replace-regexp-in-string "%" "%%" ...)` を掛けている。ディレクトリ名や
-モデル名に `%` が入る場合も巻き込まれないよう、個々の `format` ではなく
-最後にまとめて掛けるのが正しい。
+**escape は列ごとに、色を付ける前に済ませる**
+（`my:claude--header-segment`）。組み立てた**全体**に
+`replace-regexp-in-string` を掛けると、**差し込まれる `%%` だけが face を
+持たない**素の文字列になり、その桁で色が切れる。ディレクトリ名や
+モデル名に `%` が入る場合もあるので escape 自体はやめられない。
 
 **この検証は batch ではできない。** `format-mode-line` は batch では
 常に `""` を返す。GUI で `(format-mode-line 文字列)` を見ること。
+**「組み立てた文字列」ではなく「実際に表示される文字列」を見ないと、
+`%` の扱いも face の生き死にも分からない。** `help-echo` も
+`format-mode-line` を通って残る（実測）。
 
 2026-09-04 に発見。`5h 4% 7d 8%` が `5h 47d 8` と表示されていた。
 あわせてレート上限の表示を `(5h 5%)(7d 8%)(reset MM/DD HH:MM)` の形に
 変えてある（`%` が区切りに埋もれず読めるように）。
 
 モードラインは `[.emacs.d ... $0.12]`（プロジェクト名 / 応答待ち /
-累計コスト）だけ。フルパスは `help-echo` に入れてある。ディレクトリを
-ヘッダ行とモードラインの両方に出すと、いちばん幅を食う項目が二重に
-なるのでヘッダ行から外した。`doom-modeline` は `mode-line-process` を
-`process` セグメントでそのまま拾うので、`doom-modeline-def-segment` を
-書く必要は無い（セグメント名がバージョンで変わる問題も踏まない）。
+累計コスト）だけ。フルパスは `help-echo` に入れてある。プロジェクト名は
+ヘッダ行の 2 列目にも出るが、**入力バッファ（`*claude-input*`）の
+ヘッダ行はキーの案内**なので、そちらではモードラインが唯一の表示場所に
+なる。`doom-modeline` は `mode-line-process` を `process` セグメントで
+そのまま拾うので、`doom-modeline-def-segment` を書く必要は無い
+（セグメント名がバージョンで変わる問題も踏まない）。
 
 ### 逐次表示（`my:claude-stream`、既定 t）
 

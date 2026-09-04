@@ -64,6 +64,17 @@ subscriptionType を返すので、選択時にそちらを見せる。"
 変更はプロセスの起動時にしか効かない。"
   :type '(choice (const :tag "既定" nil) string))
 
+(defcustom my:claude-effort nil
+  "起動時に渡す `--effort'。nil なら settings.json の効き目に任せる。
+
+**stream-json は effort level を返さない** (全イベントの全キーを
+列挙して確認した)。そのためヘッダ行に出す値は、ここが nil のときは
+`settings.json' を自分で読んで求める (`my:claude--effort')。
+非 nil なら `--effort' で明示するので、その値がそのまま効く。"
+  :type '(choice (const :tag "settings.json に任せる" nil)
+                 (const "low") (const "medium") (const "high")
+                 (const "xhigh") (const "max")))
+
 (defcustom my:claude-permission-mode nil
   "起動時に渡す `--permission-mode'。nil なら指定しない。"
   :type '(choice (const :tag "既定" nil)
@@ -220,6 +231,37 @@ nil にするとブロックが確定してから一度に出る (段階 3 ま�
   '((t :inherit shadow :height 0.9))
   "コスト・所要時間などの補足。")
 
+;; ヘッダ行の 5 列。`~/.claude/statusline-command.sh' が端末の TUI で
+;; 使っている ANSI 色に合わせてある (plan=マゼンタ / dir=シアン /
+;; model=イエロー / ctx=グリーン / limit=シアン)。
+;; `:foreground' だけを指定する。ヘッダ行では `header-line' face が
+;; 下地になり、テキストプロパティの face はその上に重なるので、
+;; 背景はテーマのものがそのまま残る。
+(defface my:claude-header-plan-face
+  '((((background dark))  :foreground "magenta")
+    (((background light)) :foreground "dark magenta"))
+  "ヘッダ行 1 列目 (アカウントとプラン)。")
+
+(defface my:claude-header-dir-face
+  '((((background dark))  :foreground "cyan")
+    (((background light)) :foreground "dark cyan"))
+  "ヘッダ行 2 列目 (プロジェクト名)。")
+
+(defface my:claude-header-model-face
+  '((((background dark))  :foreground "yellow")
+    (((background light)) :foreground "dark goldenrod"))
+  "ヘッダ行 3 列目 (モデルと effort)。")
+
+(defface my:claude-header-context-face
+  '((((background dark))  :foreground "green")
+    (((background light)) :foreground "dark green"))
+  "ヘッダ行 4 列目 (コンテキスト使用量)。")
+
+(defface my:claude-header-limit-face
+  '((((background dark))  :foreground "cyan")
+    (((background light)) :foreground "dark cyan"))
+  "ヘッダ行 5 列目 (レート上限とリセット時刻)。")
+
 ;;; --------------------------------------------------
 ;;; セッション
 ;;; --------------------------------------------------
@@ -242,6 +284,7 @@ nil にするとブロックが確定してから一度に出る (段階 3 ま�
   session-id
   model
   claude-version   ; system/init の claude_code_version
+  effort           ; effort level (settings.json から求めたもの)
   context-tokens   ; 直近の assistant の message.usage の合計
   context-window   ; result の modelUsage.<model>.contextWindow
   (busy nil)     ; 応答待ちか
@@ -410,6 +453,7 @@ RESUME が t なら `--continue' (そのディレクトリの直近の会話を�
    (when my:claude-stream (list "--include-partial-messages"))
    (when my:claude-forward-subagent-text (list "--forward-subagent-text"))
    (when my:claude-model (list "--model" my:claude-model))
+   (when my:claude-effort (list "--effort" my:claude-effort))
    (when my:claude-permission-mode
      (list "--permission-mode" my:claude-permission-mode))
    my:claude-extra-args))
@@ -665,13 +709,86 @@ LABEL は `Read(foo.el)\' のような呼び出しの要約 (`my:claude--tool-su
         ((>= n 1000) (format "%.1fk" (/ n 1000.0)))
         (t (format "%d" n))))
 
+;;; effort level
+
+(defun my:claude--json-file (file)
+  "FILE を JSON として読んで alist で返す。読めなければ nil。"
+  (when (file-readable-p file)
+    (ignore-errors
+      (with-temp-buffer
+        (let ((coding-system-for-read 'utf-8-unix))
+          (insert-file-contents file))
+        (goto-char (point-min))
+        (json-parse-buffer :object-type 'alist)))))
+
+(defun my:claude--settings-files (session)
+  "SESSION に効く settings.json を、優先順位の高い順に返す。
+
+claude 自身の順序 (プロジェクトのローカル → プロジェクト共有 → ユーザ)
+に合わせてある。ユーザ側は `.claude.json' と違って
+**CLAUDE_CONFIG_DIR の下の `settings.json'** なので、
+`my:claude--config-json' とは組み立て方が違う点に注意。"
+  (let ((dir (my:claude-session-directory session)))
+    (list (expand-file-name ".claude/settings.local.json" dir)
+          (expand-file-name ".claude/settings.json" dir)
+          (expand-file-name "settings.json"
+                            (or (my:claude-session-config-dir session)
+                                (expand-file-name "~/.claude"))))))
+
+(defun my:claude--effort-in (settings model)
+  "SETTINGS (alist) から MODEL の effortLevel を取り出す。
+
+`modelSettings' のほうが上位。キーは `claude-opus-5' のように
+日付の付かない名前で、`system/init' が返すのは
+`claude-haiku-4-5-20251001' のような日付付きのことがあるので、
+**完全一致ではなく前方一致**で突き合わせる。"
+  (or (seq-some (lambda (kv)
+                  (and (string-prefix-p (symbol-name (car kv)) (or model ""))
+                       (alist-get 'effortLevel (cdr kv))))
+                (alist-get 'modelSettings settings))
+      (alist-get 'effortLevel settings)))
+
+(defun my:claude--effort (session)
+  "SESSION の effort level。分からなければ nil。
+
+`my:claude-effort' が非 nil ならそれ (`--effort' で明示している)。
+そうでなければ settings.json を読んで求める。**stream-json は
+effort を返さない**ので、ここでしか分からない。"
+  (or my:claude-effort
+      (let ((model (my:claude-session-model session)))
+        (seq-some (lambda (f)
+                    (when-let* ((conf (my:claude--json-file f)))
+                      (my:claude--effort-in conf model)))
+                  (my:claude--settings-files session)))))
+
+(defun my:claude--header-segment (text face &rest props)
+  "TEXT を FACE で色づけしてヘッダ行の 1 列にする。PROPS も載せる。
+
+【重要】`%\' の escape は **列ごとに、色を付ける前に** 済ませる。
+`header-line-format\' に素の文字列を渡しているので、`%\' は mode-line の
+書式指定子として解釈され、`%\' と**直後の 1 文字**がまとめて消える
+ (`5h 4%% 7d 8%%\' が `5h 47d 8\' になっていた)。
+
+組み立てた全体に `replace-regexp-in-string\' を掛けると、**差し込まれる
+`%%\' だけが face を持たない**素の文字列になり、その桁で色が切れる。
+ディレクトリ名やモデル名に `%\' が入る場合もあるので、escape 自体は
+やめられない。"
+  (apply #'propertize (replace-regexp-in-string "%" "%%" text)
+         'face face props))
+
 (defun my:claude--header (session)
   "会話バッファのヘッダ行。
 
-**ヘッダ行を主に使う。** モードラインは幅が狭いので
-プロジェクト名とコストだけに留める (`my:claude--mode-line\')。
-ディレクトリはモードラインに移したのでここには出さない
- (フルパスはモードラインの help-echo で見られる)。
+**ヘッダ行を主に使う。** 5 列に分けて色を付けてある
+ (`~/.claude/statusline-command.sh\' が端末の TUI で使っている ANSI 色に
+合わせた)。モードラインは幅が狭いのでプロジェクト名とコストだけ
+ (`my:claude--mode-line\')。
+
+  1 アカウント (プラン) と claude のバージョン   マゼンタ
+  2 プロジェクト名 (フルパスは help-echo)        シアン
+  3 モデルと effort                              イエロー
+  4 コンテキスト使用量                           グリーン
+  5 レート上限とリセット時刻                     シアン
 
 出す項目は `~/.claude/statusline-command.sh\' が端末の TUI に出して
 いるものに合わせてある。ただし **statusLine は端末 TUI の機能で、
@@ -685,40 +802,57 @@ LABEL は `Read(foo.el)\' のような呼び出しの要約 (`my:claude--tool-su
   レート上限とリセット rate_limit_event の unifiedWindows
 
 git ブランチは載せない (プロセス起動のコストに見合わない)。
-effort level は **stream-json に出てこない** ので載せられない。"
+effort level は **stream-json に出てこない**ので、`--effort' の指定か
+settings.json から求める (`my:claude--effort')。"
   (let* ((auth (gethash (my:claude-session-name session) my:claude--auth-cache))
          (rl (my:claude-session-rate-limit session))
          (w (and rl (alist-get 'unifiedWindows rl)))
          (used (my:claude-session-context-tokens session))
          (limit (or (my:claude-session-context-window session) 200000))
+         (dir (my:claude-session-directory session))
          (segs nil))
-    (push (format "%s(%s)%s"
-                  (my:claude-session-name session)
-                  (or (alist-get 'subscriptionType auth) "?")
-                  (if-let* ((v (my:claude-session-claude-version session)))
-                      (format " v%s" v) ""))
+    ;; [1] アカウント (プラン) と claude のバージョン
+    (push (my:claude--header-segment
+           (format "%s(%s)%s"
+                   (my:claude-session-name session)
+                   (or (alist-get 'subscriptionType auth) "?")
+                   (if-let* ((v (my:claude-session-claude-version session)))
+                       (format " v%s" v) ""))
+           'my:claude-header-plan-face)
           segs)
-    (when-let* ((m (my:claude-session-model session))) (push m segs))
-    (when (numberp used)
-      (push (format "ctx %s %d%%" (my:claude--format-tokens used)
-                    (round (* 100.0 (/ (float used) (max 1 limit)))))
+    ;; [2] プロジェクト名。フルパスは help-echo に入れる。
+    (push (my:claude--header-segment
+           (file-name-nondirectory (directory-file-name dir))
+           'my:claude-header-dir-face
+           'help-echo (abbreviate-file-name dir))
+          segs)
+    ;; [3] モデルと effort
+    (when-let* ((m (my:claude-session-model session)))
+      (push (my:claude--header-segment
+             (concat m (if-let* ((e (my:claude-session-effort session)))
+                           (format " (%s)" e) ""))
+             'my:claude-header-model-face)
             segs))
+    ;; [4] コンテキスト使用量
+    (when (numberp used)
+      (push (my:claude--header-segment
+             (format "ctx %s %d%%" (my:claude--format-tokens used)
+                     (round (* 100.0 (/ (float used) (max 1 limit)))))
+             'my:claude-header-context-face)
+            segs))
+    ;; [5] レート上限とリセット時刻
     (when w
       (let ((r (alist-get 'resetsAt (alist-get 'five_hour w))))
-        (push (format "(5h %d%%)(7d %d%%)%s"
-                      (round (* 100 (or (alist-get 'utilization
-                                                   (alist-get 'five_hour w)) 0)))
-                      (round (* 100 (or (alist-get 'utilization
-                                                   (alist-get 'seven_day w)) 0)))
-                      (if (numberp r) (format-time-string "(reset %m/%d %H:%M)" r) ""))
+        (push (my:claude--header-segment
+               (format "(5h %d%%)(7d %d%%)%s"
+                       (round (* 100 (or (alist-get 'utilization
+                                                    (alist-get 'five_hour w)) 0)))
+                       (round (* 100 (or (alist-get 'utilization
+                                                    (alist-get 'seven_day w)) 0)))
+                       (if (numberp r) (format-time-string "(reset %m/%d %H:%M)" r) ""))
+               'my:claude-header-limit-face)
               segs)))
-    ;; 【重要】`header-line-format' に素の文字列を渡しているので、`%' は
-    ;; mode-line の書式指定子として解釈され、`%' と**直後の 1 文字**が
-    ;; まとめて消える。`5h 4% 7d 8%' が `5h 47d 8' になっていた。
-    ;; 表示したい `%' は `%%' に escape する。ディレクトリ名やモデル名に
-    ;; `%' が入る場合もあるので、組み立てた全体に掛ける。
-    (replace-regexp-in-string
-     "%" "%%" (mapconcat #'identity (nreverse segs) " | "))))
+    (mapconcat #'identity (nreverse segs) " | ")))
 
 (defun my:claude--update-header (session)
   (when (buffer-live-p (my:claude-session-buffer session))
@@ -730,6 +864,17 @@ effort level は **stream-json に出てこない** ので載せられない。"
     ("init"
      ;; init はターンごとに来る。バッファに挿すと会話の途中に何度も
      ;; 見出しが混ざるので、ヘッダ行に出す。
+     ;;
+     ;; effort は毎ターン求め直さない。settings.json を 3 つまで読むので
+     ;; ファイル I/O が要るのに対し、モデルが変わらない限り結果は変わら
+     ;; ない。**モデルの更新より先に**判定すること (更新してしまうと
+     ;; 「変わったかどうか」が分からなくなる)。
+     ;; どこにも settings.json が無くて nil のままのときは毎ターン試すが、
+     ;; `file-readable-p' が 3 回走るだけなので放っておく。
+     (unless (and (my:claude-session-effort session)
+                  (equal (my:claude-session-model session) (alist-get 'model obj)))
+       (setf (my:claude-session-model session) (alist-get 'model obj)
+             (my:claude-session-effort session) (my:claude--effort session)))
      (setf (my:claude-session-session-id session) (alist-get 'session_id obj)
            (my:claude-session-model session) (alist-get 'model obj)
            ;; ヘッダ行に出す。`claude --version' を別に呼ぶ必要は無い。
