@@ -1129,6 +1129,43 @@ claude も conhost も East Asian Ambiguous を **幅 1** として桁を組む�
 そのコードポイントのグリフを持つフォントが無いだけ。豆腐ではなく
 eat が意図して出している空の箱。
 
+### 【重要】幅表だけでは足りない。フォントも切り替える
+
+`char-width` を 1 にしても、**フォントがその文字を 2 桁ぶんの幅で描けば
+見た目はずれる。** GUI では `string-pixel-width` が `char-width` ではなく
+フォントの送り幅を返すことからも分かる。`M-x my:pty-toggle-ambiguous-width`
+で画面が変わらなかったのはこれが理由。
+
+原因は `my-appearance.el` の
+
+```elisp
+(set-fontset-font nil 'japanese-jisx0208 jp-fontspec)  ; jp-fontspec = HackGen
+```
+
+`─` (U+2500) は **JIS X 0208 の罫線素片**なので、この行で HackGen に
+割り当てられ、全角 16px で描かれる。
+
+実測（`:height` 116、半角 8px / 全角 16px の設定）:
+
+| フォント | `a` | `─` | `○` | `あ` | |
+|---|---|---|---|---|---|
+| **HackGen Console NF** | 8 | **8** | **8** | 16 | **正解** |
+| Consolas | 8 | 8 | 8 | 16 | 日本語を持たない |
+| HackGen35 Console NF | 8 | 11 | 9 | 16 | 3:5 設計で合わない |
+| Cascadia Mono | 9 | 9 | 9 | 16 | 半角が 9px |
+| HackGen（通常） | 8 | **16** | **16** | 16 | ずれる |
+
+HackGen の **Console 版**は ambiguous 幅の文字を半角にした派生なので、
+半角 8 / 全角 16 というメトリクスをそのまま保てる。
+
+`my:pty-console-font`（既定 `"HackGen Console NF"`）が、端末を開いている
+あいだだけ日本語と ambiguous の範囲をこのフォントに差し替える。幅表と
+同じ寿命で、最後の端末を閉じたら戻す。
+
+**Nerd Font のアイコン領域（#xe000-#xf8ff）は触らない。**
+`my-appearance.el` がそこを別のフォントに回しており、上書きすると
+アイコンが豆腐になる。
+
 ### 桁が合っているかの確かめ方
 
 見た目が崩れていても、**バッファの中で桁が合っているかは別**。切り分けは

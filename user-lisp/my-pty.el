@@ -81,6 +81,24 @@ nil にすると eaw の幅のまま。端末の見た目は崩れるが、他�
 桁揃えは変わらない。"
   :type 'boolean)
 
+(defcustom my:pty-console-font "HackGen Console NF"
+  "端末を開いている間だけ使うフォント。nil なら切り替えない。
+
+**幅表を直すだけでは足りない。** `char-width' を 1 にしても、フォントが
+その文字を 2 桁ぶんの幅で描けば見た目はずれる。GUI では
+`string-pixel-width' が `char-width' ではなく**フォントの送り幅**を返す
+ことからも分かる。実測 (`:height' 116、半角 8px / 全角 16px の設定):
+
+  HackGen Console NF     a=8 ─= 8 ○= 8 あ=16   ← これが正解
+  Consolas               a=8 ─= 8 ○= 8 あ=16   (日本語を持たない)
+  HackGen35 Console NF   a=8 ─=11 ○= 9 あ=16   (3:5 設計なので合わない)
+  Cascadia Mono          a=9 ─= 9 ○= 9 あ=16   (半角が 9px で合わない)
+  HackGen (通常の設定)   a=8 ─=16 ○=16 あ=16   ← ずれる
+
+HackGen の Console 版は ambiguous 幅の文字を半角にした派生なので、
+半角 8 / 全角 16 という手元のメトリクスをそのまま保てる。"
+  :type '(choice (const :tag "切り替えない" nil) string))
+
 (defcustom my:pty-term-name "xterm-256color"
   "子プロセスに渡す TERM (`term' バックエンドのとき)。
 
@@ -277,6 +295,56 @@ ambiguous を幅 1 として扱う。Emacs 側だけ幅 2 で数えると、ル�
                   (aset tbl c 1)))
               tbl))))
 
+(defconst my:pty--ambiguous-ranges
+  '((#x00a1 . #x00ff)   ; ラテン補助 (· ° ± × ÷ § ¶)
+    (#x2000 . #x206f)   ; 一般句読点 (… † ‡ ‘ ’ “ ”)
+    (#x2100 . #x214f)   ; 文字様記号
+    (#x2150 . #x218f)   ; 数字に準じるもの
+    (#x2190 . #x21ff)   ; 矢印 (→ ←)
+    (#x2460 . #x24ff)   ; 囲み英数字 (①②③)
+    (#x2500 . #x257f)   ; 罫線素片 (─ │ ┌ ┐)
+    (#x2580 . #x259f)   ; ブロック要素 (█ ▀ ▐)
+    (#x25a0 . #x25ff)   ; 幾何学模様 (○ △ □ ◇)
+    (#x2600 . #x26ff))  ; その他の記号 (★ ☆ ※)
+  "端末のあいだフォントを差し替える範囲。
+
+ambiguous 幅の文字が多く、かつ claude の TUI が実際に使うところ。
+Nerd Font のアイコン領域 (#xe000-#xf8ff) は **触らない**。
+`my-appearance.el' がそこを別のフォントに回しており、上書きすると
+アイコンが豆腐になる。")
+
+(defvar my:pty--saved-jp-font nil
+  "端末を開く前の日本語フォント。閉じるときに戻す。")
+
+(defun my:pty--apply-font (family)
+  "FAMILY を日本語と ambiguous の範囲に割り当てる。"
+  (let ((spec (font-spec :family family)))
+    (dolist (cs '(japanese-jisx0208 japanese-jisx0212 japanese-jisx0213-1
+                  japanese-jisx0213-2 japanese-jisx0213.2004-1
+                  katakana-jisx0201))
+      (set-fontset-font nil cs spec))
+    (dolist (range my:pty--ambiguous-ranges)
+      (set-fontset-font nil range spec))
+    (redraw-display)))
+
+(defun my:pty--console-font-on ()
+  "端末用のフォントに切り替える。"
+  (when (and my:pty-narrow-ambiguous
+             my:pty-console-font
+             (display-graphic-p)
+             (null my:pty--saved-jp-font)
+             (find-font (font-spec :family my:pty-console-font)))
+    ;; 既定のフォント名を控える。`my-appearance.el' は ascii と日本語に
+    ;; 同じファミリを使っているので、これで戻せる。
+    (setq my:pty--saved-jp-font (face-attribute 'default :family))
+    (my:pty--apply-font my:pty-console-font)))
+
+(defun my:pty--console-font-off ()
+  "元のフォントに戻す。端末が 1 つも無くなったときだけ。"
+  (when (and my:pty--saved-jp-font (null my:pty--processes))
+    (my:pty--apply-font my:pty--saved-jp-font)
+    (setq my:pty--saved-jp-font nil)))
+
 (defvar my:pty--saved-width-table nil
   "`my:pty-narrow-ambiguous' で退避した元の `char-width-table'。")
 
@@ -285,16 +353,19 @@ ambiguous を幅 1 として扱う。Emacs 側だけ幅 2 で数えると、ル�
   (when (and my:pty-narrow-ambiguous (null my:pty--saved-width-table))
     (setq my:pty--saved-width-table char-width-table)
     (setq char-width-table (my:pty--narrow-width-table))
+    (my:pty--console-font-on)
     (redraw-display)
-    (message "端末のあいだ East Asian Ambiguous を幅 1 にしました")))
+    (message "端末のあいだ ambiguous を幅 1 / フォントを %s にしました"
+             (or (and my:pty--saved-jp-font my:pty-console-font) "そのまま"))))
 
 (defun my:pty--narrow-widths-off ()
   "元の幅に戻す。端末が 1 つも無くなったときだけ。"
   (when (and my:pty--saved-width-table (null my:pty--processes))
     (setq char-width-table my:pty--saved-width-table)
     (setq my:pty--saved-width-table nil)
+    (my:pty--console-font-off)
     (redraw-display)
-    (message "East Asian Ambiguous の幅を元に戻しました")))
+    (message "ambiguous の幅とフォントを元に戻しました")))
 
 ;;;###autoload
 (defun my:pty-toggle-ambiguous-width ()
@@ -312,6 +383,9 @@ ambiguous を幅 1 として扱う。Emacs 側だけ幅 2 で数えると、ル�
     (when my:pty--saved-width-table
       (setq char-width-table my:pty--saved-width-table
             my:pty--saved-width-table nil)
+      (when my:pty--saved-jp-font
+        (my:pty--apply-font my:pty--saved-jp-font)
+        (setq my:pty--saved-jp-font nil))
       (redraw-display)))
   (message "ambiguous 幅: %s%s"
            (if my:pty-narrow-ambiguous "1 (端末に合わせる)" "eaw のまま")
