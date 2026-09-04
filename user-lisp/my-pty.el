@@ -81,8 +81,16 @@ nil にすると eaw の幅のまま。端末の見た目は崩れるが、他�
 桁揃えは変わらない。"
   :type 'boolean)
 
-(defcustom my:pty-console-font "Consolas"
-  "端末を開いている間だけ使うフォント。nil なら切り替えない。
+(defcustom my:pty-console-font nil
+  "端末を開いている間だけ使うフォント。**既定は nil (切り替えない)。**
+
+【重要】切り替えると **Emacs 全体のフォントが変わる**。
+`char-width-table' と同じく、フォントもバッファ単位に変えられないため
+(`set-fontset-font' はこの設定では効かない、後述)。端末を開いている
+あいだ、編集中のバッファまで Consolas になるのは実用上つらいので、
+既定では切り替えないことにした。
+
+端末の見た目を優先したいときだけ Consolas を指定する。
 
 **幅表を直すだけでは足りない。** `char-width' を 1 にしても、フォントが
 その文字を 2 桁ぶんの幅で描けば見た目はずれる。GUI では
@@ -103,7 +111,9 @@ Consolas は日本語を持たないが、`あ' はフォントセットのフ�
 
 `★' (U+2605) と `※' (U+203B) は**手元のどのフォントでも全角**なので、
 これらを含む行だけは揃わない。未解決。"
-  :type '(choice (const :tag "切り替えない" nil) string))
+  :type '(choice (const :tag "切り替えない (既定)" nil)
+                 (const "Consolas")
+                 string))
 
 (defcustom my:pty-term-name "xterm-256color"
   "子プロセスに渡す TERM (`term' バックエンドのとき)。

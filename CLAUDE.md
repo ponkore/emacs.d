@@ -1155,7 +1155,9 @@ eat が意図して出している空の箱。
 | HackGen35 Console NF | 8 | 16 | 11 | 9 | — | 3:5 設計で合わない |
 | Cascadia Mono | 9 | 16 | 9 | 9 | — | 半角が 9px |
 
-**`my:pty-console-font` の既定は `"Consolas"`。** Consolas は日本語を
+**`my:pty-console-font` の既定は nil（切り替えない）。** 切り替えると
+`char-width-table` と同じく **Emacs 全体**のフォントが変わり、編集中の
+バッファまで巻き込む。端末の見た目を優先したいときだけ Consolas にする。 Consolas は日本語を
 持たないが、`あ` はフォントセットのフォールバックで全角のまま描かれる
 （実測で 16px）。`my-appearance.el` のコメントにある「Consolas だと
 丸付き数字が半角幅になってしまっている」は、通常の編集では困る挙動だが
