@@ -253,6 +253,90 @@ root に置換する）も `string-prefix-p` が大文字小文字を区別す�
 インデントは `php-mode-coding-style` で指定する。
 cc-mode 版が要るときは `php-cc-mode` が別に残っている。
 
+### elisp の flymake は「信頼されたバッファ」でしか動かない
+
+Emacs 30 で `trusted-content` が入った（`files.el:718`）。
+`elisp-flymake-byte-compile` はバッファをバイトコンパイルする
+（= マクロ展開でそのバッファのコードが走りうる）ため、`trusted-content-p` が
+偽なら自ら降りる（`elisp-mode.el:2733`）。
+
+```
+Disabling elisp-flymake-byte-compile in *scratch* (untrusted content)
+```
+
+`my-lsp.el` の `(prog-mode-hook . flymake-mode)` が `*scratch*`
+（lisp-interaction-mode → emacs-lisp-mode → prog-mode）にも付くので、
+起動のたびにこれが出ていた。エラーを返したバックエンドは flymake が
+そのバッファで無効化する（`flymake.el:736`）ので、メッセージ自体は
+1 バッファにつき 1 回。
+
+**信頼の例外は `user-init-file`（init.el）だけ。** 明示しないと
+`early-init.el` も `user-lisp/` も `site-lisp/` も診断が出ない。
+`my-lsp.el` の `:custom` で 3 箇所を登録してある。`~/.emacs.d/` を丸ごと
+信頼させると `straight/repos/` のパッケージソースまで対象になるので広げない。
+
+| バッファ | `trusted-content-p` |
+|---|---|
+| `init.el` | t（`user-init-file` の例外） |
+| `early-init.el` / `user-lisp/` / `site-lisp/` | t（登録したもの） |
+| `straight/repos/*.el` | nil |
+| `*scratch*` | ファイル名が無いので `trusted-content` では救えない |
+
+#### 【重要】`*scratch*` の設定は `prog-mode-hook` に depth 付きで載せる
+
+`*scratch*` は `buffer-file-truename` が nil なのでバッファローカルに
+`(setq-local trusted-content :all)` するしかない（ielm.el:715 と
+simple.el:2072 が同じことをしている）。
+
+**`lisp-interaction-mode-hook` に置いても間に合わない。** `flymake-mode` は
+有効化した時点でチェックを 1 回走らせる（`flymake.el:1487`。表示済みの
+バッファなら即座に）が、`run-mode-hooks` は `delay-mode-hooks` で溜めた
+**親のフックを子のフックより先に**回すので、`prog-mode-hook` の
+`flymake-mode` のほうが早い。`add-hook` の depth を `-100` にして
+`prog-mode-hook` に載せること。
+
+GUI 実測（`lisp-interaction-mode-hook` → depth -100）:
+
+| | 修正前 | 修正後 |
+|---|---|---|
+| `*scratch*` の `trusted-content` | `:all` | `:all` |
+| `flymake-disabled-backends` | **`(elisp-flymake-byte-compile)`** | **nil** |
+| `*Messages*` にメッセージ | **t** | **nil** |
+
+フック自体はどちらも走っているので、**「変数が設定されていること」を
+確かめても検証にならない**。バックエンドが生きているかを見ること。
+
+#### 偽警告は避けられない
+
+`elisp-flymake-byte-compile` は `emacs -Q` 相当の子プロセスでコンパイルする。
+`user-lisp/` は use-package / straight でパッケージを読む前提なので、
+パッケージ由来のマクロが未定義扱いになる。バイトコンパイルしない方針
+（`user-lisp/` の節）と同じ理由。実測（byte-compile / checkdoc）:
+
+| | byte-compile | checkdoc |
+|---|---|---|
+| `my-appearance.el` | 21（`doom-modeline-def-segment` など） | 5 |
+| `my-lsp.el` | 9（全部 `defhydra`） | 0 |
+| `my-editor.el` | 9 | 1 |
+| `my-claude.el` | 2 | 206 |
+| `my-core.el` | 0 | 8 |
+
+checkdoc 側は `trusted-content-p` を見ないので、こちらは信頼設定とは
+無関係に以前から出ていた。うるさければ `trusted-content` から
+`user-lisp/` を落とせば byte-compile 側だけ止まる。
+
+#### 検証は GUI で、遅延に付き合うこと
+
+`flymake-mode` の初回チェックは `flymake-start-on-flymake-mode` の
+ドキュメントどおり**バッファが実際に表示されてから**走る。
+`find-file-noselect` してプローブすると `flymake-start` を呼んでも
+何も起きず、診断 0 件になる。`switch-to-buffer` してから
+`(flymake-start nil t)`（deferred を nil、force を t）で今すぐ走らせる。
+
+プローブは必ず `condition-case` で囲み、`unwind-protect` で
+`kill-emacs` すること。タイマーの中でエラーが出ると GUI の Emacs が
+そのまま残り、外から見ると「固まった」ようにしか見えない。
+
 ## tree-sitter
 
 メジャーモードは tree-sitter 版（`*-ts-mode`）を使う方針。ただし文法は

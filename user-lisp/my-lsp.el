@@ -135,7 +135,25 @@
 ;; flymake-show-diagnostics-at-end-of-line が flycheck-inline の代わりになる。
 
 (use-package flymake
+  :preface
+  (defun my:trust-scratch-content ()
+    "`*scratch*' の中身を信頼する。
+ファイルを訪ねていないバッファは `trusted-content' では救えないため、
+バッファローカルに設定する。ielm (ielm.el) や `read--expression'
+\(simple.el) が同じことをしている。"
+    (when (derived-mode-p 'lisp-interaction-mode)
+      (setq-local trusted-content :all)))
   :custom
+  ;; elisp-flymake-byte-compile はバッファをバイトコンパイルする
+  ;; (= マクロ展開でそのバッファのコードが走りうる) ため、trusted-content-p が
+  ;; 偽なら自ら降りて "Disabling elisp-flymake-byte-compile in FOO
+  ;; (untrusted content)" と言う。信頼の例外は user-init-file (init.el) だけ
+  ;; なので、明示しないと early-init.el も user-lisp/ も診断が出ない。
+  ;; ~/.emacs.d/ を丸ごと信頼させると straight/repos/ のパッケージソースまで
+  ;; 対象になるので、自分で書く 3 箇所に絞る。
+  (trusted-content '("~/.emacs.d/early-init.el"
+                     "~/.emacs.d/user-lisp/"
+                     "~/.emacs.d/site-lisp/"))
   ;; 旧 flycheck-check-syntax-automatically '(idle-change) 相当
   (flymake-no-changes-timeout 1.0)
   (flymake-fringe-indicator-position 'right-fringe)
@@ -158,6 +176,14 @@
   ;; :config にすると flymake がロードされるまで hydra-flymake/body が
   ;; 定義されず、C-c ! h が効かなくなる。
   :init
+  ;; flymake-mode は有効化した時点で 1 回チェックを走らせる (表示済みの
+  ;; バッファなら即座に)。run-mode-hooks は親から子の順に回すので、
+  ;; lisp-interaction-mode-hook に置くと prog-mode-hook の flymake-mode に
+  ;; 間に合わない。GUI 実測で trusted-content が :all になっているのに
+  ;; elisp-flymake-byte-compile が disabled になっていた。
+  ;; depth -100 で flymake-mode より先に走らせる。
+  (add-hook 'prog-mode-hook #'my:trust-scratch-content -100)
+
   (defhydra hydra-flymake nil
     "
       Navigate Error^^    Miscellaneous
