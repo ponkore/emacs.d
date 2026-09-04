@@ -86,6 +86,21 @@ subscriptionType を返すので、選択時にそちらを見せる。"
 nil なら毎回聞く。"
   :type '(choice (const :tag "毎回聞く" nil) regexp function))
 
+(defcustom my:claude-stream t
+  "非 nil なら応答を書かれる端から表示する。
+
+`--include-partial-messages' を付けて `stream_event' を拾う。
+受信する JSON の量は倍近くになるが、待たされている感じは相当減る。
+nil にするとブロックが確定してから一度に出る (段階 3 までの挙動)。"
+  :type 'boolean)
+
+(defcustom my:claude-show-thinking nil
+  "非 nil なら thinking ブロックの中身も薄く表示する。
+
+モデルによっては `thinking_delta' の本文が空で届く (haiku で実測)。
+その場合は非 nil にしても何も出ない。"
+  :type 'boolean)
+
 (defcustom my:claude-tool-result-max-lines 12
   "ツールの実行結果を畳まずに見せる行数。これを超えると折りたたむ。"
   :type 'integer)
@@ -136,6 +151,7 @@ nil なら毎回聞く。"
   config-dir     ; CLAUDE_CONFIG_DIR (nil なら既定)
   rate-limit     ; 直近の rate_limit_event の中身
   untrusted-key  ; claude が「信頼されていない」と言ってきた projects のキー
+  stream-block   ; 逐次表示中のブロックの種別 (text / thinking / tool_use)
   (pending "")   ; フィルタの未処理バイト
   session-id
   model
@@ -179,6 +195,10 @@ nil なら毎回聞く。"
 
 (defvar my:claude--auth-cache (make-hash-table :test 'equal)
   "CONFIG-DIR -> `claude auth status --json' の結果。")
+
+(defvar my:claude--commands nil
+  "claude が持っているスラッシュコマンド。((名前 説明 引数ヒント) …)。
+`initialize' の control_response に入っている。")
 
 (defvar my:claude--last-environment nil
   "前回選んだ環境のラベル。次回の既定にする。")
@@ -253,23 +273,31 @@ Emacs 自体が CLAUDE_CONFIG_DIR の設定された環境から起動されて�
 ;;; プロセスの起動
 ;;; --------------------------------------------------
 
-(defun my:claude--command ()
+(defun my:claude--command (&optional resume)
   "claude に渡す引数リスト。
 `--verbose' と `--permission-prompt-tool stdio' は省略できない。
-前者は無いと即エラー終了し、後者は無いと許可要求が黙って自動拒否される。"
+前者は無いと即エラー終了し、後者は無いと許可要求が黙って自動拒否される。
+
+RESUME が t なら `--continue' (そのディレクトリの直近の会話を継ぐ)、
+文字列ならその ID で `--resume' する。実測ではどちらも stream-json と
+併用でき、`--continue' では前のターンの内容を憶えていた。"
   (append
    (list my:claude-executable
          "-p" "--verbose"
          "--input-format" "stream-json"
          "--output-format" "stream-json"
          "--permission-prompt-tool" "stdio")
+   (cond ((stringp resume) (list "--resume" resume))
+         (resume            (list "--continue")))
+   (when my:claude-stream (list "--include-partial-messages"))
    (when my:claude-model (list "--model" my:claude-model))
    (when my:claude-permission-mode
      (list "--permission-mode" my:claude-permission-mode))
    my:claude-extra-args))
 
-(defun my:claude--start (dir env)
-  "環境 ENV で DIR に claude を起動して session 構造体を返す。"
+(defun my:claude--start (dir env &optional resume)
+  "環境 ENV で DIR に claude を起動して session 構造体を返す。
+RESUME は `my:claude--command' に渡す (t で --continue、文字列で --resume)。"
   (unless (file-executable-p my:claude-executable)
     (user-error "claude が見つからない: %s" my:claude-executable))
   (let* ((config-dir (my:claude--config-dir env))
@@ -299,7 +327,7 @@ Emacs 自体が CLAUDE_CONFIG_DIR の設定された環境から起動されて�
              :buffer nil                ; 出力は自前のフィルタで捌く
              :connection-type 'pipe
              :noquery t
-             :command (my:claude--command)
+             :command (my:claude--command resume)
              :filter (lambda (_p str) (my:claude--filter session str))
              :sentinel (lambda (_p e) (my:claude--sentinel session e)))))
     (setf (my:claude-session-process session) proc)
@@ -465,9 +493,8 @@ Emacs 自体が CLAUDE_CONFIG_DIR の設定された環境から起動されて�
     ("result"          (my:claude--handle-result obj session))
     ("control_request" (my:claude--handle-control-request obj session))
     ;; control_response は initialize の応答。今のところ使い道が無い。
-    ("control_response" nil)
-    ;; 段階 4 で使う。今は捨てる。
-    ("stream_event" nil)
+    ("control_response" (my:claude--handle-control-response obj))
+    ("stream_event"    (my:claude--handle-stream obj session))
     ;; 残量はアカウントを切り替える判断材料そのものなので拾う。
     ("rate_limit_event"
      (setf (my:claude-session-rate-limit session)
@@ -523,14 +550,75 @@ Emacs 自体が CLAUDE_CONFIG_DIR の設定された環境から起動されて�
       'my:claude-error-face))
     (_ nil)))
 
+(defun my:claude--handle-stream (obj session)
+  "`stream_event' を処理して、書かれる端から表示する。
+
+イベントの並びは実測で次のとおり。**`assistant' は
+`content_block_stop' より先に、ブロック 1 つぶんずつ届く。**
+
+  content_block_start (thinking/text/tool_use)
+  content_block_delta … (thinking_delta / signature_delta /
+                         text_delta / input_json_delta)
+  assistant                ← そのブロックの確定版
+  content_block_stop
+
+そのため text は delta で出しておき、`assistant' 側では出さない
+(`my:claude--handle-assistant' が `my:claude-stream' を見て飛ばす)。
+tool_use は逆に delta を捨てて `assistant' の確定版だけを使う。
+`input_json_delta' は JSON の断片なので、揃うまで意味を持たない。"
+  (let* ((ev (alist-get 'event obj))
+         (delta (alist-get 'delta ev)))
+    (pcase (alist-get 'type ev)
+      ("content_block_start"
+       (setf (my:claude-session-stream-block session)
+             (alist-get 'type (alist-get 'content_block ev))))
+      ("content_block_delta"
+       (pcase (alist-get 'type delta)
+         ("text_delta"
+          (my:claude--insert session (alist-get 'text delta)
+                             'my:claude-assistant-face))
+         ("thinking_delta"
+          (when my:claude-show-thinking
+            (let ((th (alist-get 'thinking delta)))
+              (unless (or (null th) (string-empty-p th))
+                (my:claude--insert session th 'my:claude-meta-face)))))
+         ;; signature_delta は署名、input_json_delta は JSON の断片。
+         (_ nil)))
+      ("content_block_stop"
+       (when (equal (my:claude-session-stream-block session) "text")
+         (my:claude--end-paragraph session))
+       (setf (my:claude-session-stream-block session) nil))
+      (_ nil))))
+
+(defun my:claude--end-paragraph (session)
+  "会話バッファの末尾を「空行 1 つ」に整える。
+delta で流し込んだ本文は末尾の改行がまちまちなので、ここで揃える。"
+  (let ((buf (my:claude-session-buffer session)))
+    (when (buffer-live-p buf)
+      (with-current-buffer buf
+        (let ((inhibit-read-only t))
+          (save-excursion
+            (goto-char (point-max))
+            (skip-chars-backward " \t\n")
+            (delete-region (point) (point-max))
+            (insert "\n\n")))))))
+
+(defun my:claude--close-stream-block (session)
+  "開いたままのブロックがあれば行を閉じる。中断されたときに使う。"
+  (when (my:claude-session-stream-block session)
+    (my:claude--insert session "\n")
+    (setf (my:claude-session-stream-block session) nil)))
+
 (defun my:claude--handle-assistant (obj session)
   (let ((content (alist-get 'content (alist-get 'message obj))))
     (seq-doseq (block content)
       (pcase (alist-get 'type block)
         ("text"
-         (my:claude--insert session
-                            (concat (string-trim-right (alist-get 'text block)) "\n\n")
-                            'my:claude-assistant-face))
+         ;; 逐次表示しているなら delta で出し終えている。
+         (unless my:claude-stream
+           (my:claude--insert session
+                              (concat (string-trim-right (alist-get 'text block)) "\n\n")
+                              'my:claude-assistant-face)))
         ("tool_use"
          (let ((name (alist-get 'name block))
                (id (alist-get 'id block)))
@@ -568,6 +656,8 @@ Emacs 自体が CLAUDE_CONFIG_DIR の設定された環境から起動されて�
                              'my:claude-tool-result-face)))))))
 
 (defun my:claude--handle-result (obj session)
+  ;; 中断されると content_block_stop が来ないことがある。
+  (my:claude--close-stream-block session)
   (setf (my:claude-session-last-result session) obj
         (my:claude-session-busy session) nil)
   (let* ((usage (alist-get 'usage obj))
@@ -698,6 +788,42 @@ ARG (`C-u') を付けると、生きているセッションがあっても畳�
     (pop-to-buffer (my:claude-session-buffer session))
     session))
 
+;;; スラッシュコマンド
+
+(defun my:claude--handle-control-response (obj)
+  "`initialize' の応答からスラッシュコマンドの一覧を覚える。"
+  (when-let* ((resp (alist-get 'response obj))
+              (inner (alist-get 'response resp))
+              (cmds (alist-get 'commands inner)))
+    (setq my:claude--commands
+          (mapcar (lambda (c)
+                    (list (alist-get 'name c)
+                          (or (alist-get 'description c) "")
+                          (or (alist-get 'argumentHint c) "")))
+                  (append cmds nil)))))
+
+(defun my:claude--capf ()
+  "入力バッファで `/コマンド' を補完する。
+
+**行頭の `/' だけを対象にする。** 文中のスラッシュまで拾うと
+`src/foo' のようなパスを書くたびに候補が出て邪魔になる。"
+  (let ((bol (line-beginning-position)))
+    (when (and my:claude--commands
+               (eq (char-after bol) ?/)
+               (>= (point) (1+ bol))
+               ;; 行頭からここまでに空白が無い = まだコマンド名の途中
+               (not (string-match-p "[ \t]" (buffer-substring bol (point)))))
+      (list (1+ bol) (point)
+            (mapcar #'car my:claude--commands)
+            :exclusive 'no
+            :annotation-function
+            (lambda (name)
+              (let ((e (assoc name my:claude--commands)))
+                (when e
+                  (concat " " (truncate-string-to-width
+                               (replace-regexp-in-string "\n" " " (nth 1 e))
+                               70 nil nil "…")))))))))
+
 ;;; ワークスペースの信頼
 
 (defun my:claude--workspace-key (dir)
@@ -781,6 +907,58 @@ KEY は claude が警告で言ってきたものを優先し、無ければ
             (write-region (point-min) (point-max) file nil 'quiet))))
       (message "信頼済みにしました: %s (バックアップ: %s)"
                key (file-name-nondirectory backup)))))
+
+;;; セッションの再開とモデルの変更
+
+(defun my:claude--restart (resume &optional env)
+  "いまと同じディレクトリでセッションを立て直す。
+RESUME は `my:claude--command' に渡す。ENV を省くと今の環境のまま。"
+  (let* ((old (my:claude--session-for-buffer))
+         (dir (if old (my:claude-session-directory old)
+                (my:claude--project-directory)))
+         (env (or env (and old (my:claude-session-name old))
+                  (my:claude--read-environment))))
+    (when (and old (process-live-p (my:claude-session-process old)))
+      (my:claude-quit-session old)
+      (let ((d (+ (float-time) 10)))
+        (while (and (process-live-p (my:claude-session-process old))
+                    (< (float-time) d))
+          (accept-process-output (my:claude-session-process old) 0.2))))
+    (let ((session (my:claude--start dir env resume)))
+      (pop-to-buffer (my:claude-session-buffer session))
+      session)))
+
+;;;###autoload
+(defun my:claude-continue ()
+  "このディレクトリの直近の会話を継いでセッションを開く。
+
+`--continue' を渡す。Emacs を再起動したあとでも、端末で続けていた会話でも、
+そのディレクトリで最後に話していたものに繋がる (実測)。"
+  (interactive)
+  (let ((session (my:claude--live-session)))
+    (if session
+        (my:claude--restart t)
+      (let ((dir (my:claude--project-directory))
+            (env (my:claude--read-environment)))
+        (pop-to-buffer
+         (my:claude-session-buffer (my:claude--start dir env t)))))))
+
+;;;###autoload
+(defun my:claude-set-model (model)
+  "モデルを変えてセッションを立て直す。会話は `--resume' で引き継ぐ。
+
+claude はモデルを起動時にしか受け取らないので立て直すしかないが、
+同じアカウントなら session-id で会話を継げる。
+Opus と Haiku を行き来してもそれまでの話は消えない。"
+  (interactive
+   (list (completing-read "モデル: " '("opus" "sonnet" "haiku" "fable") nil nil
+                          (or my:claude-model ""))))
+  (let* ((old (my:claude--session-for-buffer))
+         (id (and old (my:claude-session-session-id old))))
+    (setq my:claude-model (if (string-empty-p model) nil model))
+    (my:claude--restart (or id t))
+    (message "モデルを %s にしました%s" model
+             (if id " (会話は継続)" " (--continue で再開)"))))
 
 ;;;###autoload
 (defun my:claude-switch-environment ()
@@ -922,7 +1100,9 @@ KEY は claude が警告で言ってきたものを優先し、無ければ
 
 (define-derived-mode my:claude-input-mode text-mode "Claude-Input"
   "claude に送るテキストを書くモード。"
-  (setq-local header-line-format "C-c C-c で送信 / C-c C-k で閉じる"))
+  (setq-local header-line-format
+              "C-c C-c で送信 / C-c C-k で閉じる / 行頭の / は TAB で補完")
+  (add-hook 'completion-at-point-functions #'my:claude--capf nil t))
 
 ;;; --------------------------------------------------
 ;;; グローバルキーバインド
@@ -934,6 +1114,8 @@ KEY は claude が警告で言ってきたものを優先し、無ければ
   :bind (("C-c a a" . my:claude)
          ("C-c a e" . my:claude-switch-environment)
          ("C-c a t" . my:claude-trust-workspace)
+         ("C-c a c" . my:claude-continue)
+         ("C-c a m" . my:claude-set-model)
          ("C-c a i" . my:claude-input)
          ("C-c a s" . my:claude-send-region)
          ("C-c a k" . my:claude-interrupt)

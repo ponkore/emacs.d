@@ -663,6 +663,8 @@ Windows の Emacs には PTY が無いので claude の対話 TUI は動かな�
 | `C-c a a` | セッションを開く。無ければ環境を選んで起動（`C-u` で立て直す） |
 | `C-c a e` | 環境（アカウント）を切り替える |
 | `C-c a t` | ワークスペースを信頼済みにする（下記） |
+| `C-c a c` | 直近の会話を継いで開く（`--continue`） |
+| `C-c a m` | モデルを変える（会話は `--resume` で継続） |
 | `C-c a i` | 入力バッファを開く（`C-c C-c` で送信） |
 | `C-c a s` | リージョンを送る |
 | `C-c a k` | 中断 |
@@ -688,6 +690,56 @@ ESC-Web    enterprise  株式会社　熾火
 ヘッダ行に `jighead(max) | claude-opus-5 | 5h 0% 7d 6% | ~/.emacs.d` を出す。
 残量は `rate_limit_event` から取っている。**アカウントを切り替える判断は
 この数字で行う**ので、常に見えるようにしてある。
+
+### 逐次表示（`my:claude-stream`、既定 t）
+
+`--include-partial-messages` を付けて `stream_event` を拾い、書かれる端から
+バッファに流す。イベントの並びは実測でこうなっている。
+
+```
+content_block_start (thinking / text / tool_use)
+content_block_delta … (thinking_delta / signature_delta /
+                       text_delta / input_json_delta)
+assistant                  ← そのブロックの確定版
+content_block_stop
+```
+
+**`assistant` は `content_block_stop` より先に、ブロック 1 つぶんずつ届く。**
+そのため text は delta で出し、`assistant` 側では出さない（出すと二重になる）。
+tool_use は逆に delta（`input_json_delta`）を捨てて `assistant` の確定版だけ使う。
+JSON の断片は揃うまで意味を持たないため。
+
+中断すると `content_block_stop` が来ないことがあるので、`result` を受けた
+ところでブロックを閉じる。
+
+`thinking_delta` の本文は **haiku では空文字列で届く**。`my:claude-show-thinking`
+を t にしても何も出ないことがある。
+
+### セッションの再開とモデルの変更
+
+| | |
+|---|---|
+| `--continue` | そのディレクトリの直近の会話を継ぐ。Emacs を再起動しても、端末で続けていた会話でも繋がる |
+| `--resume <id>` | `session_id` を指定して継ぐ |
+
+どちらも stream-json と併用できる（実測）。`init` イベントの `session_id` を
+覚えているので、`C-c a m` は **`--resume` でモデルだけ差し替える**。
+Opus と Haiku を行き来しても、それまでの話は消えない（実測で確認）。
+
+**アカウントをまたぐ再開はできない。** セッションの保存先が
+`CLAUDE_CONFIG_DIR` の下なので、`C-c a e` で環境を変えると会話は切れる。
+
+### スラッシュコマンドの補完
+
+`initialize` の control_response に `commands`（名前・説明・引数ヒント）が
+入っている。実測で 52 個。これを覚えて入力バッファの `completion-at-point`
+に流す。
+
+**行頭の `/` だけを対象にすること。** 文中のスラッシュまで拾うと
+`src/foo` のようなパスを書くたびに候補が出て邪魔になる。
+
+スラッシュコマンドは stream-json でもそのまま通る。`/context` は
+`num_turns=0` でコンテキスト使用量の表を返した（API を消費しない）。
 
 ### 【重要】Emacs から起動すると必ず「信頼されていないワークスペース」になる
 
