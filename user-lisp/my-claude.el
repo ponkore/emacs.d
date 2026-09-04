@@ -262,6 +262,28 @@ nil にするとブロックが確定してから一度に出る (段階 3 ま�
     (((background light)) :foreground "dark cyan"))
   "ヘッダ行 5 列目 (レート上限とリセット時刻)。")
 
+(defface my:claude-input-header-face
+  '((((background dark))  :foreground "cyan")
+    (((background light)) :foreground "dark cyan"))
+  "入力バッファ (`my:claude-input-mode') のヘッダ行 (キーの案内)。
+
+色は会話バッファのヘッダ行と揃えてシアン。大きさは
+`my:claude-header-size-face' が持つので、ここでは指定しない。")
+
+(defface my:claude-header-size-face
+  '((t :height 0.9))
+  "ヘッダ行の大きさ。会話バッファと入力バッファで共通。
+
+`my:claude--header-segment' が色の face と**並べて**載せる。
+face をリストにすると先に書いたものが勝つので、色は列ごとの face から、
+大きさはこちらから来る。
+
+【重要】`:height' は相対値 (浮動小数) にすること。整数は絶対値なので、
+フォントサイズを変えたときにヘッダ行だけ取り残される。
+
+【重要】**区切りの \" | \" にも載せること。** 行の高さは行内でいちばん
+高いグリフで決まるので、1 か所でも素のままだと行は縮まない。")
+
 ;;; --------------------------------------------------
 ;;; セッション
 ;;; --------------------------------------------------
@@ -772,9 +794,13 @@ effort を返さない**ので、ここでしか分からない。"
 組み立てた全体に `replace-regexp-in-string\' を掛けると、**差し込まれる
 `%%\' だけが face を持たない**素の文字列になり、その桁で色が切れる。
 ディレクトリ名やモデル名に `%\' が入る場合もあるので、escape 自体は
-やめられない。"
+やめられない。
+
+face は `my:claude-header-size-face\' と**並べたリスト**にする。
+リストは先に書いたものが勝つので、色は FACE から、大きさは
+size face から来る。大きさを 1 か所で決めるためにこうしてある。"
   (apply #'propertize (replace-regexp-in-string "%" "%%" text)
-         'face face props))
+         'face (list face 'my:claude-header-size-face) props))
 
 (defun my:claude--header (session)
   "会話バッファのヘッダ行。
@@ -852,7 +878,10 @@ settings.json から求める (`my:claude--effort')。"
                        (if (numberp r) (format-time-string "(reset %m/%d %H:%M)" r) ""))
                'my:claude-header-limit-face)
               segs)))
-    (mapconcat #'identity (nreverse segs) " | ")))
+    ;; 区切りにも大きさの face を載せる。ここだけ素のままだと、行の高さは
+    ;; 行内でいちばん高いグリフで決まるためヘッダ行が縮まない。
+    (mapconcat #'identity (nreverse segs)
+               (propertize " | " 'face 'my:claude-header-size-face))))
 
 (defun my:claude--update-header (session)
   (when (buffer-live-p (my:claude-session-buffer session))
@@ -2108,6 +2137,30 @@ Opus と Haiku を行き来してもそれまでの話は消えない。"
   (my:claude--ensure-session)
   (my:claude-layout))
 
+(defun my:claude--conversation-buffer ()
+  "いま使う会話バッファ。無ければ nil。"
+  (let ((session (my:claude--session-for-buffer)))
+    (if session (my:claude-session-buffer session) (get-buffer "*claude*"))))
+
+(defun my:claude-input-quit ()
+  "入力バッファを閉じ、空いた領域を会話バッファに渡す。
+
+`quit-window\' だと**ウィンドウはそのまま残り**、下半分が別のバッファで
+埋まるだけになる。ここではウィンドウごと畳むので、下半分は *claude* だけに
+なる。`C-c C-i\' (`my:claude-input\') を押せば `my:claude-layout\' が
+元の 3 分割に組み直す。"
+  (interactive)
+  (let ((buf (current-buffer))
+        (conv (my:claude--conversation-buffer)))
+    (if (one-window-p 'no-mini)
+        ;; 畳む先が無い。ウィンドウを消すと何も残らないので中身を差し替える。
+        (if conv (switch-to-buffer conv) (bury-buffer))
+      (delete-window)
+      (bury-buffer buf)
+      ;; 空いた領域を受け取ったのは会話バッファのはず。そこへ移る。
+      (when-let* ((cw (and conv (get-buffer-window conv))))
+        (select-window cw)))))
+
 (defun my:claude-input-send ()
   "入力バッファの内容を送って空にする。"
   (interactive)
@@ -2121,7 +2174,18 @@ Opus と Haiku を行き来してもそれまでの話は消えない。"
     (setq my:claude--input-index -1
           my:claude--input-draft nil)
     (when-let* ((buf (and session (my:claude-session-buffer session))))
-      (display-buffer buf))))
+      (display-buffer buf)
+      ;; 送信のたびに会話バッファを末尾へ戻し、**追従を張り直す**。
+      ;; 読み返している間に届いたぶんで point が末尾から外れていると、
+      ;; `my:claude--at-end\' の判定が偽になって以後の応答が流れても
+      ;; 追いかけない。自分で送った直後だけは必ず末尾に付ける。
+      ;; ウィンドウごとに `window-point\' を持つので両方動かすこと。
+      ;; 【重要】`point-max\' は会話バッファの中で評価する。外に出すと
+      ;; 直前に `erase-buffer\' した入力バッファの 1 を渡すことになる。
+      (with-current-buffer buf
+        (goto-char (point-max))
+        (dolist (w (get-buffer-window-list buf nil t))
+          (set-window-point w (point-max)))))))
 
 (defun my:claude-toggle-fold ()
   "折りたたんだツール出力の全体を別バッファで見る。"
@@ -2182,7 +2246,7 @@ z / C-c C-z でこのウィンドウを最大化 (もう一度で元のレイア
 (defvar my:claude-input-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "C-c C-c") #'my:claude-input-send)
-    (define-key map (kbd "C-c C-k") #'quit-window)
+    (define-key map (kbd "C-c C-k") #'my:claude-input-quit)
     (define-key map (kbd "C-c C-z") #'my:claude-toggle-maximize)
     (define-key map (kbd "M-p") #'my:claude-input-previous)
     (define-key map (kbd "M-n") #'my:claude-input-next)
@@ -2214,8 +2278,13 @@ C-1 のようにテキストプロパティを貼る仕掛けは要らない。�
 ディレクトリ一覧が出る。"
   (setq-local markdown-mode-hook nil)
   (setq-local markdown-fontify-code-blocks-natively t)
+  ;; 案内は `my:claude--header-segment' を通す。いまの文言に `%' は無いが、
+  ;; 素の文字列を `header-line-format' に渡すと `%' と直後の 1 文字が
+  ;; まとめて消えるので、文言を書き換えたときに黙って壊れないようにしておく。
   (setq-local header-line-format
-              "C-c C-c 送信 / C-c C-k 閉じる / C-c C-z 最大化 / 行頭 / は TAB 補完 / M-p 履歴")
+              (my:claude--header-segment
+               "C-c C-c 送信 / C-c C-k 閉じる / C-c C-z 最大化 / 行頭 / は TAB 補完 / M-p 履歴"
+               'my:claude-input-header-face))
   (setq-local mode-line-process '(:eval (my:claude--mode-line)))
   ;; cape-file が深さ 90 にいる。念のため明示的に先頭へ置く。
   (add-hook 'completion-at-point-functions #'my:claude--capf -100 t))
