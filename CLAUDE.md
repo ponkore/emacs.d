@@ -662,6 +662,7 @@ Windows の Emacs には PTY が無いので claude の対話 TUI は動かな�
 |---|---|
 | `C-c a a` | セッションを開く。無ければ環境を選んで起動（`C-u` で立て直す） |
 | `C-c a e` | 環境（アカウント）を切り替える |
+| `C-c a t` | ワークスペースを信頼済みにする（下記） |
 | `C-c a i` | 入力バッファを開く（`C-c C-c` で送信） |
 | `C-c a s` | リージョンを送る |
 | `C-c a k` | 中断 |
@@ -687,6 +688,59 @@ ESC-Web    enterprise  株式会社　熾火
 ヘッダ行に `jighead(max) | claude-opus-5 | 5h 0% 7d 6% | ~/.emacs.d` を出す。
 残量は `rate_limit_event` から取っている。**アカウントを切り替える判断は
 この数字で行う**ので、常に見えるようにしてある。
+
+### 【重要】Emacs から起動すると必ず「信頼されていないワークスペース」になる
+
+`.claude/settings.json` を置いてあるプロジェクトで `C-c a a` すると、
+会話バッファにこれが出る。
+
+```
+Ignoring 17 permissions.allow entries from .claude/settings.json:
+this workspace has not been trusted. ...
+set projects["c:/Projects/ESC-Web/WebCoreSystem_v1"].hasTrustDialogAccepted: true
+```
+
+原因は **Emacs が子プロセスの作業ディレクトリのドライブレターを小文字にする**こと。
+実測（Emacs 31.1 / Windows 11）:
+
+| | |
+|---|---|
+| `default-directory` | `C:/Projects/Foo/` |
+| `expand-file-name` | `C:/Projects/Foo/`（大文字のまま） |
+| **子プロセスが見る cwd** | **`c:\Projects\Foo`** |
+
+`default-directory` を大文字にしても変わらない。`make-process` が
+作業ディレクトリを設定する経路で小文字になる。
+
+一方、端末で対話的に起動した claude は大文字のまま記録するので、
+`.claude.json` の `projects` に**大小 2 つのエントリができる**。
+
+```
+C:/Projects/ESC-Web/WebCoreSystem_v1   trusted=True    ← 端末の TUI が書いた
+c:/Projects/ESC-Web/WebCoreSystem_v1   trusted=False   ← Emacs 経由で作られた
+```
+
+Emacs 側は必ず信頼されていない方を引くため、プロジェクトの
+`permissions.allow` がまるごと無視される。**壊れはしないが許可の確認が
+増えるだけになる。** gopls が大文字のドライブレターを返して診断が出なかった
+のとまったく同じ罠。
+
+`--settings` でファイルや JSON 文字列を明示しても回避できない（実測）。
+`-p` は仕様として信頼ダイアログを出さない。
+
+`C-c a t`（`my:claude-trust-workspace`）が
+`projects[KEY].hasTrustDialogAccepted` を `t` にする。KEY は claude が
+警告で言ってきたものをそのまま使う。**セッションを先に終了させてから
+書く**（claude 自身がこのファイルを書き戻すため）。書き換え前に
+`.claude.json.bak-my-claude-<時刻>` を作る。
+
+書き戻しは `json-parse-buffer` → `json-serialize` の往復で行う。
+69 KB の設定で検証したところ、差分は追加した 1 エントリのみで
+`oauthAccount` を含め無傷だった。
+
+> 検証で `equal` を使ってハッシュテーブルを比べてはいけない。
+> **Emacs の `equal` はハッシュテーブルの中身を見ない**ので、
+> 同一でも nil になる。中身を比べるなら serialize してから。
 
 #### 【重要】既定の環境には `CLAUDE_CONFIG_DIR` を「設定しない」
 

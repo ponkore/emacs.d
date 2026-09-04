@@ -114,6 +114,10 @@ nil なら毎回聞く。"
   '((t :inherit error))
   "エラーと拒否。")
 
+(defface my:claude-notice-face
+  '((t :inherit warning))
+  "claude が標準出力に吐いた平文の警告。")
+
 (defface my:claude-meta-face
   '((t :inherit shadow :height 0.9))
   "コスト・所要時間などの補足。")
@@ -131,6 +135,7 @@ nil なら毎回聞く。"
   name           ; 環境のラベル
   config-dir     ; CLAUDE_CONFIG_DIR (nil なら既定)
   rate-limit     ; 直近の rate_limit_event の中身
+  untrusted-key  ; claude が「信頼されていない」と言ってきた projects のキー
   (pending "")   ; フィルタの未処理バイト
   session-id
   model
@@ -354,17 +359,35 @@ Emacs 自体が CLAUDE_CONFIG_DIR の設定された環境から起動されて�
           (with-current-buffer log
             (goto-char (point-max))
             (insert line "\n")))
-        (condition-case err
-            (my:claude--handle (json-parse-string line :object-type 'alist)
-                               session)
-          (error
-           ;; パースにも処理にも失敗した行は捨てずに見せる。
-           ;; 上流のフォーマット変更に気づける唯一の手掛かり。
-           (my:claude--insert
-            session
-            (format "[解釈できない行: %S]\n%s\n"
-                    err (truncate-string-to-width line 200))
-            'my:claude-error-face)))))))
+        (if (not (string-prefix-p "{" (string-trim-left line)))
+            ;; claude は警告を stderr ではなく標準出力に吐くことがある。
+            ;; 異常ではないので JSON の解釈失敗とは分けて見せる。
+            (my:claude--handle-notice line session)
+          (condition-case err
+              (my:claude--handle (json-parse-string line :object-type 'alist)
+                                 session)
+            (error
+             ;; JSON のはずなのに読めなかった行は捨てずに見せる。
+             ;; 上流のフォーマット変更に気づける唯一の手掛かり。
+             (my:claude--insert
+              session
+              (format "[解釈できない行: %S]\n%s\n"
+                      err (truncate-string-to-width line 200))
+              'my:claude-error-face))))))))
+
+(defun my:claude--handle-notice (line session)
+  "claude が標準出力に吐いた平文 LINE を見せる。"
+  (my:claude--insert session (concat (string-trim line) "\n")
+                     'my:claude-notice-face)
+  ;; ワークスペースが信頼されていないという警告なら直し方まで出す。
+  ;; Emacs から起動すると必ずこうなる (下の my:claude-trust-workspace 参照)。
+  ;; 放っておくとプロジェクト側の permissions.allow がまるごと無視される。
+  (when (string-match "projects\\[\"\\([^\"]+\\)\"\\]" line)
+    (setf (my:claude-session-untrusted-key session) (match-string 1 line))
+    (my:claude--insert
+     session
+     "  → M-x my:claude-trust-workspace で信頼済みにできます\n"
+     'my:claude-meta-face)))
 
 ;;; --------------------------------------------------
 ;;; 描画
@@ -675,6 +698,90 @@ ARG (`C-u') を付けると、生きているセッションがあっても畳�
     (pop-to-buffer (my:claude-session-buffer session))
     session))
 
+;;; ワークスペースの信頼
+
+(defun my:claude--workspace-key (dir)
+  "claude が `.claude.json' の projects に使うキーを DIR から作る。
+
+Emacs から起動した claude は **必ずドライブレターが小文字**の
+ワークスペースを見る。`expand-file-name' は大文字を保つのに、
+`make-process' が子プロセスの作業ディレクトリを設定する経路で
+小文字になる。実測 (Emacs 31.1 / Windows 11):
+
+  default-directory      = C:/Projects/Foo/
+  expand-file-name       = C:/Projects/Foo/
+  子が見る cwd           = c:\\Projects\\Foo     ← 小文字
+
+一方、端末で対話的に起動した claude は大文字のまま記録するので、
+同じディレクトリに対して大小 2 つのエントリができる。Emacs 側は
+必ず信頼されていない方を引くため、プロジェクトの
+`.claude/settings.json' の permissions.allow が毎回まるごと無視される。
+gopls が大文字のドライブレターを返して診断が出なかったのと同じ罠。"
+  (let ((path (directory-file-name (expand-file-name dir))))
+    (if (string-match "\\`\\([A-Za-z]\\):" path)
+        (concat (downcase (match-string 1 path)) (substring path 1))
+      path)))
+
+(defun my:claude--config-json (session)
+  "SESSION の設定ディレクトリにある `.claude.json' のパス。"
+  (expand-file-name ".claude.json"
+                    (or (my:claude-session-config-dir session)
+                        (expand-file-name "~"))))
+
+;;;###autoload
+(defun my:claude-trust-workspace ()
+  "いまのワークスペースを claude の設定で信頼済みにする。
+
+`.claude.json' の projects[KEY].hasTrustDialogAccepted を t にする。
+KEY は claude が警告で言ってきたものを優先し、無ければ
+`my:claude--workspace-key' で組み立てる。
+
+**claude が動いている間に実行しない。** claude はこのファイルを
+自分でも書き戻すので、走っている最中に触ると上書きされる。
+このコマンドはセッションを先に終了させ、書き換える前に
+バックアップを取る。"
+  (interactive)
+  (let* ((session (or (my:claude--session-for-buffer)
+                      (user-error "セッションが無い")))
+         (key (or (my:claude-session-untrusted-key session)
+                  (my:claude--workspace-key (my:claude-session-directory session))))
+         (file (my:claude--config-json session)))
+    (unless (file-exists-p file)
+      (user-error "設定ファイルが無い: %s" file))
+    (unless (yes-or-no-p
+             (format "%s の projects[\"%s\"] を信頼済みにする (セッションは終了します)? "
+                     (abbreviate-file-name file) key))
+      (user-error "やめました"))
+    (when (my:claude--live-session)
+      (my:claude-quit-session session)
+      ;; プロセスが落ちて設定を書き終えるのを待つ。
+      (let ((d (+ (float-time) 10)))
+        (while (and (process-live-p (my:claude-session-process session))
+                    (< (float-time) d))
+          (accept-process-output (my:claude-session-process session) 0.2)))
+      (sleep-for 0.5))
+    (let ((backup (concat file ".bak-my-claude-"
+                          (format-time-string "%Y%m%d%H%M%S"))))
+      (copy-file file backup)
+      (with-temp-buffer
+        (let ((coding-system-for-read 'utf-8-unix))
+          (insert-file-contents file))
+        (goto-char (point-min))
+        (let* ((root (json-parse-buffer :object-type 'hash-table
+                                        :array-type 'array))
+               (projects (or (gethash "projects" root)
+                             (puthash "projects" (make-hash-table :test 'equal)
+                                      root)))
+               (entry (or (gethash key projects)
+                          (puthash key (make-hash-table :test 'equal) projects))))
+          (puthash "hasTrustDialogAccepted" t entry)
+          (erase-buffer)
+          (insert (json-serialize root))
+          (let ((coding-system-for-write 'utf-8-unix))
+            (write-region (point-min) (point-max) file nil 'quiet))))
+      (message "信頼済みにしました: %s (バックアップ: %s)"
+               key (file-name-nondirectory backup)))))
+
 ;;;###autoload
 (defun my:claude-switch-environment ()
   "環境 (アカウント) を選び直してセッションを立て直す。
@@ -826,6 +933,7 @@ ARG (`C-u') を付けると、生きているセッションがあっても畳�
 (use-package emacs
   :bind (("C-c a a" . my:claude)
          ("C-c a e" . my:claude-switch-environment)
+         ("C-c a t" . my:claude-trust-workspace)
          ("C-c a i" . my:claude-input)
          ("C-c a s" . my:claude-send-region)
          ("C-c a k" . my:claude-interrupt)
