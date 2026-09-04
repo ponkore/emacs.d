@@ -664,6 +664,7 @@ Windows の Emacs には PTY が無いので claude の対話 TUI は動かな�
 | `C-c a e` | 環境（アカウント）を切り替える |
 | `C-c a t` | ワークスペースを信頼済みにする（下記） |
 | `C-c a c` | 直近の会話を継いで開く（`--continue`） |
+| `C-c a r` | 過去のセッションを一覧から選んで再開（`--resume`） |
 | `C-c a m` | モデルを変える（会話は `--resume` で継続） |
 | `C-c a i` | 入力バッファを開く（`C-c C-c` で送信、`M-p` / `M-n` で履歴） |
 | `C-c a s` | リージョンを送る |
@@ -714,6 +715,60 @@ JSON の断片は揃うまで意味を持たないため。
 
 `thinking_delta` の本文は **haiku では空文字列で届く**。`my:claude-show-thinking`
 を t にしても何も出ないことがある。
+
+### 過去セッションの一覧（`C-c a r`）
+
+`--continue` は「そのディレクトリの直近の 1 つ」しか選べない。
+記録ファイルを直接読んで一覧にする。
+
+セッションは
+`<CLAUDE_CONFIG_DIR>/projects/<エンコードしたパス>/<session-id>.jsonl`
+に貯まる。ディレクトリ名は **ワークスペースのパスの英数字以外をすべて
+`-` に置き換えたもの**。`C:/Users/masao/.emacs.d` なら
+`C--Users-masao--emacs-d`。手元の 10 個で突き合わせて確かめた
+（合わなかった 1 つはドライブレターの大小違いだけで、Windows の
+ファイルシステムでは同じ場所を指す）。
+
+#### 【重要】`message.content` は文字列とは限らない
+
+一覧に出すプロンプトを取り出すとき、**文字列だけを見てはいけない。**
+ブロックの配列で入っていることがあり、**Emacs から送ったものは必ず配列**。
+文字列しか見ないと、自分で作ったセッションが全部「(プロンプトなし)」に
+なる。実際にそうなっていた。`my:claude--content-string` が両方を扱う。
+
+1 MB を超えるファイルもあるので、先頭 200 KB / 400 行で打ち切る。
+
+### サブエージェントの表示
+
+サブエージェントの発言は **`parent_tool_use_id` 付きの assistant / user
+イベント**として届く。`--forward-subagent-text`（`my:claude-forward-subagent-text`、
+既定 t）を付けると増えるが、**付けなくても一部は届く**（実測）。
+
+**`stream_event` に `parent_tool_use_id` が付くことは無い。**
+つまりサブエージェントの本文は delta では来ないので、
+`streamed-text` を見ずに必ず出す。見てしまうと、本体のブロックが
+開いている間はサブエージェントの発言が捨てられる。
+
+表示は字下げ + `my:claude-subagent-face` で本体と区別する。
+
+### Edit / Write の差分表示
+
+`tool_use` の入力に `old_string` と `new_string`（Write は `content`）が
+そのまま入っているので、行頭に `-` / `+` を付けて色分けする。
+`my:claude-diff-max-lines`（既定 30）を超えたら行数だけ知らせる。
+
+**外部の diff は呼ばない。** Windows に入っている保証が無いうえ、
+Edit の入力は置換前と置換後がそのまま来るので、行単位で並べれば足りる。
+
+### 許可の `permission_suggestions`
+
+要求には `permission_suggestions`（例: `acceptEdits` に切り替える）が
+付いてくる。これを `updatedPermissions` に載せて allow を返すと
+**claude 側が以後聞いてこなくなる**。実測で 2 回目の `Write` が
+聞かれなくなった。
+
+許可プロンプトの `a` がこれを使う。候補が付いていないときだけ
+Emacs 側で覚える従来動作に落ちる。
 
 ### 会話バッファの markdown 装飾
 

@@ -94,6 +94,14 @@ nil なら毎回聞く。"
 nil にするとブロックが確定してから一度に出る (段階 3 までの挙動)。"
   :type 'boolean)
 
+(defcustom my:claude-forward-subagent-text t
+  "非 nil なら `--forward-subagent-text' を付ける。
+
+サブエージェントの発言は `parent_tool_use_id' 付きの assistant / user
+イベントとして届く。**このフラグが無くても一部は届く** (実測) ので、
+表示側は常に親 ID を見て字下げする。"
+  :type 'boolean)
+
 (defcustom my:claude-show-thinking nil
   "非 nil なら thinking ブロックの中身も薄く表示する。
 
@@ -149,6 +157,20 @@ nil にするとブロックが確定してから一度に出る (段階 3 ま�
 (defface my:claude-inline-code-face
   '((t :inherit font-lock-constant-face))
   "行中の `コード`。")
+
+(defface my:claude-subagent-face
+  '((t :inherit font-lock-doc-face))
+  "サブエージェントの発言。")
+
+(defface my:claude-diff-removed-face
+  '((((background dark))  :background "#3a1d1f" :extend t)
+    (((background light)) :background "#ffe6e6" :extend t))
+  "差分の削除行。")
+
+(defface my:claude-diff-added-face
+  '((((background dark))  :background "#1d3a24" :extend t)
+    (((background light)) :background "#e6ffe6" :extend t))
+  "差分の追加行。")
 
 (defface my:claude-meta-face
   '((t :inherit shadow :height 0.9))
@@ -310,6 +332,7 @@ RESUME が t なら `--continue' (そのディレクトリの直近の会話を�
    (cond ((stringp resume) (list "--resume" resume))
          (resume            (list "--continue")))
    (when my:claude-stream (list "--include-partial-messages"))
+   (when my:claude-forward-subagent-text (list "--forward-subagent-text"))
    (when my:claude-model (list "--model" my:claude-model))
    (when my:claude-permission-mode
      (list "--permission-mode" my:claude-permission-mode))
@@ -692,33 +715,92 @@ delta で流し込んだ本文は末尾の改行がまちまちなので、こ�
     (my:claude--insert session "\n")
     (setf (my:claude-session-stream-block session) nil)))
 
+(defun my:claude--parent-id (obj)
+  "OBJ が サブエージェント由来なら親の tool_use_id、そうでなければ nil。
+JSON の null は `:null' で来るので `alist-get' の結果をそのまま使えない。"
+  (let ((p (alist-get 'parent_tool_use_id obj)))
+    (and (stringp p) p)))
+
 (defun my:claude--handle-assistant (obj session)
-  (let ((content (alist-get 'content (alist-get 'message obj))))
+  (let ((content (alist-get 'content (alist-get 'message obj)))
+        (sub (my:claude--parent-id obj)))
     (seq-doseq (block content)
       (pcase (alist-get 'type block)
         ("text"
-         ;; 【重要】`my:claude-stream' ではなく「このブロックを実際に
-         ;; delta で出したか」で判断する。スラッシュコマンドは
-         ;; assistant で本文を返すが stream_event を伴わない
-         ;; (num_turns=0 で API を通らないため)。フラグを見ずに
-         ;; my:claude-stream だけで飛ばすと /mcp や /context が
-         ;; 何も表示されない。実際にそうなっていた。
-         (unless (my:claude-session-streamed-text session)
+         (cond
+          ;; サブエージェントの本文。**delta では来ない** (実測で
+          ;; stream_event に parent_tool_use_id が付くことは無かった) ので、
+          ;; streamed-text を見ずに必ず出す。見ると本体のブロックが
+          ;; 開いている間は捨てられてしまう。字下げして本体と区別する。
+          (sub
+           (my:claude--insert-block session
+                                    (string-trim-right (alist-get 'text block))
+                                    'my:claude-subagent-face))
+          ;; 【重要】`my:claude-stream' ではなく「このブロックを実際に
+          ;; delta で出したか」で判断する。スラッシュコマンドは
+          ;; assistant で本文を返すが stream_event を伴わない
+          ;; (num_turns=0 で API を通らないため)。フラグを見ずに
+          ;; my:claude-stream だけで飛ばすと /mcp や /context が
+          ;; 何も表示されない。実際にそうなっていた。
+          ((not (my:claude-session-streamed-text session))
            (my:claude--mark-text-start session)
            (my:claude--insert session
                               (concat (string-trim-right (alist-get 'text block)) "\n\n")
                               'my:claude-assistant-face)
            (my:claude--fontify-markdown session
-                                        (my:claude-session-text-start session))))
+                                        (my:claude-session-text-start session)))))
         ("tool_use"
          (let ((name (alist-get 'name block))
                (id (alist-get 'id block)))
            (puthash id name (my:claude-session-tool-names session))
            (my:claude--insert
             session
-            (format "▶ %s %s\n" name (my:claude--tool-summary block))
-            'my:claude-tool-face)))
+            (format "%s▶ %s %s\n" (if sub "  " "") name
+                    (my:claude--tool-summary block))
+            (if sub 'my:claude-subagent-face 'my:claude-tool-face))
+           ;; Edit / Write は入力そのものが差分なので、その場で見せる。
+           (my:claude--show-edit session name (alist-get 'input block))))
         (_ nil)))))
+
+(defun my:claude--insert-diff (session removed added)
+  "REMOVED / ADDED を diff 風に見せる。
+
+外部の diff は呼ばない。Edit の入力は old_string と new_string が
+そのまま来るので、行単位で `-' と `+' を付けて並べれば足りる。
+Windows に diff が入っている保証も無い。"
+  (let ((buf (my:claude-session-buffer session)))
+    (when (buffer-live-p buf)
+      (with-current-buffer buf
+        (let ((inhibit-read-only t))
+          (save-excursion
+            (goto-char (point-max))
+            (dolist (pair (list (cons removed 'my:claude-diff-removed-face)
+                                (cons added 'my:claude-diff-added-face)))
+              (when (and (stringp (car pair))
+                         (not (string-empty-p (car pair))))
+                (let ((mark (if (eq (cdr pair) 'my:claude-diff-removed-face) "-" "+")))
+                  (dolist (l (split-string (string-trim-right (car pair)) "\n"))
+                    (insert (propertize (concat "    " mark l "\n")
+                                        'font-lock-face (cdr pair)))))))))))))
+
+(defcustom my:claude-diff-max-lines 30
+  "Edit / Write の差分をそのまま見せる行数の上限。
+これを超えたら行数だけ知らせる。"
+  :type 'integer)
+
+(defun my:claude--show-edit (session name input)
+  "Edit / Write の入力を差分として見せる。"
+  (let* ((old (alist-get 'old_string input))
+         (new (or (alist-get 'new_string input) (alist-get 'content input)))
+         (lines (+ (if (stringp old) (length (split-string old "\n")) 0)
+                   (if (stringp new) (length (split-string new "\n")) 0))))
+    (when (and (member name '("Edit" "Write" "NotebookEdit"))
+               (or (stringp old) (stringp new)))
+      (if (> lines my:claude-diff-max-lines)
+          (my:claude--insert session
+                             (format "    (差分 %d 行。TAB で全体を表示)\n" lines)
+                             'my:claude-meta-face)
+        (my:claude--insert-diff session old new)))))
 
 (defun my:claude--tool-summary (block)
   "tool_use の入力を 1 行にまとめる。"
@@ -732,7 +814,8 @@ delta で流し込んだ本文は末尾の改行がまちまちなので、こ�
 
 (defun my:claude--handle-user (obj session)
   "tool_result を表示する。"
-  (let ((content (alist-get 'content (alist-get 'message obj))))
+  (let ((content (alist-get 'content (alist-get 'message obj)))
+        (sub (my:claude--parent-id obj)))
     (seq-doseq (block content)
       (when (equal (alist-get 'type block) "tool_result")
         (let* ((id (alist-get 'tool_use_id block))
@@ -743,8 +826,9 @@ delta で流し込んだ本文は末尾の改行がまちまちなので、こ�
                            (if (string-empty-p (string-trim text))
                                (format "(%s: 出力なし)" name)
                              text)
-                           (if err 'my:claude-error-face
-                             'my:claude-tool-result-face)))))))
+                           (cond (err 'my:claude-error-face)
+                                 (sub 'my:claude-subagent-face)
+                                 (t 'my:claude-tool-result-face))))))))
 
 (defun my:claude--handle-result (obj session)
   ;; 中断されると content_block_stop が来ないことがある。
@@ -824,11 +908,22 @@ delta で流し込んだ本文は末尾の改行がまちまちなので、こ�
                                                    "Denied by the user in Emacs."
                                                  message)))))
 
+(defun my:claude--suggestion-label (suggestions)
+  "SUGGESTIONS を人間向けの短い説明にする。"
+  (mapconcat
+   (lambda (s)
+     (pcase (alist-get 'type s)
+       ("setMode" (format "%s に切り替える" (alist-get 'mode s)))
+       ("addRules" "ルールを追加する")
+       (other (format "%s" other))))
+   (append suggestions nil) " / "))
+
 (defun my:claude--ask-permission (_obj session rid req)
   "ツール使用の可否を尋ねて control_response を返す。"
   (let* ((name (or (alist-get 'tool_name req) "?"))
          (desc (or (alist-get 'description req) ""))
-         (input (alist-get 'input req)))
+         (input (alist-get 'input req))
+         (sugg (alist-get 'permission_suggestions req)))
     (if (my:claude--auto-approve-p session name)
         (progn
           (my:claude--insert session (format "  (自動許可: %s)\n" name)
@@ -839,10 +934,13 @@ delta で流し込んだ本文は末尾の改行がまちまちなので、こ�
           (pcase (car (read-multiple-choice
                        (format "%s %s を許可する?"
                                name (truncate-string-to-width desc 60 nil nil "…"))
-                       '((?y "今回だけ許可")
+                       `((?y "今回だけ許可")
                          (?n "拒否")
                          (?r "理由を書いて拒否")
-                         (?a "以後このツールは聞かない")
+                         (?a ,(if (and sugg (> (length sugg) 0))
+                                  (format "以後聞かない (%s)"
+                                          (my:claude--suggestion-label sugg))
+                                "以後このツールは聞かない"))
                          (?v "入力を全部見る"))))
             (?y (my:claude--respond-allow session rid input)
                 (setq done t))
@@ -857,8 +955,25 @@ delta で流し込んだ本文は末尾の改行がまちまちなので、こ�
                                      'my:claude-error-face)
                   (my:claude--respond-deny session rid why))
                 (setq done t))
-            (?a (push name (my:claude-session-approved session))
-                (my:claude--respond-allow session rid input)
+            ;; 要求には permission_suggestions が付いてくる (例: acceptEdits に
+            ;; 切り替える)。これを updatedPermissions に載せて返すと
+            ;; **claude 側が以後聞いてこなくなる** (実測で 2 回目の Write が
+            ;; 聞かれなくなった)。付いていないときは Emacs 側で覚えるだけの
+            ;; 従来動作に落とす。
+            (?a (if (and sugg (> (length sugg) 0))
+                    (progn
+                      (my:claude--insert
+                       session
+                       (format "  (以後許可: %s — %s)\n"
+                               name (my:claude--suggestion-label sugg))
+                       'my:claude-meta-face)
+                      (my:claude--respond-permission
+                       session rid
+                       `((behavior . "allow")
+                         (updatedInput . ,input)
+                         (updatedPermissions . ,sugg))))
+                  (push name (my:claude-session-approved session))
+                  (my:claude--respond-allow session rid input))
                 (setq done t))
             (?v (my:claude--show-input name input))))))))
 
@@ -1057,6 +1172,103 @@ RESUME は `my:claude--command' に渡す。ENV を省くと今の環境のま�
     (let ((session (my:claude--start dir env resume)))
       (pop-to-buffer (my:claude-session-buffer session))
       session)))
+
+(defun my:claude--projects-directory (env)
+  "環境 ENV がセッションを貯めているディレクトリ。"
+  (expand-file-name "projects"
+                    (or (my:claude--config-dir env) (expand-file-name "~/.claude"))))
+
+(defun my:claude--session-directory (env dir)
+  "環境 ENV で DIR のセッションが入っているディレクトリ。
+
+claude はワークスペースのパスの **英数字以外をすべて `-' に置き換えた**
+名前を使う。`C:/Users/masao/.emacs.d' なら `C--Users-masao--emacs-d'。
+手元の 10 個で突き合わせて確かめた (合わなかった 1 つはドライブレターの
+大小違いだけで、Windows のファイルシステムでは同じ場所を指す)。"
+  (let ((name (replace-regexp-in-string
+               "[^A-Za-z0-9]" "-"
+               (directory-file-name (expand-file-name dir)))))
+    (expand-file-name name (my:claude--projects-directory env))))
+
+(defun my:claude--session-preview (file)
+  "セッションの記録 FILE から、最初のプロンプトを 1 行で返す。
+
+先頭から順に読むが、`<local-command-…>' のような差し込みは飛ばす。
+1 MB を超えるファイルもあるので、見つかるか 400 行で打ち切る。"
+  (with-temp-buffer
+    (let ((coding-system-for-read 'utf-8-unix)
+          (found nil) (n 0))
+      (insert-file-contents file nil 0 200000)
+      (goto-char (point-min))
+      (while (and (not found) (< n 400) (not (eobp)))
+        (setq n (1+ n))
+        (let* ((line (buffer-substring-no-properties
+                      (line-beginning-position) (line-end-position)))
+               (o (and (string-prefix-p "{" line)
+                       (ignore-errors (json-parse-string line :object-type 'alist)))))
+          (when (and o (equal (alist-get 'type o) "user")
+                     (not (eq t (alist-get 'isSidechain o))))
+            ;; content は文字列のこともブロックの配列のこともある。
+            ;; **Emacs から送ったものは必ず配列**なので、文字列だけを
+            ;; 見ていると自分で作ったセッションが全部「プロンプトなし」に
+            ;; なる。実際にそうなっていた。
+            (let ((c (my:claude--content-string
+                      (alist-get 'content (alist-get 'message o)))))
+              (when (and (stringp c)
+                         (not (string-empty-p (string-trim c)))
+                         (not (string-prefix-p "<local-command" c))
+                         (not (string-prefix-p "<command-name" c)))
+                (setq found c)))))
+        (forward-line 1))
+      (if found
+          (truncate-string-to-width
+           (replace-regexp-in-string "[ \t\n]+" " " (string-trim found))
+           70 nil nil "…")
+        "(プロンプトなし)"))))
+
+(defun my:claude--past-sessions (env dir)
+  "環境 ENV / ディレクトリ DIR の過去セッションを新しい順に返す。
+要素は (表示用文字列 . session-id)。"
+  (let ((d (my:claude--session-directory env dir)))
+    (when (file-directory-p d)
+      (let ((files (sort (directory-files d t "\\.jsonl\\'")
+                         (lambda (a b)
+                           (time-less-p (file-attribute-modification-time
+                                         (file-attributes b))
+                                        (file-attribute-modification-time
+                                         (file-attributes a)))))))
+        (mapcar
+         (lambda (f)
+           (cons (format "%s  %s"
+                         (format-time-string
+                          "%m-%d %H:%M"
+                          (file-attribute-modification-time (file-attributes f)))
+                         (my:claude--session-preview f))
+                 (file-name-base f)))
+         (seq-take files 30))))))
+
+;;;###autoload
+(defun my:claude-resume ()
+  "過去のセッションを一覧から選んで再開する。
+
+`--continue' は「そのディレクトリの直近の 1 つ」しか選べない。
+こちらは記録ファイル (`<CLAUDE_CONFIG_DIR>/projects/…/*.jsonl') を
+新しい順に並べて選ばせる。アカウントが違うと保存先も別なので、
+いまの環境のものだけが出る。"
+  (interactive)
+  (let* ((old (my:claude--session-for-buffer))
+         (env (or (and old (my:claude-session-name old))
+                  (my:claude--read-environment)))
+         (dir (if old (my:claude-session-directory old)
+                (my:claude--project-directory)))
+         (rows (my:claude--past-sessions env dir)))
+    (unless rows
+      (user-error "%s に %s のセッションの記録が無い"
+                  env (abbreviate-file-name (directory-file-name dir))))
+    (let* ((choice (completing-read "再開するセッション: "
+                                    (mapcar #'car rows) nil t))
+           (id (cdr (assoc choice rows))))
+      (my:claude--restart id env))))
 
 ;;;###autoload
 (defun my:claude-continue ()
@@ -1288,6 +1500,7 @@ Opus と Haiku を行き来してもそれまでの話は消えない。"
          ("C-c a e" . my:claude-switch-environment)
          ("C-c a t" . my:claude-trust-workspace)
          ("C-c a c" . my:claude-continue)
+         ("C-c a r" . my:claude-resume)
          ("C-c a m" . my:claude-set-model)
          ("C-c a i" . my:claude-input)
          ("C-c a s" . my:claude-send-region)
