@@ -37,3 +37,4 @@
 
 # --- magit-gitd (2026-09) ---
 /gitd/target/
+/ptyd/ptyd.exe

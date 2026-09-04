@@ -172,6 +172,7 @@
 (require 'my-shell)   ; Shell 関連
 (require 'my-utils)   ; ユーティリティ
 (require 'my-claude)   ; Claude Code を stream-json で使う
+(require 'my-pty)   ; ConPTY 経由で対話 TUI を動かす (ptyd)
 (require 'my-platform)   ; OS 固有設定 (Windows / macOS)
 
 ;;; --------------------------------------------------

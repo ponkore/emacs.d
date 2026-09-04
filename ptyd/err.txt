@@ -1,0 +1,2 @@
+ptyd: started pid=14248 cols=100 rows=30
+ptyd: child exited code=0

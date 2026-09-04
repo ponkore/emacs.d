@@ -30,6 +30,8 @@ Windows（主）、macOS、Linux 向けの個人 Emacs 設定リポジトリ。E
 - `site-lisp/` — パッケージマネージャで入手できないローカルベンダの Emacs Lisp
 - `gitd/` — magit の git 実行を肩代わりする常駐プロセス（Rust）。
   ソースは管理下、`gitd/target/` は git 管理外で各マシンでビルドする（後述）
+- `ptyd/` — 疑似コンソール（ConPTY）を持って対話 TUI を動かすプロセス（Go）。
+  同じく、ソースは管理下で `ptyd/ptyd.exe` は git 管理外（`M-x my:pty-build`）
 - `docs/` — 設計メモ・計画・実測の記録（git 管理下）。
   過去に `tmp/` に置いていたものは 2026-09-04 にここへ移した。
   同日にテーマ別のサブディレクトリへ分けた
@@ -104,6 +106,7 @@ Emacs 31.1 の `user-lisp/` は、既定では `package-activate-all` の直後�
 | `my-shell` | exec-path-from-shell、Windows 用 shell 設定 |
 | `my-utils` | calendar、open-junk-file、grep/ripgrep、blog 用ヘルパ |
 | `my-claude` | Claude Code を stream-json で使う（プレフィクス: `C-c a`） |
+| `my-pty` | ConPTY 経由で対話 TUI を動かす（`ptyd/`）。Windows のみ |
 | `my-platform` | Windows / macOS 固有設定 |
 
 ## LSP サーバ
@@ -1013,6 +1016,92 @@ claude -p --verbose --input-format stream-json --output-format stream-json      
 （大半はシステムプロンプトのキャッシュ作成）。
 `my:claude-log` を t にすると生の JSON Lines が残るので、
 上流のイベント種別が変わったときに気づける。
+
+## 対話 TUI を Emacs で動かす (`ptyd/` + `my-pty.el`)
+
+Windows の Emacs には PTY が無く `make-process` は常にパイプになるので、
+対話 TUI が動かない。`ptyd`（Go）が疑似コンソールを持って子プロセスを
+動かし、VT バイト列を stdio で Emacs に流す。表示は term.el に任せる。
+
+```
+Emacs ──stdin (JSON Lines)──> ptyd ──ConPTY──> 子プロセス
+      <──stdout (生の VT)──        <─────────
+      <──stderr (診断の行)──
+```
+
+| | |
+|---|---|
+| `M-x my:pty-build` | `ptyd.exe` を作る（`gitd` と同じく各マシンで） |
+| `M-x my:pty-run` | 任意のコマンドを端末で動かす（汎用） |
+| `M-x my:claude-term` | claude の TUI を開く（`--ax-screen-reader` 付き） |
+
+**バイナリが無ければ `user-error` になるだけ**で、他の設定には影響しない。
+
+stdin だけ JSON にしてあるのは、キー入力のほかに画面サイズを送る必要が
+あるため。stdout を生のままにしてあるのは、そちらが本流で量が多く、
+base64 と JSON のエスケープを挟む意味が無いから。
+
+### 【重要】プリミティブへの advice は native-compile されたコードに効かない
+
+term.el はキーを `process-send-string` で送るので、最初はそれを advice で
+包んで JSON に変換しようとした。**まったく効かなかった。**
+
+`term.eln`（native-compile 済み）は**プリミティブを直接呼ぶ**ので、
+symbol の function cell に張った advice を素通りする。実際、生の
+`echo …` がそのまま ptyd に届いて
+`bad line: invalid character 'e'` になった。
+
+包むなら **Lisp の関数**にする。そちらは symbol 経由で呼ばれる。
+term.el が書き込む入口は 4 か所しかない。
+
+| 関数 | いつ通るか |
+|---|---|
+| `term-send-raw-string` | char モードのキー入力（ほぼ全部） |
+| `term-send-string` | 貼り付けなど |
+| `term-send-eof` | `C-d` 相当 |
+| `term-emulate-terminal` の中 | `ESC[6n`（CPR）への応答。claude は送ってこない（実測 0 回） |
+
+前の 3 つを `:around` で包んでいる。使っているセッションが無くなったら外す。
+
+`my-gitd.el` が `magit-process-file` を、`my-lsp.el` が `eglot-uri-to-path` を
+包んでいるのは、どちらも Lisp の関数なので問題ない。
+
+### 【重要】`locale-coding-system` をバッファローカルに上書きする
+
+term.el は復号に `locale-coding-system` を決め打ちしている（31.1 で 5 箇所）。
+日本語 Windows では cp932 なので、UTF-8 を吐く TUI の罫線が壊れ、
+`args-out-of-range` で落ちる。`my:pty-run` が
+`(setq-local locale-coding-system 'utf-8-unix)` を入れている。
+
+### term.el が読めない CSI は ptyd 側で落とす
+
+term.el はプライベートな CSI の目印として `?` しか見ていないため、
+`ESC[>4;2m`（modifyOtherKeys）を `>` ごと数値化して SGR 0;2、つまり
+「全属性リセット + faint」として実行してしまう。
+
+`ptyd -strip-unsupported-csi` が `ESC[<` `ESC[>` `ESC[=` を落とす。
+**`ESC[?` は落とさない**（term.el が正しく扱う）。実測:
+
+| | バイト数 | `ESC[>` | `ESC[<` | `ESC[?` |
+|---|---|---|---|---|
+| strip なし | 852 | 7 | 3 | 22 |
+| strip あり | 801 | 0 | 0 | 22 |
+
+途中で切れたシーケンスは ptyd 側で持ち越す。ConPTY からの読み取りは
+任意の位置で切れるので、1 回の Write に収まっている保証が無い。
+
+### 端末経由だと信頼ダイアログが出る
+
+`-p`（案 A）は仕様として信頼ダイアログを飛ばすが、**`my:claude-term` では
+本来のダイアログが出る**。ここで `y` を押せば、Emacs 起動時の小文字
+ドライブレターのキーで `hasTrustDialogAccepted` が立つので、
+案 A 側の「permissions.allow が無視される」警告も消える。
+
+### リサイズ
+
+`window-size-change-functions` でウィンドウの桁数・行数を見て、
+`term-reset-size` と `ResizePseudoConsole` の両方を更新する。
+実測で `ESC[8;24;80t` が返り、その幅で再描画された。
 
 ## プラットフォーム固有の注意事項
 
