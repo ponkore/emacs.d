@@ -540,8 +540,8 @@ RESUME は `my:claude--command' に渡す (t で --continue、文字列で --res
 ;;; 描画
 ;;; --------------------------------------------------
 
-(defun my:claude--insert (session text &optional face)
-  "SESSION の会話バッファの末尾に TEXT を挿入する。
+(defmacro my:claude--at-end (session &rest body)
+  "SESSION の会話バッファの末尾で BODY を評価し、**追従を保つ**。
 
 **末尾を見ているときだけ追従する。** 読み返している最中に飛ばされるのは
 鬱陶しいため。判定は **ウィンドウごとに `window-point\' で行う**。
@@ -550,23 +550,42 @@ RESUME は `my:claude--command' に渡す (t で --continue、文字列で --res
 読み返している側まで飛ばされる (あるいはその逆)。
 
 バッファ自身の `point\' も別に見る。ウィンドウに出ていない間に届いた
-ぶんで追従が切れると、次に表示したときに古い位置から始まってしまう。"
-  (let ((buf (my:claude-session-buffer session)))
-    (when (buffer-live-p buf)
-      (with-current-buffer buf
-        (let* ((inhibit-read-only t)
-               (max (point-max))
-               (buffer-at-end (>= (point) max))
-               (following (seq-filter (lambda (w) (>= (window-point w) max))
-                                      (get-buffer-window-list buf nil t))))
-          (save-excursion
-            (goto-char (point-max))
-            (insert (if face (propertize text 'font-lock-face face) text)))
-          ;; save-excursion は挿入前の位置に戻すので、末尾にいたぶんは
-          ;; 明示的に進める (マーカーの insertion-type が nil のため)。
-          (when buffer-at-end (goto-char (point-max)))
-          (dolist (w following)
-            (set-window-point w (point-max))))))))
+ぶんで追従が切れると、次に表示したときに古い位置から始まってしまう。
+
+【重要】BODY のあとの `goto-char\' / `set-window-point\' を省いてはいけない。
+`save-excursion\' が使うマーカーは insertion-type が nil なので、
+**末尾での挿入では挿入したテキストの前に取り残される**。一度でも
+末尾から外れたバッファは、以後どれだけ流れても二度と追従しない。
+
+  (save-excursion (goto-char (point-max)) (insert \"    +new\\n\"))
+  => point=5 point-max=14   ; 末尾にいたのに外れる (実測)
+
+差分表示 (`my:claude--insert-diff\') と段落の整形
+ (`my:claude--end-paragraph\') がこれを持たずに直接書いており、
+**差分が 1 回出ると自動スクロールが止まっていた**。"
+  (declare (indent 1) (debug (form body)))
+  (let ((buf (gensym "buf")) (max (gensym "max"))
+        (at-end (gensym "at-end")) (wins (gensym "wins")) (w (gensym "w")))
+    `(let ((,buf (my:claude-session-buffer ,session)))
+       (when (buffer-live-p ,buf)
+         (with-current-buffer ,buf
+           (let* ((inhibit-read-only t)
+                  (,max (point-max))
+                  (,at-end (>= (point) ,max))
+                  (,wins (seq-filter (lambda (,w) (>= (window-point ,w) ,max))
+                                     (get-buffer-window-list ,buf nil t))))
+             (save-excursion
+               (goto-char (point-max))
+               ,@body)
+             (when ,at-end (goto-char (point-max)))
+             (dolist (,w ,wins)
+               (set-window-point ,w (point-max)))))))))
+
+(defun my:claude--insert (session text &optional face)
+  "SESSION の会話バッファの末尾に TEXT を挿入する。
+追従の作法は `my:claude--at-end\' を参照。"
+  (my:claude--at-end session
+    (insert (if face (propertize text 'font-lock-face face) text))))
 
 (defun my:claude--insert-block (session text face)
   "TEXT を字下げして挿入する。"
@@ -686,14 +705,20 @@ effort level は **stream-json に出てこない** ので載せられない。"
             segs))
     (when w
       (let ((r (alist-get 'resetsAt (alist-get 'five_hour w))))
-        (push (format "5h %d%% 7d %d%%%s"
+        (push (format "(5h %d%%)(7d %d%%)%s"
                       (round (* 100 (or (alist-get 'utilization
                                                    (alist-get 'five_hour w)) 0)))
                       (round (* 100 (or (alist-get 'utilization
                                                    (alist-get 'seven_day w)) 0)))
-                      (if (numberp r) (format-time-string " (reset %m/%d %H:%M)" r) ""))
+                      (if (numberp r) (format-time-string "(reset %m/%d %H:%M)" r) ""))
               segs)))
-    (mapconcat #'identity (nreverse segs) " | ")))
+    ;; 【重要】`header-line-format' に素の文字列を渡しているので、`%' は
+    ;; mode-line の書式指定子として解釈され、`%' と**直後の 1 文字**が
+    ;; まとめて消える。`5h 4% 7d 8%' が `5h 47d 8' になっていた。
+    ;; 表示したい `%' は `%%' に escape する。ディレクトリ名やモデル名に
+    ;; `%' が入る場合もあるので、組み立てた全体に掛ける。
+    (replace-regexp-in-string
+     "%" "%%" (mapconcat #'identity (nreverse segs) " | "))))
 
 (defun my:claude--update-header (session)
   (when (buffer-live-p (my:claude-session-buffer session))
@@ -1106,16 +1131,15 @@ delta が来ないスラッシュコマンドの `assistant')。**片方だけ�
 
 (defun my:claude--end-paragraph (session)
   "会話バッファの末尾を「空行 1 つ」に整える。
-delta で流し込んだ本文は末尾の改行がまちまちなので、ここで揃える。"
-  (let ((buf (my:claude-session-buffer session)))
-    (when (buffer-live-p buf)
-      (with-current-buffer buf
-        (let ((inhibit-read-only t))
-          (save-excursion
-            (goto-char (point-max))
-            (skip-chars-backward " \t\n")
-            (delete-region (point) (point-max))
-            (insert "\n\n")))))))
+delta で流し込んだ本文は末尾の改行がまちまちなので、ここで揃える。
+
+末尾の削り直しでも point は取り残される (削除でマーカーが手前に
+引かれ、そこへ挿入しても前に置かれたままになる) ので、
+`my:claude--at-end\' を通す。"
+  (my:claude--at-end session
+    (skip-chars-backward " \t\n")
+    (delete-region (point) (point-max))
+    (insert "\n\n")))
 
 (defun my:claude--close-stream-block (session)
   "開いたままのブロックがあれば行を閉じる。中断されたときに使う。"
@@ -1187,21 +1211,19 @@ JSON の null は `:null' で来るので `alist-get' の結果をそのまま�
 
 外部の diff は呼ばない。Edit の入力は old_string と new_string が
 そのまま来るので、行単位で `-' と `+' を付けて並べれば足りる。
-Windows に diff が入っている保証も無い。"
-  (let ((buf (my:claude-session-buffer session)))
-    (when (buffer-live-p buf)
-      (with-current-buffer buf
-        (let ((inhibit-read-only t))
-          (save-excursion
-            (goto-char (point-max))
-            (dolist (pair (list (cons removed 'my:claude-diff-removed-face)
-                                (cons added 'my:claude-diff-added-face)))
-              (when (and (stringp (car pair))
-                         (not (string-empty-p (car pair))))
-                (let ((mark (if (eq (cdr pair) 'my:claude-diff-removed-face) "-" "+")))
-                  (dolist (l (split-string (string-trim-right (car pair)) "\n"))
-                    (insert (propertize (concat "    " mark l "\n")
-                                        'font-lock-face (cdr pair)))))))))))))
+Windows に diff が入っている保証も無い。
+
+`my:claude--at-end\' を通すこと。直接書いていたため、**差分が 1 回出ると
+point が末尾から外れて自動スクロールが止まっていた**。"
+  (my:claude--at-end session
+    (dolist (pair (list (cons removed 'my:claude-diff-removed-face)
+                        (cons added 'my:claude-diff-added-face)))
+      (when (and (stringp (car pair))
+                 (not (string-empty-p (car pair))))
+        (let ((mark (if (eq (cdr pair) 'my:claude-diff-removed-face) "-" "+")))
+          (dolist (l (split-string (string-trim-right (car pair)) "\n"))
+            (insert (propertize (concat "    " mark l "\n")
+                                'font-lock-face (cdr pair)))))))))
 
 (defcustom my:claude-diff-max-lines 30
   "Edit / Write の差分をそのまま見せる行数の上限。

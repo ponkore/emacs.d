@@ -733,7 +733,7 @@ ESC-Web    enterprise  株式会社　熾火
 ```
 
 ヘッダ行に
-`jighead(max) v2.1.260 | claude-opus-5 | ctx 103.2k 52% | 5h 0% 7d 6% (reset 09/05 03:00)`
+`jighead(max) v2.1.260 | claude-opus-5 | ctx 103.2k 52% | (5h 0%)(7d 6%)(reset 09/05 03:00)`
 を出す。残量は `rate_limit_event` から取っている。**アカウントを
 切り替える判断はこの数字で行う**ので、常に見えるようにしてある。
 
@@ -760,6 +760,29 @@ Emacs 側で再現してある。**`statusLine` は端末 TUI の機能で、`-p
 列挙して確認）。`permissionMode` / `output_style` / `fast_mode_state` は
 あるが `effort` は無い。git ブランチも載せていない（プロセス起動の
 コストに見合わない。「`call-process` が Windows で遅い」の節を参照）。
+
+#### 【重要】`header-line-format` に出す `%` は `%%` に escape する
+
+`header-line-format` / `mode-line-format` に**素の文字列**を渡すと、
+Emacs が `%` を書式指定子として解釈し、**`%` と直後の 1 文字がまとめて
+消える**。`%` の次が空白でも `)` でも同じ。
+
+```
+raw       : ... ctx 103.2k 52% | (5h 5%)(7d 8%)(reset 09/04 23:10)
+displayed : ... ctx 103.2k 52| (5h 5(7d 8(reset 09/04 23:10)
+```
+
+`my:claude--header` は組み立てた**全体**に
+`(replace-regexp-in-string "%" "%%" ...)` を掛けている。ディレクトリ名や
+モデル名に `%` が入る場合も巻き込まれないよう、個々の `format` ではなく
+最後にまとめて掛けるのが正しい。
+
+**この検証は batch ではできない。** `format-mode-line` は batch では
+常に `""` を返す。GUI で `(format-mode-line 文字列)` を見ること。
+
+2026-09-04 に発見。`5h 4% 7d 8%` が `5h 47d 8` と表示されていた。
+あわせてレート上限の表示を `(5h 5%)(7d 8%)(reset MM/DD HH:MM)` の形に
+変えてある（`%` が区切りに埋もれず読めるように）。
 
 モードラインは `[.emacs.d ... $0.12]`（プロジェクト名 / 応答待ち /
 累計コスト）だけ。フルパスは `help-echo` に入れてある。ディレクトリを
@@ -966,6 +989,41 @@ GUI 実測（`string-width` だけでは検算にならないので
 バッファ自身の `point` も別に見る。`save-excursion` は挿入前の位置に
 戻す（マーカーの `insertion-type` が nil）ので、末尾にいたぶんは
 明示的に `goto-char` しないと追従が切れる。
+
+##### 【重要】会話バッファへの書き込みは必ず `my:claude--at-end` を通す
+
+上の作法をマクロ `my:claude--at-end` に括り出してある。**`save-excursion` +
+`goto-char (point-max)` + `insert` を直接書いてはいけない。**
+
+`save-excursion` のマーカーは `insertion-type` が nil なので、**末尾での
+挿入では挿入したテキストの前に取り残される**。
+
+```elisp
+(save-excursion (goto-char (point-max)) (insert "    +new\n"))
+;; => point=5  point-max=14   末尾にいたのに外れる
+```
+
+一度外れると `my:claude--insert` の `(>= (point) max)` が偽になるため、
+**以後どれだけ流れても二度と追従しない**。1 回の書き込みでその後ずっと
+壊れるので、原因になった書き込みから離れたところで表面化する。
+
+末尾を削り直す経路も同じ。削除でマーカーが手前に引かれ、そこへ挿入しても
+前に置かれたままになる。
+
+2026-09-04 に `my:claude--insert-diff`（Edit / Write の差分）と
+`my:claude--end-paragraph`（段落の整形）が直接書いていたのを直した。
+**差分が 1 回出ると自動スクロールが止まる**という壊れ方をしていた。
+同じ 6 行を 3 か所に書いていたのが取りこぼしの原因なので、マクロに寄せてある。
+
+GUI 実測（2 窓、修正前 → 修正後）:
+
+| | 修正前 | 修正後 |
+|---|---|---|
+| `insert` のあと末尾か | t | t |
+| `insert-diff` のあと末尾か | **nil**（point=10 / point-max=38） | **t** |
+| `end-paragraph` のあと末尾か | **nil** | **t** |
+| 読み返し中に動かないか | t | t |
+| 末尾を見ている窓だけ追従するか | **nil** | **t** |
 
 #### 入力バッファは markdown-mode 派生
 
