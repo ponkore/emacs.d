@@ -1173,6 +1173,37 @@ eat が意図して出している空の箱。
 端末を開いているあいだだけ差し替え、幅表と同じ寿命で、最後の端末を
 閉じたら戻す。
 
+#### 【重要】`set-fontset-font` だけでは効かない
+
+`set-fontset-font` を `nil`（選択フレーム）にも `t`（既定）にも入れ、
+`clear-face-cache` と `redraw-display` まで呼んでも、GUI の実測で
+`font-at` は元のフォントを返し続け `string-pixel-width` も 16 のままだった。
+
+**この設定で実際に効く経路は `set-face-attribute 'default nil :family`**
+（`my-appearance.el` の `emacs-font-setting` と同じ）。こちらに変えたら
+1 回で通った。
+
+```
+▐ U+2590 width=1 pixel=8 font=HackGen Console NF
+```
+
+`:height` は触らないこと。サイズが変わると桁が全部ずれる。
+
+確かめ方（`*claude-term*` で）:
+
+```elisp
+(with-current-buffer "*claude-term*"
+  (save-excursion
+    (goto-char (point-min))
+    (re-search-forward "[─▐█①]" nil t)
+    (goto-char (1- (point)))
+    (let* ((c (char-after)) (f (font-at (point))))
+      (list c (char-width c) (string-pixel-width (string c))
+            (and f (font-get f :family))))))
+```
+
+`font=` が切り替え先になっていること、`pixel` が 8 であることを見る。
+
 **Nerd Font のアイコン領域（#xe000-#xf8ff）は触らない。**
 `my-appearance.el` がそこを別のフォントに回しており、上書きすると
 アイコンが豆腐になる。
