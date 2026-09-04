@@ -30,7 +30,7 @@
 /eln-cache/
 *~
 /tmp/*
-!/tmp/*.md
+!/tmp/.gitkeep
 /user-lisp-autoloads.el
 /tree-sitter/
 /intelephense/

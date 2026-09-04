@@ -30,17 +30,22 @@ Windows（主）、macOS、Linux 向けの個人 Emacs 設定リポジトリ。E
 - `site-lisp/` — パッケージマネージャで入手できないローカルベンダの Emacs Lisp
 - `gitd/` — magit の git 実行を肩代わりする常駐プロセス（Rust）。
   ソースは管理下、`gitd/target/` は git 管理外で各マシンでビルドする（後述）
-- `docs/archive-init.org` — Org 方式だった頃の設定（履歴として保存）
-- `docs/extract.el`, `docs/verify.el`, `docs/split.py`, `docs/verify-split.el` —
+- `docs/` — 設計メモ・計画・実測の記録（git 管理下）。
+  過去に `tmp/` に置いていたものは 2026-09-04 にここへ移した
+- `docs/_archived/` — 役目を終えた移行スクリプトと旧設定（履歴として保存）
+- `tmp/` — 作業用の捨て場。`.gitkeep` 以外は git 管理外
+- `docs/_archived/archive-init.org` — Org 方式だった頃の設定（履歴として保存）
+- `docs/_archived/extract.el`, `docs/_archived/verify.el`,
+  `docs/_archived/split.py`, `docs/_archived/verify-split.el` —
   Org からの抽出・分割に使った検証スクリプト（等価性の証跡）
-- `docs/snapshot.el` — 設定を読み込んだ Emacs の観測可能な状態
+- `docs/_archived/snapshot.el` — 設定を読み込んだ Emacs の観測可能な状態
   （defcustom 全変数、全 `*-hook` / `*-functions`、全キーバインド、face の
   `theme-face` / `defface` / 実効属性、ロード済み feature）を決定的な順序で
   ダンプする。leaf → use-package 移行の等価性検証に使った。同一設定なら
   2 回採取して差分 0 行になるので、書き換えの前後で diff すれば足りる
 
   ```sh
-  emacs --batch -l early-init.el -l init.el -l docs/snapshot.el \
+  emacs --batch -l early-init.el -l init.el -l docs/_archived/snapshot.el \
         --eval '(my:snapshot-dump "before.txt")'
   ```
 
@@ -593,7 +598,7 @@ emacs --batch --eval '(dolist (f command-line-args-left)
       (message "%s: %d forms" f n))))' user-lisp/*.el
 ```
 
-あわせて `docs/snapshot.el` の前後 diff を取る（前掲）。
+あわせて `docs/_archived/snapshot.el` の前後 diff を取る（前掲）。
 
 ## フォントとアイコン
 
@@ -1020,7 +1025,7 @@ magit のリフレッシュが遅い原因は **git ではなく Emacs のプロ
 `user-lisp/my-gitd.el` が `magit-process-file` に `:around` を張り、
 Rust の常駐プロセス（`gitd/`）に git の実行を肩代わりさせる。
 
-計画と実測は `tmp/magit-auto-refresh-plan.md` と `tmp/magit-gitd-2a-design.md`。
+計画と実測は `docs/magit-auto-refresh-plan.md` と `docs/magit-gitd-2a-design.md`。
 
 ### 遅さの原因（2026-09 実測）
 
@@ -1135,7 +1140,7 @@ M-x my:gitd-restart   ; サーキットブレーカが落ちたときの復帰
 
 ## デーモン側のキャッシュ（段階 2b）
 
-設計と実測は `tmp/magit-gitd-2b-design.md`。
+設計と実測は `docs/magit-gitd-2b-design.md`。
 
 ### 無効化を「通知」ではなく「トークン」でやる
 
@@ -1272,7 +1277,7 @@ Emacs は file バッファの `default-directory` を `~/...` に略記する�
 **2a 無しではこれは入れられなかった**（1.7 秒の固まりが頻発する）。
 段階 2b のキャッシュで 50〜70 ms になっている。
 
-設計と実測は `tmp/magit-autorefresh-stage1-design.md`。
+設計と実測は `docs/magit-autorefresh-stage1-design.md`。
 gitd のキャッシュにトークンを供給する役目も負っている（前節）。
 
 ### `w32notify-add-watch` を直接呼ぶこと
