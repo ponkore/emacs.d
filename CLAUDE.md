@@ -1239,6 +1239,81 @@ dedicated window であることに由来する。ディレクトリならサイ
 `dired-mode-map` に置いたキーが効かないときは、**まず `dired-x` を疑う**こと。
 奪われるのは上の 5 つと `*(` / `*O` / `*.`。
 
+## dired の自動更新（2026-09-04）
+
+外部でファイルが増減したら dired の一覧も追随する。`dired-mode-hook` から
+`auto-revert-mode` を**バッファローカルに**有効にしている
+（`my:dired-auto-revert-setup`、`my-dired.el`）。
+
+### 【重要】`global-auto-revert-non-file-buffers` は使わない
+
+あれは `buffer-stale-function` を持つ非ファイルバッファを**一律に**対象に
+するので、効き先が dired の外へ広がる。magit の更新は `my-magit-watch` と
+`my-gitd` で自前に組んであり、そこに autorevert を並走させたくない。
+
+実測では magit のバッファは `buffer-stale-function` が既定
+（`buffer-stale--default-function`）のままで、`auto-revert--global-add-current-buffer`
+は独自の stale 関数を要求する（`autorevert.el:561`）ため、あの変数を t に
+しても magit は採用されない。**それでも範囲は広げない**（`buffer-menu` は
+`auto-revert-interval` = 1 秒ごとに revert されるし、将来 magit 側が
+`buffer-stale-function` を持てば黙って挙動が変わる）。
+
+### ポーリングではない
+
+dired 側は受け入れ準備が済んでいる（`dired.el:2906`）。
+
+```elisp
+(setq-local buffer-stale-function #'dired-buffer-stale-p)
+(setq-local buffer-auto-revert-by-notification t)
+```
+
+`auto-revert-handler` は watch がある間、通知で `auto-revert-notify-modified-p`
+が立たない限り `dired-buffer-stale-p` すら呼ばない（`autorevert.el:830`）。
+`auto-revert-interval` が 1 でも毎秒 `ls` が走るわけではない。
+
+### 拾えるもの・拾えないもの
+
+**メインディレクトリの `created` / `renamed` / `deleted` だけ**が対象
+（`autorevert.el:758`）。
+
+| | |
+|---|---|
+| ファイルの追加・削除・改名 | **拾う** |
+| ファイルの中身・サイズ・更新日時の変化 | 拾わない（**サイズ欄は古いまま**） |
+| `i` で挿入したサブディレクトリの中の変化 | 拾わない |
+| w32notify がバッファ溢れで落としたイベント | 拾えない |
+
+保険として `dired-auto-revert-buffer` を `dired-directory-changed-p` にして
+ある。これは auto-revert とは別物で、**既に開いてある dired バッファを訪ね
+直したとき**に、変わっていれば revert する。通知に依存しない経路。
+
+### 壊れないことの根拠
+
+- `dired-revert` は**マーク・隠しサブディレクトリ・point とウィンドウ位置を
+  復元する**（`dired.el:2232`）
+- wdired 中は `buffer-read-only` が nil になり `dired-buffer-stale-p` が nil を
+  返すので、編集中に潰されない
+- `auto-revert-verbose` は dired だけ `setq-local` で nil にしてある。
+  ファイルバッファ側のメッセージは残る
+- `dired-sidebar` も dired バッファなので一緒に効くが、**あちらは
+  auto-revert 前提の作り**になっている。`revert-buffer-function` をラップして
+  窓の位置を保ち、`auto-revert-verbose` を自分で nil にし、
+  `dired-sidebar-delay-auto-revert-updates`（既定 t）で 1.5 秒のアイドル待ちに
+  間引く
+- `diff-hl-dired-mode` が `dired-after-readin-hook` に載っている（`my-vc.el`）
+  ので、自動更新のたびに vc 経由の git 呼び出しが増える。watch は非再帰で
+  `.git/` の中の変化は届かないため、git の書き込みで更新が誘発される
+  ループにはならない
+
+GUI プローブでの実測:
+
+| | |
+|---|---|
+| 外部で作ったファイルが出る / 消したファイルが消える | **両方 t** |
+| マークの維持 | **t**（`*` 1 個が残った） |
+| magit バッファの `auto-revert-mode` / `auto-revert--global-mode` | **どちらも nil** |
+| `magit-refresh-buffer` | 従来どおり成功 |
+
 ## markdown のプレビューと外部エディタ
 
 似ているが**別経路**の 2 つがある。

@@ -40,6 +40,27 @@
       (if (my:dired-external-open-p file)
           (my:open-file-externally file)
         (dired-find-file))))
+
+  (defun my:dired-auto-revert-setup ()
+    "この dired バッファを外部の変更に追随させる。
+
+【重要】`global-auto-revert-non-file-buffers' は使わない。あれは
+`buffer-stale-function' を持つ非ファイルバッファを一律に対象にするので、
+対象範囲が dired の外へ広がる。magit の更新は my-magit-watch と my-gitd で
+自前に組んであり、そこに autorevert を並走させたくない。バッファローカルに
+有効にすれば dired (と dired-sidebar) だけで閉じる。
+
+なお dired は通知ベースで動く。`dired-mode' が
+`buffer-auto-revert-by-notification' を t にしており、watch がある間は
+`auto-revert-notify-modified-p' が立たない限り `dired-buffer-stale-p' すら
+呼ばれない (autorevert.el の `auto-revert-handler')。
+`auto-revert-interval' が 1 でも毎秒 ls が走るわけではない。"
+    ;; 更新のたびに "Reverting buffer ..." が出るとうるさいので、dired だけ
+    ;; 黙らせる。ファイルバッファ側 (global-auto-revert-mode) の
+    ;; メッセージはそのまま残る。
+    (setq-local auto-revert-verbose nil)
+    (auto-revert-mode 1))
+  :hook (dired-mode-hook . my:dired-auto-revert-setup)
   :bind
   (:map dired-mode-map
    ;; RET / f / e は同じ dired-find-file なので、まとめて差し替える。
@@ -64,6 +85,10 @@
   (dired-recursive-copies 'always)
   ;; diredバッファでC-sした時にファイル名だけにマッチするように
   (dired-isearch-filenames t)
+  ;; 既に開いてある dired バッファを訪ね直したときの更新。auto-revert とは
+  ;; 別物で、通知の取りこぼし (w32notify はバッファ溢れでイベントを落とす) に
+  ;; 対する保険になる。t は毎回、この値は変わっていたときだけ revert する。
+  (dired-auto-revert-buffer 'dired-directory-changed-p)
   ;;
   (ls-lisp-dirs-first t)
   :config
