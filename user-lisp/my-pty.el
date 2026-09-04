@@ -46,6 +46,15 @@ term.el の既定は `eterm-color' だが、それを知らない相手のほう
 どのみち VT を解釈するのは conhost なので、広く知られている名前にする。"
   :type 'string)
 
+(defcustom my:pty-map-alt-screen t
+  "非 nil なら `ESC[?1049' を `ESC[?47' に読み替えて ptyd に渡す。
+
+term.el は代替画面として `?47' しか実装していない。いまどきの TUI が使う
+`?1049' は無視されるので、そのままだと代替画面に入ったまま戻らない。
+**読み替えても完全にはならない** (`?1049h' は画面消去も含むが `?47h' は
+含まない)。term.el 以外に差し替えるときは nil にする。"
+  :type 'boolean)
+
 (defcustom my:pty-strip-unsupported-csi t
   "非 nil なら `ESC[<' `ESC[>' `ESC[=' を ptyd 側で落とす。
 
@@ -163,11 +172,19 @@ term.el 以外のエミュレータに差し替えるときは nil にする。"
   "このバッファの ptyd プロセス。")
 
 (defun my:pty--window-size (buffer)
-  "BUFFER を表示しているウィンドウの (桁 . 行)。無ければ既定値。"
-  (if-let* ((win (get-buffer-window buffer t)))
-      (cons (max 20 (window-max-chars-per-line win))
-            (max 5 (window-body-height win)))
-    (cons 100 30)))
+  "BUFFER を表示しているウィンドウの (桁 . 行)。
+
+【重要】まだ表示されていなければ、ここで表示してしまう。
+サイズを決め打ちで起動すると、**子プロセスと term.el で幅が食い違う**。
+子は自分の幅で折り返しの有無を決めるので、実際の幅が狭いと term.el 側で
+余分に折り返され、行がずれる。以後の絶対カーソル移動が 1 行ずつずれ、
+`ESC[K' が効くべき場所からずれるため、古い文字が消えずに新しい文字と
+重なる。画面のあちこちが二重に見えるのはこれ。"
+  (let ((win (or (get-buffer-window buffer t) (display-buffer buffer))))
+    (if win
+        (cons (max 20 (window-max-chars-per-line win))
+              (max 5 (window-body-height win)))
+      (cons 100 30))))
 
 ;;;###autoload
 (defun my:pty-run (name command &optional dir env)
@@ -219,6 +236,8 @@ DIR は作業ディレクトリ、ENV は追加の環境変数 (\"K=V\" のリ�
                              "-dir" dir)
                        (when my:pty-strip-unsupported-csi
                          (list "-strip-unsupported-csi"))
+                       (when my:pty-map-alt-screen
+                         (list "-map-alt-screen"))
                        (list "--")
                        command)
              :stderr (my:pty--stderr-buffer name)
@@ -268,8 +287,31 @@ DIR は作業ディレクトリ、ENV は追加の環境変数 (\"K=V\" のリ�
   "ptyd 経由の端末バッファであることを示す。"
   :lighter " pty"
   (if my:pty-mode
-      (add-hook 'kill-buffer-hook #'my:pty--kill-child nil t)
-    (remove-hook 'kill-buffer-hook #'my:pty--kill-child t)))
+      (progn
+        (add-hook 'kill-buffer-hook #'my:pty--kill-child nil t)
+        ;; ウィンドウが変わったときにも合わせる。
+        ;; `window-size-change-functions' はフレームのサイズが変わったときしか
+        ;; 走らないので、別のウィンドウに出し直しただけでは効かない。
+        (add-hook 'window-configuration-change-hook #'my:pty--sync-size nil t)
+        (add-hook 'post-command-hook #'my:pty--pin-point nil t))
+    (remove-hook 'kill-buffer-hook #'my:pty--kill-child t)
+    (remove-hook 'window-configuration-change-hook #'my:pty--sync-size t)
+    (remove-hook 'post-command-hook #'my:pty--pin-point t)))
+
+(defun my:pty--pin-point ()
+  "カーソルを端末のカーソル位置に戻す。
+
+端末なので、クリックした場所にカーソルが残るのはおかしい。ただし
+範囲選択中は動かさない (コピーができなくなるため)。
+入力自体は `term-send-raw-string' がプロセスマークへ移動してから送るので
+元々ずれないが、**見た目のカーソルが別の場所にある**のが紛らわしい。"
+  (when (and my:pty-mode
+             (not (region-active-p))
+             (term-in-char-mode)
+             (process-live-p my:pty--process))
+    (let ((m (process-mark my:pty--process)))
+      (when (and (marker-position m) (/= (point) m))
+        (goto-char m)))))
 
 (defun my:pty--kill-child ()
   "バッファを閉じたら子プロセスも終わらせる。"

@@ -116,6 +116,24 @@ func (p *pty) resize(cols, rows int16) error {
 // 切れるので、1 回の Write に収まっている保証が無い。
 type csiStripper struct {
 	pending []byte
+	strip   bool // ESC[< ESC[> ESC[= を落とす
+	mapAlt  bool // ESC[?1049 を ESC[?47 に読み替える
+}
+
+// altScreen は代替画面の切り替えを term.el が解する形に直す。
+//
+// term.el は `?47' しか実装していない (`term-switch-to-alternate-sub-buffer')。
+// いまどきの TUI が使う `?1049' は無視されるので、ダイアログを閉じたときに
+// 元の画面が戻らず、古い文字と新しい文字が重なる。`?1047' も同じ扱いにし、
+// カーソルの保存/復帰だけの `?1048' は落とす (term.el に対応が無い)。
+func altScreen(params []byte) (replacement []byte, drop bool) {
+	switch string(params) {
+	case "?1049", "?1047":
+		return []byte("?47"), false
+	case "?1048":
+		return nil, true
+	}
+	return params, false
 }
 
 func (s *csiStripper) filter(buf []byte) []byte {
@@ -145,7 +163,7 @@ func (s *csiStripper) filter(buf []byte) []byte {
 			s.pending = append(s.pending, data[i:]...)
 			break
 		}
-		drop := data[j] == '<' || data[j] == '>' || data[j] == '='
+		drop := s.strip && (data[j] == '<' || data[j] == '>' || data[j] == '=')
 		// 終端文字 (0x40-0x7e) まで進む
 		k := j
 		for k < len(data) && (data[k] < 0x40 || data[k] > 0x7e) {
@@ -156,8 +174,17 @@ func (s *csiStripper) filter(buf []byte) []byte {
 			s.pending = append(s.pending, data[i:]...)
 			break
 		}
+		params := data[j:k]
+		final := data[k]
+		if !drop && s.mapAlt && (final == 'h' || final == 'l') {
+			var d bool
+			params, d = altScreen(params)
+			drop = drop || d
+		}
 		if !drop {
-			out = append(out, data[i:k+1]...)
+			out = append(out, 0x1b, '[')
+			out = append(out, params...)
+			out = append(out, final)
 		}
 		i = k + 1
 	}
@@ -179,6 +206,8 @@ func main() {
 	workdir := flag.String("dir", "", "子プロセスの作業ディレクトリ")
 	strip := flag.Bool("strip-unsupported-csi", false,
 		"ESC[< ESC[> ESC[= のシーケンスを落とす (term.el 向け)")
+	mapAlt := flag.Bool("map-alt-screen", false,
+		"ESC[?1049 を ESC[?47 に読み替える (term.el 向け)")
 	flag.Parse()
 
 	if len(flag.Args()) == 0 {
@@ -199,7 +228,7 @@ func main() {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		var st csiStripper
+		st := csiStripper{strip: *strip, mapAlt: *mapAlt}
 		buf := make([]byte, 16384)
 		w := bufio.NewWriterSize(os.Stdout, 16384)
 		for {
@@ -209,7 +238,7 @@ func main() {
 				return
 			}
 			b := buf[:n]
-			if *strip {
+			if *strip || *mapAlt {
 				b = st.filter(b)
 			}
 			if len(b) > 0 {
