@@ -231,9 +231,9 @@ nil にするとブロックが確定してから一度に出る (段階 3 ま�
   '((t :inherit shadow :height 0.9))
   "コスト・所要時間などの補足。")
 
-;; ヘッダ行の 5 列。`~/.claude/statusline-command.sh' が端末の TUI で
+;; ヘッダ行の 6 列。`~/.claude/statusline-command.sh' が端末の TUI で
 ;; 使っている ANSI 色に合わせてある (plan=マゼンタ / dir=シアン /
-;; model=イエロー / ctx=グリーン / limit=シアン)。
+;; branch=グリーン / model=イエロー / ctx=グリーン / limit=シアン)。
 ;; `:foreground' だけを指定する。ヘッダ行では `header-line' face が
 ;; 下地になり、テキストプロパティの face はその上に重なるので、
 ;; 背景はテーマのものがそのまま残る。
@@ -247,20 +247,25 @@ nil にするとブロックが確定してから一度に出る (段階 3 ま�
     (((background light)) :foreground "dark cyan"))
   "ヘッダ行 2 列目 (プロジェクト名)。")
 
+(defface my:claude-header-branch-face
+  '((((background dark))  :foreground "green")
+    (((background light)) :foreground "dark green"))
+  "ヘッダ行 3 列目 (git ブランチ)。")
+
 (defface my:claude-header-model-face
   '((((background dark))  :foreground "yellow")
     (((background light)) :foreground "dark goldenrod"))
-  "ヘッダ行 3 列目 (モデルと effort)。")
+  "ヘッダ行 4 列目 (モデルと effort)。")
 
 (defface my:claude-header-context-face
   '((((background dark))  :foreground "green")
     (((background light)) :foreground "dark green"))
-  "ヘッダ行 4 列目 (コンテキスト使用量)。")
+  "ヘッダ行 5 列目 (コンテキスト使用量)。")
 
 (defface my:claude-header-limit-face
   '((((background dark))  :foreground "cyan")
     (((background light)) :foreground "dark cyan"))
-  "ヘッダ行 5 列目 (レート上限とリセット時刻)。")
+  "ヘッダ行 6 列目 (レート上限とリセット時刻)。")
 
 (defface my:claude-input-header-face
   '((((background dark))  :foreground "cyan")
@@ -294,6 +299,8 @@ face をリストにすると先に書いたものが勝つので、色は列ご
   buffer         ; 会話バッファ
   log-buffer     ; 生 JSON のバッファ (nil のことがある)
   directory      ; 起動した default-directory (展開済み)
+  gitdir         ; directory を含むリポジトリの .git (nil なら git 管理外)
+  branch-cache   ; (FINGERPRINT . BRANCH)。`my:claude--branch' が使う
   name           ; 環境のラベル
   config-dir     ; CLAUDE_CONFIG_DIR (nil なら既定)
   rate-limit     ; 直近の rate_limit_event の中身
@@ -490,7 +497,10 @@ RESUME は `my:claude--command' に渡す (t で --continue、文字列で --res
          (log  (when my:claude-log (get-buffer-create "*claude-log*")))
          (session (my:claude--make-session
                    :buffer conv :log-buffer log
-                   :directory dir :name env :config-dir config-dir))
+                   :directory dir :name env :config-dir config-dir
+                   ;; DIR は起動後に変わらないので、探索はここで 1 回だけ。
+                   ;; ヘッダ行はこれが非 nil のときだけブランチの列を出す。
+                   :gitdir (my:claude--git-dir dir)))
          proc)
     (when (and config-dir (not (file-directory-p config-dir)))
       (user-error "CLAUDE_CONFIG_DIR が無い: %s" config-dir))
@@ -783,6 +793,94 @@ effort を返さない**ので、ここでしか分からない。"
                       (my:claude--effort-in conf model)))
                   (my:claude--settings-files session)))))
 
+;;; ------------------------------------------------ git ブランチ (3 列目)
+
+;; **git は呼ばない。`.git/HEAD' を読むだけで足りる。**
+;; 実測 (batch、`~/.emacs.d'、1 回あたり):
+;;
+;;   file-attributes で stat       0.043 ms   キャッシュのヒット判定
+;;   HEAD を読んでパース           0.061 ms   キャッシュのミス時
+;;   call-process git rev-parse   55.6   ms   参考
+;;
+;; 1300 倍違うので `header-line-format' の `:eval' から毎回呼んでよい。
+;; 「Emacs の `call-process' が Windows で遅い」(CLAUDE.md の既知の課題) を
+;; 丸ごと迂回できる。ブランチの切り替えは Emacs の外 (端末や magit) でも
+;; 起きるので、ターンごとの更新では古い表示が残る。`:eval' なら再描画の
+;; たびに追随するので、監視もタイマーも要らない。
+
+(defun my:claude--git-dir (dir)
+  "DIR を含むリポジトリの .git ディレクトリを返す。git 管理外なら nil。
+
+**git は呼ばない** (`locate-dominating-file' で上へ探すだけ)。
+worktree と submodule では `.git' がディレクトリではなくファイルで、
+中身が `gitdir: PATH' なのでそれを辿る。
+
+セッションの作業ディレクトリは起動後に変わらないので、呼ぶのは
+セッションを作るときの 1 回だけでよい (`my:claude-session-gitdir')。"
+  (and-let* ((root (locate-dominating-file dir ".git"))
+             (g (expand-file-name ".git" root)))
+    (cond
+     ((file-directory-p g) (file-name-as-directory g))
+     ((file-regular-p g)
+      (with-temp-buffer
+        (let ((coding-system-for-read 'utf-8))
+          (insert-file-contents g nil 0 1024))
+        (goto-char (point-min))
+        (when (looking-at "gitdir: *\\([^\n\r]+\\)")
+          (file-name-as-directory
+           (expand-file-name (string-trim (match-string 1)) root))))))))
+
+(defun my:claude--head-branch (gitdir)
+  "GITDIR の HEAD からブランチ名を返す。detached なら短縮 SHA。
+
+**`literally' で読んで自分で decode する。** git はブランチ名を UTF-8 の
+バイト列で書くので、`insert-file-contents-literally' が作る unibyte の
+ままでは非 ASCII のブランチ名が化ける。"
+  (let ((head (expand-file-name "HEAD" gitdir)))
+    (when (file-readable-p head)
+      (ignore-errors
+        (with-temp-buffer
+          (insert-file-contents-literally head nil 0 512)
+          (goto-char (point-min))
+          (cond
+           ((looking-at "ref: refs/heads/\\([^\n\r]+\\)")
+            (decode-coding-string (match-string 1) 'utf-8))
+           ;; detached HEAD は生の SHA が入っている
+           ((looking-at "\\([0-9a-f]\\{7\\}\\)") (match-string 1))))))))
+
+(defun my:claude--branch (session)
+  "SESSION のリポジトリの現在のブランチ。git 管理外なら nil。
+
+`.git/HEAD' の (mtime . size) をフィンガープリントにしてキャッシュする
+\(`my-magit-watch' の `my:magit-watch--fingerprint' と同じ手口)。
+ヒットするかぎり stat 1 回で済む。"
+  (and-let* ((gitdir (my:claude-session-gitdir session))
+             (attr (file-attributes (expand-file-name "HEAD" gitdir))))
+    (let ((fp (cons (file-attribute-modification-time attr)
+                    (file-attribute-size attr)))
+          (cache (my:claude-session-branch-cache session)))
+      (if (equal (car cache) fp)
+          (cdr cache)
+        (let ((branch (my:claude--head-branch gitdir)))
+          (setf (my:claude-session-branch-cache session) (cons fp branch))
+          branch)))))
+
+(defun my:claude--branch-segment ()
+  "ヘッダ行 3 列目 (git ブランチ)。`header-line-format' の `:eval' から呼ぶ。
+
+【重要】`:eval' の戻り値は mode-line 構文として**再解釈される**ので、
+`%' の escape は依然として要る (`my:claude--header-segment' が済ませる)。
+ブランチ名に `%' を入れることはできる。
+
+読めなかったときは `?' を出す。空文字列を返すと区切りだけが残るため。
+列そのものを出すかどうかは gitdir の有無で `my:claude--header' が
+決めており、そちらは起動後に変わらない。"
+  (when-let* ((session my:claude--session))
+    (my:claude--header-segment (or (my:claude--branch session) "?")
+                               'my:claude-header-branch-face)))
+
+;;; ------------------------------------------------ ヘッダ行の組み立て
+
 (defun my:claude--header-segment (text face &rest props)
   "TEXT を FACE で色づけしてヘッダ行の 1 列にする。PROPS も載せる。
 
@@ -805,16 +903,22 @@ size face から来る。大きさを 1 か所で決めるためにこうして�
 (defun my:claude--header (session)
   "会話バッファのヘッダ行。
 
-**ヘッダ行を主に使う。** 5 列に分けて色を付けてある
+**ヘッダ行を主に使う。** 6 列に分けて色を付けてある
  (`~/.claude/statusline-command.sh\' が端末の TUI で使っている ANSI 色に
 合わせた)。モードラインは幅が狭いのでプロジェクト名とコストだけ
  (`my:claude--mode-line\')。
 
   1 アカウント (プラン) と claude のバージョン   マゼンタ
   2 プロジェクト名 (フルパスは help-echo)        シアン
-  3 モデルと effort                              イエロー
-  4 コンテキスト使用量                           グリーン
-  5 レート上限とリセット時刻                     シアン
+  3 git ブランチ                                 グリーン
+  4 モデルと effort                              イエロー
+  5 コンテキスト使用量                           グリーン
+  6 レート上限とリセット時刻                     シアン
+
+**戻り値は文字列ではなくリスト** (mode-line 構文)。3 列目だけは
+`(:eval (my:claude--branch-segment))\' で、再描画のたびに評価される。
+ブランチの切り替えは Emacs の外でも起きるので、ターンごとの更新
+ (`my:claude--update-header\') では追随できないため。
 
 出す項目は `~/.claude/statusline-command.sh\' が端末の TUI に出して
 いるものに合わせてある。ただし **statusLine は端末 TUI の機能で、
@@ -827,7 +931,10 @@ size face から来る。大きさを 1 か所で決めるためにこうして�
                        result の modelUsage.<model>.contextWindow
   レート上限とリセット rate_limit_event の unifiedWindows
 
-git ブランチは載せない (プロセス起動のコストに見合わない)。
+git ブランチは `.git/HEAD\' を直接読む (`my:claude--branch\')。**git は
+呼ばない。** stat 0.043 ms / 読み込み 0.061 ms で、`call-process\' 経由の
+`git rev-parse\' (55.6 ms) の 1300 分の 1。
+
 effort level は **stream-json に出てこない**ので、`--effort' の指定か
 settings.json から求める (`my:claude--effort')。"
   (let* ((auth (gethash (my:claude-session-name session) my:claude--auth-cache))
@@ -852,21 +959,26 @@ settings.json から求める (`my:claude--effort')。"
            'my:claude-header-dir-face
            'help-echo (abbreviate-file-name dir))
           segs)
-    ;; [3] モデルと effort
+    ;; [3] git ブランチ。**列を出すかどうかはここで決める。** gitdir は
+    ;; 起動後に変わらないので、変わりうるのは中身だけ。それを `:eval' に
+    ;; 委ねて再描画のたびに評価させる (`my:claude--branch-segment')。
+    (when (my:claude-session-gitdir session)
+      (push '(:eval (my:claude--branch-segment)) segs))
+    ;; [4] モデルと effort
     (when-let* ((m (my:claude-session-model session)))
       (push (my:claude--header-segment
              (concat m (if-let* ((e (my:claude-session-effort session)))
                            (format " (%s)" e) ""))
              'my:claude-header-model-face)
             segs))
-    ;; [4] コンテキスト使用量
+    ;; [5] コンテキスト使用量
     (when (numberp used)
       (push (my:claude--header-segment
              (format "ctx %s %d%%" (my:claude--format-tokens used)
                      (round (* 100.0 (/ (float used) (max 1 limit)))))
              'my:claude-header-context-face)
             segs))
-    ;; [5] レート上限とリセット時刻
+    ;; [6] レート上限とリセット時刻
     (when w
       (let ((r (alist-get 'resetsAt (alist-get 'five_hour w))))
         (push (my:claude--header-segment
@@ -880,8 +992,11 @@ settings.json から求める (`my:claude--effort')。"
               segs)))
     ;; 区切りにも大きさの face を載せる。ここだけ素のままだと、行の高さは
     ;; 行内でいちばん高いグリフで決まるためヘッダ行が縮まない。
-    (mapconcat #'identity (nreverse segs)
-               (propertize " | " 'face 'my:claude-header-size-face))))
+    ;;
+    ;; **`mapconcat' で 1 つの文字列にはしない。** 3 列目の
+    ;; `(:eval ...)' を活かすため、mode-line 構文のリストのまま返す。
+    (let ((sep (propertize " | " 'face 'my:claude-header-size-face)))
+      (cdr (mapcan (lambda (seg) (list sep seg)) (nreverse segs))))))
 
 (defun my:claude--update-header (session)
   (when (buffer-live-p (my:claude-session-buffer session))

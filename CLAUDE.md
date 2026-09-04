@@ -884,18 +884,19 @@ Emacs 側で再現してある。**`statusLine` は端末 TUI の機能で、`-p
 スクリプトの出力をもらうのではなく同じ情報を stream-json から自前で
 組み立てている。
 
-ヘッダ行は 5 列で、色は statusline スクリプトが使っている ANSI 色に
+ヘッダ行は 6 列で、色は statusline スクリプトが使っている ANSI 色に
 合わせてある。
 
 | 列 | 内容 | 色 | 取得元 |
 |---|---|---|---|
 | 1 | アカウント（プラン）と claude のバージョン | マゼンタ | auth cache と `system/init` の `claude_code_version` |
 | 2 | プロジェクト名（フルパスは `help-echo`） | シアン | セッションの cwd |
-| 3 | モデルと effort | イエロー | `system/init` の `model` と `my:claude--effort` |
-| 4 | コンテキスト使用量 | グリーン | `assistant` の `message.usage` の `input_tokens` + `cache_read_input_tokens` + `cache_creation_input_tokens` / `result` の `modelUsage.<model>.contextWindow`（1M 版なら 1000000 が来る） |
-| 5 | レート上限とリセット時刻 | シアン | `rate_limit_event` の `unifiedWindows` |
+| 3 | git ブランチ | グリーン | `.git/HEAD`（後述。git は呼ばない） |
+| 4 | モデルと effort | イエロー | `system/init` の `model` と `my:claude--effort` |
+| 5 | コンテキスト使用量 | グリーン | `assistant` の `message.usage` の `input_tokens` + `cache_read_input_tokens` + `cache_creation_input_tokens` / `result` の `modelUsage.<model>.contextWindow`（1M 版なら 1000000 が来る） |
+| 6 | レート上限とリセット時刻 | シアン | `rate_limit_event` の `unifiedWindows` |
 
-face は `my:claude-header-{plan,dir,model,context,limit}-face`。
+face は `my:claude-header-{plan,dir,branch,model,context,limit}-face`。
 **`:foreground` だけを指定する。** ヘッダ行では `header-line` face が
 下地になり、テキストプロパティの face はその上に重なるので、背景は
 テーマのものがそのまま残る。
@@ -904,8 +905,76 @@ face は `my:claude-header-{plan,dir,model,context,limit}-face`。
 1 時間キャッシュまでして避けていたプロセス起動が、`system/init` に
 最初から入っている。
 
-git ブランチは載せていない（プロセス起動のコストに見合わない。
-「`call-process` が Windows で遅い」の節を参照）。
+#### git ブランチは `.git/HEAD` を読む（git は呼ばない）
+
+かつては「プロセス起動のコストに見合わない」として載せていなかったが、
+**そもそも git を起動する必要が無い**。ブランチ名は `.git/HEAD` の
+1 行目にそのまま入っている。実測（1 回あたり）:
+
+| | |
+|---|---|
+| `file-attributes` で stat（キャッシュのヒット判定） | **0.043 ms** |
+| `.git/HEAD` を読んでパース（キャッシュのミス時） | **0.061 ms** |
+| `call-process git rev-parse --abbrev-ref HEAD` | **55.6 ms** |
+
+1300 倍違うので「Emacs の `call-process` が Windows で遅い」（既知の課題）
+を丸ごと迂回できる。
+
+**列の中身は `header-line-format` の `(:eval ...)` で出す。**
+ブランチの切り替えは Emacs の外（端末や magit）でも起きるため、
+ターンごとの `my:claude--update-header` では古い表示が残る。`:eval` なら
+再描画のたびに評価されるので、監視もタイマーも要らない。GUI 実測で
+`:eval` 1 回 0.044 ms、ヘッダ行全体でも 0.048 ms。
+
+そのため **`my:claude--header` の戻り値は文字列ではなくリスト**
+（mode-line 構文）になっている。`mapconcat` で 1 本の文字列にすると
+`:eval` が死ぬ。
+
+- **列を出すかどうかは gitdir の有無で決める。** これはセッションの
+  作業ディレクトリで決まり起動後に変わらないので、探索
+  （`my:claude--git-dir`。`locate-dominating-file` で上へ辿るだけ）は
+  セッションを作るときの 1 回だけ。`:eval` 側が空文字列を返すと区切りが
+  二重に残るので、読めなければ `?` を出す
+- **`%` の escape は `:eval` の戻り値にも要る。** `:eval` の結果は
+  mode-line 構文として**再解釈される**ため。`my:claude--header-segment`
+  を通すこと（`pct-100%-done` で確認済み）
+- worktree と submodule では `.git` がファイルで、中身が `gitdir: PATH`。
+  それを辿る
+- detached HEAD では `ref:` ではなく生の SHA が入っているので短縮して出す
+- **ブランチ名は UTF-8 で decode する。** `insert-file-contents-literally`
+  は unibyte バッファを作るので、そのままでは非 ASCII のブランチ名が化ける
+
+##### 【重要】検証で `call-process` から git にブランチを作らせない
+
+日本語のブランチ名を `call-process` の引数で渡すと、**引数の側で化ける**。
+実測（`emacs -Q`、「機能」= UTF-8 で `e6 a9 9f e8 83 bd`）:
+
+| 作り方 | `.git/HEAD` に書かれたバイト列 |
+|---|---|
+| `call-process` の引数にそのまま | `e8 ae 96 e6 ba af e3 83 bb`（= 「讖溯・」） |
+| 引数を `utf-8` で encode して渡す | 同上 |
+| `cmd.exe /c chcp 65001 && git ...` 経由 | 同上 |
+
+3 通りとも同じ。UTF-8 のバイト列が cp932 として解釈された結果で、
+CLAUDE.md の「`call-process` の引数は cp932 でエンコードすること」と
+同じ罠。**読み取り側は正しいのに壊れて見える**ので、検証では
+`.git/HEAD` を直接書くこと。git が HEAD を UTF-8 で書くこと自体は
+上の 3 通りとも一致していて確認できている。
+
+##### 【重要】`format-mode-line` は選択ウィンドウのバッファで `:eval` を評価する
+
+BUFFER 引数を省略すると、カレントバッファではなく**選択ウィンドウの
+バッファ**が使われる。`with-temp-buffer` の中で
+
+```elisp
+(setq-local my:claude--session session)
+(format-mode-line header-line-format)   ; ← :eval は *scratch* で評価される
+```
+
+としても、バッファローカルの `my:claude--session` が見えず `:eval` が
+黙って空になる。**列が消えるだけでエラーは出ない。** 実際に
+`switch-to-buffer` してから測ること（batch では `format-mode-line` が
+常に `""` を返すのでそもそも検証できない）。
 
 #### effort level は stream-json に出てこない
 
