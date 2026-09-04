@@ -5,8 +5,8 @@
 ;; (`--input-format stream-json' / `--output-format stream-json') を素のパイプで
 ;; 駆動する。端末エミュレーションも常駐プロキシも要らない。
 ;;
-;; 設計と実測は docs/emacs-claude-stream-json-plan.md、
-;; PTY プロキシ方式との比較は docs/emacs-claude-pty-proxy-study.md を参照。
+;; 設計と実測は docs/claude/emacs-claude-stream-json-plan.md、
+;; PTY プロキシ方式との比較は docs/claude/emacs-claude-pty-proxy-study.md を参照。
 ;;
 ;; 構成:
 ;;   *claude: PROJECT*        会話の記録 (読み取り専用、`my:claude-mode')

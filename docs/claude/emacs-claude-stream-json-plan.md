@@ -1,6 +1,6 @@
 # 案 A 実装メモ — stream-json で Emacs から Claude Code を使う
 
-2026-09-04 着手。実現可能性の検討は `docs/emacs-claude-pty-proxy-study.md`。
+2026-09-04 着手。実現可能性の検討は `docs/claude/emacs-claude-pty-proxy-study.md`。
 そこで「PTY プロキシを書かなくても済む」と分かったので、その道（案 A）を実装する。
 
 将来 C（`--ax-screen-reader` + ConPTY プロキシ）→ B（完全な TUI）へ進む余地は残す。
@@ -356,5 +356,5 @@ doom-modeline のセグメントにするかはあとで決める（まずは `m
 
 ## 参考
 
-- 実現可能性の検討と ConPTY の PoC: `docs/emacs-claude-pty-proxy-study.md`
-- 常駐プロセスと jsonrpc の前例: `docs/magit-gitd-2a-design.md`, `docs/magit-gitd-2b-design.md`
+- 実現可能性の検討と ConPTY の PoC: `docs/claude/emacs-claude-pty-proxy-study.md`
+- 常駐プロセスと jsonrpc の前例: `docs/magit/magit-gitd-2a-design.md`, `docs/magit/magit-gitd-2b-design.md`

@@ -31,7 +31,12 @@ Windows（主）、macOS、Linux 向けの個人 Emacs 設定リポジトリ。E
 - `gitd/` — magit の git 実行を肩代わりする常駐プロセス（Rust）。
   ソースは管理下、`gitd/target/` は git 管理外で各マシンでビルドする（後述）
 - `docs/` — 設計メモ・計画・実測の記録（git 管理下）。
-  過去に `tmp/` に置いていたものは 2026-09-04 にここへ移した
+  過去に `tmp/` に置いていたものは 2026-09-04 にここへ移した。
+  同日にテーマ別のサブディレクトリへ分けた
+  - `docs/refactoring/` — `.emacs.d` 以下のリファクタリング（Org からの移行、ベースライン計測）
+  - `docs/magit/` — magit の高速化と自動更新（`gitd/`、`my-magit-watch`）
+  - `docs/hydra/` — hydra の棚卸しメモ
+  - `docs/claude/` — Claude Code を Emacs から使う（`my-claude.el`）
 - `docs/_archived/` — 役目を終えた移行スクリプトと旧設定（履歴として保存）
 - `tmp/` — 作業用の捨て場。`.gitkeep` 以外は git 管理外
 - `docs/_archived/archive-init.org` — Org 方式だった頃の設定（履歴として保存）
@@ -650,8 +655,8 @@ Windows の Emacs には PTY が無いので claude の対話 TUI は動かな�
 常駐プロキシも要らない。
 
 検討の経緯（ConPTY プロキシ方式との比較、PoC の実測）は
-`docs/emacs-claude-pty-proxy-study.md`、設計は
-`docs/emacs-claude-stream-json-plan.md`。
+`docs/claude/emacs-claude-pty-proxy-study.md`、設計は
+`docs/claude/emacs-claude-stream-json-plan.md`。
 
 | キー | |
 |---|---|
@@ -1098,7 +1103,7 @@ magit のリフレッシュが遅い原因は **git ではなく Emacs のプロ
 `user-lisp/my-gitd.el` が `magit-process-file` に `:around` を張り、
 Rust の常駐プロセス（`gitd/`）に git の実行を肩代わりさせる。
 
-計画と実測は `docs/magit-auto-refresh-plan.md` と `docs/magit-gitd-2a-design.md`。
+計画と実測は `docs/magit/magit-auto-refresh-plan.md` と `docs/magit/magit-gitd-2a-design.md`。
 
 ### 遅さの原因（2026-09 実測）
 
@@ -1213,7 +1218,7 @@ M-x my:gitd-restart   ; サーキットブレーカが落ちたときの復帰
 
 ## デーモン側のキャッシュ（段階 2b）
 
-設計と実測は `docs/magit-gitd-2b-design.md`。
+設計と実測は `docs/magit/magit-gitd-2b-design.md`。
 
 ### 無効化を「通知」ではなく「トークン」でやる
 
@@ -1350,7 +1355,7 @@ Emacs は file バッファの `default-directory` を `~/...` に略記する�
 **2a 無しではこれは入れられなかった**（1.7 秒の固まりが頻発する）。
 段階 2b のキャッシュで 50〜70 ms になっている。
 
-設計と実測は `docs/magit-autorefresh-stage1-design.md`。
+設計と実測は `docs/magit/magit-autorefresh-stage1-design.md`。
 gitd のキャッシュにトークンを供給する役目も負っている（前節）。
 
 ### `w32notify-add-watch` を直接呼ぶこと
