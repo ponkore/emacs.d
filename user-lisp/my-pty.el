@@ -347,6 +347,12 @@ FALLBACK が nil のときは全部 FAMILY (元に戻すときはこちら)。"
   (let ((spec (font-spec :family family))
         (fspec (and fallback (find-font (font-spec :family fallback))
                     (font-spec :family fallback))))
+    ;; 【重要】`set-fontset-font' だけでは効かない。GUI で実測すると、
+    ;; nil と t の両方に入れても `font-at' が元のフォントを返し続けた。
+    ;; この設定で実際に効いている経路は `my-appearance.el' の
+    ;; `set-face-attribute' なので、まずそちらでファミリを差し替える。
+    ;; `:height' は触らない (サイズが変わると桁が全部ずれる)。
+    (set-face-attribute 'default nil :family family)
     ;; 【重要】フォントセットの指定先は 1 つではない。
     ;; `nil' は選択フレームのフォントセット、`t' は既定のフォントセット。
     ;; `fontset-font' で引くと両者が食い違って見えることがあるので、
@@ -359,9 +365,7 @@ FALLBACK が nil のときは全部 FAMILY (元に戻すときはこちら)。"
       (dolist (entry my:pty--ambiguous-ranges)
         (set-fontset-font fontset (car entry)
                           (if (and fspec (eq (cdr entry) 'fallback)) fspec spec))))
-    ;; 【重要】`set-fontset-font' だけでは表示に反映されない。
-    ;; 実現済みの face が文字ごとのフォントを抱えているので、捨てさせる。
-    ;; これが無いと `font-at' が古いフォント (HackGen) を返し続ける。
+    ;; 実現済みの face が文字ごとのフォントを抱えているので捨てさせる。
     (clear-face-cache)
     (force-window-update)
     (redraw-display)))
