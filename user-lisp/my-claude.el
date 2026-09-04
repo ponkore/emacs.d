@@ -164,7 +164,7 @@ nil にするとブロックが確定してから一度に出る (段階 3 ま�
   "`my:claude-layout' で会話 + 入力に使うフレーム高さの割合。"
   :type 'number)
 
-(defcustom my:claude-input-window-height 5
+(defcustom my:claude-input-window-height 6
   "`my:claude-layout' で入力バッファに使う行数。"
   :type 'integer)
 
@@ -2219,6 +2219,24 @@ C-1 のようにテキストプロパティを貼る仕掛けは要らない。�
   (setq-local mode-line-process '(:eval (my:claude--mode-line)))
   ;; cape-file が深さ 90 にいる。念のため明示的に先頭へ置く。
   (add-hook 'completion-at-point-functions #'my:claude--capf -100 t))
+
+(defun my:claude-input--disable-line-numbers ()
+  "入力バッファでは行番号を出さない。
+
+数行しか書かないバッファなので、桁を食うだけで得が無い。
+
+【重要】モード本体ではなくフックで切ること。`markdown-mode' は
+`text-mode' 派生なので `my-editor.el' が
+`text-mode-hook' に載せた `display-line-numbers-mode' が走る。
+`delay-mode-hooks' で溜められた親のフックは `run-mode-hooks' が
+このモード自身のフックより **先に** 回すので、モード本体で切っても
+そのあと有効にされてしまう。
+
+`markdown-mode-hook' のようにバッファローカルに nil にする手も
+あるが、`text-mode-hook' は他の用途にも使う場所なので潰さない。"
+  (display-line-numbers-mode -1))
+
+(add-hook 'my:claude-input-mode-hook #'my:claude-input--disable-line-numbers)
 
 ;;; --------------------------------------------------
 ;;; グローバルキーバインド
