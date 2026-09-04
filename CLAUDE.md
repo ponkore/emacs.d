@@ -1109,6 +1109,11 @@ claude も conhost も East Asian Ambiguous を **幅 1** として桁を組む�
 他のバッファの桁揃えも端末を開いている間だけ変わる。それが困るときは
 `my:pty-narrow-ambiguous` を nil にする（端末の見た目は崩れる）。
 
+**`my:pty-narrow-ambiguous` は defcustom なので `M-x` では出てこない。**
+開いている端末にその場で反映して見比べたいので、
+`M-x my:pty-toggle-ambiguous-width` を用意してある。崩れの原因が eaw か
+どうかは、これで切り替えて見比べるのがいちばん早い。
+
 ### 【重要】端末バッファでは折り返さない (`truncate-lines` = t)
 
 **折り返すと 1 桁ずれただけで以後の行が全部ずれる。**

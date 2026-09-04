@@ -296,6 +296,29 @@ ambiguous を幅 1 として扱う。Emacs 側だけ幅 2 で数えると、ル�
     (redraw-display)
     (message "East Asian Ambiguous の幅を元に戻しました")))
 
+;;;###autoload
+(defun my:pty-toggle-ambiguous-width ()
+  "East Asian Ambiguous を幅 1 にするかどうかを切り替える。
+
+`my:pty-narrow-ambiguous' は defcustom なので `M-x' では出てこない。
+開いている端末にその場で反映したいので、コマンドを用意してある。
+端末の見た目が eaw のせいで崩れているのかどうかを、切り替えて
+見比べるのがいちばん早い。"
+  (interactive)
+  (setq my:pty-narrow-ambiguous (not my:pty-narrow-ambiguous))
+  (if my:pty-narrow-ambiguous
+      (my:pty--narrow-widths-on)
+    ;; 端末が開いていても戻す。
+    (when my:pty--saved-width-table
+      (setq char-width-table my:pty--saved-width-table
+            my:pty--saved-width-table nil)
+      (redraw-display)))
+  (message "ambiguous 幅: %s%s"
+           (if my:pty-narrow-ambiguous "1 (端末に合わせる)" "eaw のまま")
+           (if my:pty--processes " / 開いている端末に反映しました" ""))
+  ;; 幅が変わったので端末側も測り直す。
+  (my:pty--sync-size))
+
 (defun my:pty--our-terminal-p (terminal)
   "TERMINAL が ptyd に繋がっているか。"
   (ignore-errors
