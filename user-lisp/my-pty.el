@@ -220,8 +220,12 @@ eat はキーイベントを既にバイト列 (unibyte) にして渡してく�
 重なる。画面のあちこちが二重に見えるのはこれ。"
   (let ((win (or (get-buffer-window buffer t) (display-buffer buffer))))
     (if win
-        (cons (max 20 (window-max-chars-per-line win))
-              (max 5 (window-body-height win)))
+        (with-selected-window win
+          ;; 行数は `window-screen-lines' で採る。`window-body-height' と
+          ;; 違ってヘッダ行や端数行を勘定に入れてくれる。**ヘッダ行を
+          ;; 立てるならこれを呼ぶ前に**。あとから足すと 1 行ぶんずれる。
+          (cons (max 20 (window-max-chars-per-line win))
+                (max 5 (floor (window-screen-lines)))))
       (cons 100 30))))
 
 (defvar my:pty--narrow-width-table nil
@@ -264,9 +268,8 @@ ambiguous を幅 1 として扱う。Emacs 側だけ幅 2 で数えると、ル�
     (apply orig terminal args)))
 
 (defun my:pty--setup-eat (buf cols rows)
-  "BUF を eat の端末バッファにする。"
+  "BUF に eat の端末を作る。`eat-mode' は先に立てておくこと。"
   (with-current-buffer buf
-    (eat-mode)
     (setq eat-terminal (eat-term-make buf (point)))
     (eat-semi-char-mode)
     (eat-term-resize eat-terminal cols rows)
@@ -288,23 +291,19 @@ ambiguous を幅 1 として扱う。Emacs 側だけ幅 2 で数えると、ル�
     (my:pty--send-input proc input)))
 
 (defun my:pty--setup-term (buf cols rows)
-  "BUF を term.el の端末バッファにする。"
+  "BUF の term.el 側のサイズを決める。`term-mode' は先に立てておくこと。"
   (with-current-buffer buf
-    (term-mode)
-    ;; 【重要】term.el は復号に `locale-coding-system' を決め打ちしている。
-    ;; 日本語 Windows では cp932 なので、UTF-8 を吐く TUI の罫線が壊れ、
-    ;; args-out-of-range で落ちる。バッファローカルに上書きする。
-    (setq-local locale-coding-system 'utf-8-unix)
     (term-reset-size rows cols)))
 
 ;;;###autoload
-(defun my:pty-run (name command &optional dir env)
+(defun my:pty-run (name command &optional dir env header)
   "COMMAND を ConPTY 経由で動かし、端末のバッファを返す。
 
 NAME はバッファ名 (`*NAME*' になる)、COMMAND は文字列のリスト、
 DIR は作業ディレクトリ。ENV は非 nil なら `process-environment' を
 **丸ごと** それに差し替える。追加ではなく差し替えなのは、環境変数を
-消す必要がある場合があるため。"
+消す必要がある場合があるため。HEADER はヘッダ行 (サイズを測る前に
+立てる必要があるのでここで受け取る)。"
   (unless (my:pty-available-p)
     (user-error "ptyd が無い。M-x my:pty-build でビルドしてください (%s)"
                 my:pty-executable))
@@ -318,7 +317,23 @@ DIR は作業ディレクトリ。ENV は非 nil なら `process-environment' �
       (let ((old (get-buffer-process buf)))
         (when old (delete-process old)))
       (let ((inhibit-read-only t)) (erase-buffer))
-      (setq default-directory dir))
+      (setq default-directory dir)
+      ;; 【重要】メジャーモードを先に立てる。`eat-mode' も `term-mode' も
+      ;; `kill-all-local-variables' を通るので、あとから立てると
+      ;; ヘッダ行も `truncate-lines' も消える。実際に消えていた。
+      (if eatp (eat-mode) (term-mode))
+      (when header (setq header-line-format header))
+      ;; 端末は自分で桁を管理するので折り返させない。
+      ;; **折り返すと 1 桁ずれただけで以後の行が全部ずれる。**
+      ;; eaw で ambiguous を幅 2 にしていると、eat が幅 1 で組んだ行を
+      ;; Emacs は幅 2 で描くため、どうしても溢れることがある
+      ;; (claude も conhost も幅 1 を前提にしているので eat 側は 1 が正しい)。
+      ;; そのときは右端が切れるだけで、レイアウトは保たれる。
+      (setq-local truncate-lines t)
+      (unless eatp
+        ;; 【重要】term.el は復号に `locale-coding-system' を決め打ちしている。
+        ;; 日本語 Windows では cp932 なので UTF-8 の罫線が壊れて落ちる。
+        (setq-local locale-coding-system 'utf-8-unix)))
     ;; 【重要】サイズを決める前にウィンドウを確保する。決め打ちで起動すると
     ;; 子と Emacs 側で幅が食い違い、行がずれて画面が二重に見える。
     (setq size (my:pty--window-size buf) cols (car size) rows (cdr size))
@@ -494,12 +509,15 @@ DIR は作業ディレクトリ。ENV は非 nil なら `process-environment' �
                ;; 必要がある。Emacs が継承していると、既定の環境を
                ;; 選んだつもりで別のアカウントに繋がる。my-claude.el が
                ;; 同じ理由で用意している組み立てをそのまま使う。
-               (my:claude--process-environment config))))
-    (with-current-buffer buf
-      (setq header-line-format (format "claude-term: %s | %s" env
-                                       (abbreviate-file-name
-                                        (directory-file-name dir)))))
-    (pop-to-buffer buf)))
+               (my:claude--process-environment config)
+               ;; ヘッダ行はサイズを測る前に立てる。あとから足すと
+               ;; 使える行数が 1 減って、疑似コンソールと食い違う。
+               (format "claude-term: %s | %s" env
+                       (abbreviate-file-name (directory-file-name dir))))))
+    (pop-to-buffer buf)
+    ;; `pop-to-buffer' で別のウィンドウに移ることがあるので測り直す。
+    (my:pty--sync-size)
+    buf))
 
 (provide 'my-pty)
 ;;; my-pty.el ends here

@@ -1066,6 +1066,32 @@ term.el では通常の TUI がまともに映らなかった。代替画面 (`E
 （パーサが文字を比較する）が、**term.el は生バイト**を要求して復号を
 自分でやる。`:coding` を切り替えている。
 
+### 【重要】起動時のサイズはメジャーモードを立ててから測る
+
+`eat-mode` も `term-mode` も `kill-all-local-variables` を通るので、
+**先にヘッダ行や `truncate-lines` を設定しても消える**。実際に消えていた。
+
+順序は「モードを立てる → ヘッダ行と `truncate-lines` → サイズを測る →
+端末を作る」。行数は `window-body-height` ではなく
+`(floor (window-screen-lines))` で採る（ヘッダ行と端数行を勘定に入れる）。
+`pop-to-buffer` で別のウィンドウに移ることがあるので、そのあとにも
+`my:pty--sync-size` を呼ぶ。
+
+**ヘッダ行を立てるのはサイズを測る前。** あとから足すと使える行数が 1 減り、
+疑似コンソールと Emacs の行数が食い違って、以後の描画が 1 行ずつずれる。
+
+### 【重要】端末バッファでは折り返さない (`truncate-lines` = t)
+
+**折り返すと 1 桁ずれただけで以後の行が全部ずれる。**
+
+とくに eaw を入れていると避けられない食い違いがある。claude も conhost も
+ambiguous を **幅 1** として桁を組むので eat も幅 1 で数える（上記）が、
+**Emacs の描画は `char-width-table` を見るので幅 2 で描く**。
+`char-width-table` はグローバルで、バッファ単位に変えられない。
+
+つまり ambiguous を含む行は表示上あふれることがある。折り返すとレイアウトが
+崩れるが、`truncate-lines` なら右端が切れるだけで格子は保たれる。
+
 ### 【重要】eaw.el の文字幅表で eat が無限ループする
 
 `site-lisp/eaw.el` が East Asian Ambiguous を幅 2 にしていると、
