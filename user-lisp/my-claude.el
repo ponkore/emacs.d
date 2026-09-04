@@ -806,19 +806,24 @@ ARG (`C-u') を付けると、生きているセッションがあっても畳�
   "入力バッファで `/コマンド' を補完する。
 
 **行頭の `/' だけを対象にする。** 文中のスラッシュまで拾うと
-`src/foo' のようなパスを書くたびに候補が出て邪魔になる。"
-  (let ((bol (line-beginning-position)))
+`src/foo' のようなパスを書くたびに候補が出て邪魔になる。
+2 つめの `/' が来たらパスだと見なして手を引く (`cape-file' に譲る)。
+
+【重要】補完領域には先頭の `/' を含め、候補も `/name' の形にすること。
+`/' の **後ろ** から始めると接頭辞の長さが 0 になり、`corfu-auto-prefix'
+(この設定では 1) に満たないという理由で corfu の自動補完に**捨てられる**。
+その結果、次の capf である `cape-file' が `/' を絶対パスとして拾い、
+C: 直下のディレクトリ一覧が出る。実際にそうなっていた。"
+  (let* ((bol (line-beginning-position))
+         (text (buffer-substring-no-properties bol (point))))
     (when (and my:claude--commands
-               (eq (char-after bol) ?/)
-               (>= (point) (1+ bol))
-               ;; 行頭からここまでに空白が無い = まだコマンド名の途中
-               (not (string-match-p "[ \t]" (buffer-substring bol (point)))))
-      (list (1+ bol) (point)
-            (mapcar #'car my:claude--commands)
+               (string-match-p "\\`/[A-Za-z0-9_-]*\\'" text))
+      (list bol (point)
+            (mapcar (lambda (c) (concat "/" (car c))) my:claude--commands)
             :exclusive 'no
             :annotation-function
-            (lambda (name)
-              (let ((e (assoc name my:claude--commands)))
+            (lambda (cand)
+              (let ((e (assoc (substring cand 1) my:claude--commands)))
                 (when e
                   (concat " " (truncate-string-to-width
                                (replace-regexp-in-string "\n" " " (nth 1 e))
@@ -1102,7 +1107,8 @@ Opus と Haiku を行き来してもそれまでの話は消えない。"
   "claude に送るテキストを書くモード。"
   (setq-local header-line-format
               "C-c C-c で送信 / C-c C-k で閉じる / 行頭の / は TAB で補完")
-  (add-hook 'completion-at-point-functions #'my:claude--capf nil t))
+  ;; cape-file が深さ 90 にいる。念のため明示的に先頭へ置く。
+  (add-hook 'completion-at-point-functions #'my:claude--capf -100 t))
 
 ;;; --------------------------------------------------
 ;;; グローバルキーバインド
