@@ -13,9 +13,13 @@
 ;; 切り替えは CLAUDE_CONFIG_DIR をプロセス起動時に渡すことでしか行えないので、
 ;; C-c a a で環境を選び、切り替えたくなったら C-c a e で立て直す。
 ;;
-;;   *claude*        会話の記録 (読み取り専用、`my:claude-mode')
-;;   *claude-input*  送信するテキストを書く (`my:claude-input-mode')
-;;   *claude-log*    生の JSON Lines (`my:claude-log' が非 nil のとき)
+;;   *claude(PROJ)*        会話の記録 (読み取り専用、`my:claude-mode')
+;;   *claude-input(PROJ)*  送信するテキストを書く (`my:claude-input-mode')
+;;   *claude-log(PROJ)*    生の JSON Lines (`my:claude-log' が非 nil のとき)
+;;
+;; PROJ は作業ディレクトリの名前 (`my:claude--buffer-name')。セッションは
+;; 1 つに限っているので衝突避けではなく、どのプロジェクトに向かって話して
+;; いるのかをバッファ一覧から見えるようにするためのもの。
 ;;; Code:
 
 (require 'cl-lib)
@@ -86,7 +90,7 @@ subscriptionType を返すので、選択時にそちらを見せる。"
   :type '(repeat string))
 
 (defcustom my:claude-log nil
-  "非 nil なら受信した生の JSON Lines を *claude-log: ...* に残す。
+  "非 nil なら受信した生の JSON Lines を *claude-log(PROJ)* に残す。
 上流のイベント種別が変わったときに気づける唯一の手掛かりなので、
 様子がおかしいときは真にすること。"
   :type 'boolean)
@@ -378,6 +382,23 @@ cwd が変わるとセッション記録の置き場
            (read-directory-name "claude を起動するディレクトリ: "
                                 here nil t))))))
 
+(defun my:claude--buffer-name (base dir)
+  "BASE と作業ディレクトリ DIR からバッファ名を作る。
+
+  (my:claude--buffer-name \"claude\" \"c:/Users/masao/.emacs.d/\")
+  => \"*claude(.emacs.d)*\"
+
+DIR が nil なら従来どおりプロジェクト名を付けない (`*claude*')。
+
+セッションは Emacs 全体で 1 つに限っている (`my:claude--the-session')
+ので名前が衝突することは無いが、**どのプロジェクトに向かって話して
+いるのかはバッファ名から見えたほうがよい**。ヘッダ行の 2 列目に出して
+いるものと同じ値 (`file-name-nondirectory' + `directory-file-name')。"
+  (if dir
+      (format "*%s(%s)*" base
+              (file-name-nondirectory (directory-file-name dir)))
+    (format "*%s*" base)))
+
 (defun my:claude--session-for-buffer ()
   "いま使うセッション。無ければ nil。"
   (or my:claude--session (my:claude--live-session)))
@@ -502,8 +523,9 @@ RESUME は `my:claude--command' に渡す (t で --continue、文字列で --res
   (unless (file-executable-p my:claude-executable)
     (user-error "claude が見つからない: %s" my:claude-executable))
   (let* ((config-dir (my:claude--config-dir env))
-         (conv (get-buffer-create "*claude*"))
-         (log  (when my:claude-log (get-buffer-create "*claude-log*")))
+         (conv (get-buffer-create (my:claude--buffer-name "claude" dir)))
+         (log  (when my:claude-log
+                 (get-buffer-create (my:claude--buffer-name "claude-log" dir))))
          (session (my:claude--make-session
                    :buffer conv :log-buffer log
                    :directory dir :name env :config-dir config-dir
@@ -1837,9 +1859,13 @@ ARG (`C-u') を付けると、生きているセッションがあっても畳�
 ;;; ウィンドウのレイアウト
 
 (defun my:claude--buffer-p (buf)
-  "BUF が claude の会話 / 入力バッファなら非 nil。"
+  "BUF が claude の会話 / 入力バッファなら非 nil。
+
+**名前では見ない。** バッファ名にはプロジェクト名が入る
+ (`my:claude--buffer-name') ので、メジャーモードで判定する。"
   (and (bufferp buf)
-       (member (buffer-name buf) '("*claude*" "*claude-input*"))
+       (memq (buffer-local-value 'major-mode buf)
+             '(my:claude-mode my:claude-input-mode))
        t))
 
 (defun my:claude--keep-buffer ()
@@ -1863,7 +1889,8 @@ ARG (`C-u') を付けると、生きているセッションがあっても畳�
   "画面を上下 2 分割し、下半分に会話バッファと入力バッファを出す。
 
   上半分  編集中のバッファ
-  下半分  上が *claude* (出力)、下が *claude-input* (入力)
+  下半分  上が会話バッファ (出力)、下が入力バッファ
+          それぞれ *claude(PROJ)* と *claude-input(PROJ)*
 
 下半分の高さはフレームの `my:claude-window-height-ratio' 倍、
 入力バッファは `my:claude-input-window-height' 行。最後にカーソルを
@@ -1874,13 +1901,29 @@ ARG (`C-u') を付けると、生きているセッションがあっても畳�
  (トグル前の `window-configuration' は退避しない)。"
   (interactive)
   (let* ((session (my:claude--session-for-buffer))
-         (conv (if session (my:claude-session-buffer session)
-                 (get-buffer-create "*claude*")))
-         (input (get-buffer-create "*claude-input*"))
+         ;; バッファ名に入れるプロジェクト名の元。セッションがまだ無いときは
+         ;; **確認を出さない** `my:claude--guess-directory' で推測する。
+         ;; `my:claude--project-directory' を使うと、画面を整えるだけの
+         ;; `C-c a l' でも y-or-n-p が出てしまう。
+         (dir (if session (my:claude-session-directory session)
+                (my:claude--guess-directory)))
+         ;; **conv / input を作るより先に決める。** あとに回すと、まだ
+         ;; メジャーモードが立っていない新品のバッファを
+         ;; `my:claude--buffer-p' が claude 系と見なせず、上半分に
+         ;; 残すバッファとして選んでしまう。
          (keep (my:claude--keep-buffer))
+         (conv (if session (my:claude-session-buffer session)
+                 (get-buffer-create (my:claude--buffer-name "claude" dir))))
+         (input (get-buffer-create (my:claude--buffer-name "claude-input" dir)))
          (total (window-total-height (frame-root-window)))
          (bottom (max 8 (round (* total my:claude-window-height-ratio))))
          (ih (max 3 my:claude-input-window-height)))
+    ;; セッションより先に `C-c a l' を押したときは、ここで作った会話
+    ;; バッファにまだモードが立っていない。次に `my:claude--buffer-p' が
+    ;; 呼ばれたときのために立てておく (`my:claude-mode' は special-mode
+    ;; 派生で、空バッファに立てても読み取り専用になるだけ)。
+    (with-current-buffer conv
+      (unless (derived-mode-p 'my:claude-mode) (my:claude-mode)))
     (with-current-buffer input
       (unless (derived-mode-p 'my:claude-input-mode) (my:claude-input-mode))
       (when session (setq my:claude--session session)))
@@ -2303,7 +2346,13 @@ Opus と Haiku を行き来してもそれまでの話は消えない。"
 (defun my:claude--conversation-buffer ()
   "いま使う会話バッファ。無ければ nil。"
   (let ((session (my:claude--session-for-buffer)))
-    (if session (my:claude-session-buffer session) (get-buffer "*claude*"))))
+    (if session
+        (my:claude-session-buffer session)
+      ;; セッションが無いときは名前で引けない (プロジェクト名が入る)。
+      ;; `my:claude--buffer-p' と同じくメジャーモードで探す。
+      (seq-find (lambda (b)
+                  (eq (buffer-local-value 'major-mode b) 'my:claude-mode))
+                (buffer-list)))))
 
 (defun my:claude-input-quit ()
   "入力バッファを閉じ、空いた領域を会話バッファに渡す。

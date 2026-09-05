@@ -822,6 +822,29 @@ Windows の Emacs には PTY が無いので claude の対話 TUI は動かな�
 | `C-c C-c` | 送信（`*claude-input*`。**送ると入力ウィンドウは畳まれる**。`M-p` / `M-n` で履歴） |
 | `C-c C-k` | 入力バッファを閉じる（`*claude-input*`。`*claude*` では中断） |
 
+### バッファ名にはプロジェクト名が入る
+
+`my:claude--buffer-name` が作業ディレクトリの名前を付ける。上の表で
+`*claude*` / `*claude-input*` と書いてあるものは実際には
+`*claude(.emacs.d)*` / `*claude-input(.emacs.d)*` になる（`*claude-log*` も同じ）。
+セッションは 1 つに限っているので衝突避けではなく、**どのプロジェクトに向かって
+話しているのかをバッファ一覧から見えるようにするため**。
+
+**そのため「claude のバッファか」を名前で判定してはいけない。**
+`my:claude--buffer-p` はメジャーモード（`my:claude-mode` /
+`my:claude-input-mode`）で見る。セッションが無いときに会話バッファを探す
+`my:claude--conversation-buffer` も同じ。
+
+`my:claude-layout` はセッションより先に呼ばれることがある（`C-c a l`）ので、
+そのときは `my:claude--guess-directory`（**確認を出さない版**）で名前を決める。
+`my:claude--project-directory` を使うと画面を整えるだけで `y/n` が出る。
+あわせて 2 点:
+
+- **上半分に残すバッファは `conv` / `input` を作るより先に決める。**
+  あとに回すと、まだメジャーモードが立っていない新品のバッファを
+  `my:claude--buffer-p` が claude 系と見なせず、上半分に選んでしまう
+- 作った会話バッファにはその場で `my:claude-mode` を立てる（同じ理由）
+
 ### 作業ディレクトリの決め方
 
 **さかのぼりはしない。**
