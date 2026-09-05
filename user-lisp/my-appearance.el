@@ -105,6 +105,17 @@
         (set-fontset-font t '(#x1fa70 . #x1fbff) "Apple Color Emoji" nil 'append)
         (set-fontset-font t '(#x1f900 . #x1f9e0) "Apple Color Emoji" nil 'append))
       (when (eq window-system 'w32)
+        ;; 範囲指定 (下の 3 行) だけだと第 1 面の絵文字しか拾えず、BMP にある
+        ;; ✅ U+2705 や ⏸ U+23F8 が豆腐になっていた。Emacs 標準の fontset-default は
+        ;; emoji に Noto Color Emoji / Noto Emoji、symbol に Symbola しか登録しておらず
+        ;; (lisp/international/fontset.el)、Windows にはいずれも無いため
+        ;; 描画フォントが見つからない (internal-char-font が nil になる)。
+        ;; スクリプト単位でも Segoe UI Emoji を割り当てて漏れを塞ぐ。
+        ;;   emoji  … ✅ U+2705 など。Noto より先に見てほしいので prepend
+        ;;   symbol … ⏸ U+23F8 など emoji スクリプトに分類されないもの。
+        ;;            上の Math symbols / Greek などの範囲指定を勝たせるため append
+        (set-fontset-font t 'emoji (font-spec :family "Segoe UI Emoji") nil 'prepend)
+        (set-fontset-font t 'symbol (font-spec :family "Segoe UI Emoji") nil 'append)
         (set-fontset-font t '(#x1f300 . #x1f9ff) "Segoe UI Emoji" nil 'append)
         (set-fontset-font t '(#x1fa70 . #x1fbff) "Segoe UI Emoji" nil 'append)
         (set-fontset-font t '(#x1f900 . #x1f9e0) "Segoe UI Emoji" nil 'append))
