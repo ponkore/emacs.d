@@ -159,7 +159,7 @@ lexical-binding の検証（後述）と同じく、一時ディレクトリに�
 | `my-gitd` | magit の同期 git 実行を常駐プロセス（`gitd/`）に肩代わりさせる。Windows のみ |
 | `my-magit-watch` | ワークツリーを監視して magit バッファを自動更新。Windows のみ |
 | `my-shell` | exec-path-from-shell、Windows 用 shell 設定 |
-| `my-utils` | calendar、open-junk-file、grep/ripgrep、blog 用ヘルパ |
+| `my-utils` | calendar、open-junk-file、grep/ripgrep、server（emacsclient 用） |
 | `my-claude` | Claude Code を stream-json で使う（プレフィクス: `C-c a`） |
 | `my-pty` | ConPTY 経由で対話 TUI を動かす（`ptyd/`）。Windows のみ |
 | `my-platform` | Windows / macOS 固有設定 |

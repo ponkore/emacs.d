@@ -37,3 +37,7 @@
 # --- magit-gitd (2026-09) ---
 /gitd/target/
 /ptyd/ptyd.exe
+
+# --- Claude Code (2026-09) ---
+# skills/ は共有する。settings.local.json はマシン固有の許可リストなので除く。
+/.claude/settings.local.json

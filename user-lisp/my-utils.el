@@ -171,6 +171,35 @@
     ;; cp932 化は上の advice が担当するので、ここで束縛する必要は無い。
     (ripgrep-regexp regexp (dired-current-directory) args)))
 
+;;; [3] Emacs server
+
+;; emacsclient から式を評価させるために server を立てる。
+;; GUI でしか観測できない値 (フォントの実描画幅、format-mode-line の実表示、
+;; 実際に効いているキーバインド) は batch では測れないので、生きた Emacs に
+;; 直接聞けるようにしておく。
+;;
+;; これまでは手で M-x server-start していたため、Emacs を再起動すると
+;; emacsclient が繋がらなくなっていた。
+(use-package server
+  ;; 組み込みライブラリなのでインストール指定は不要。
+  ;; :hook があるので遅延され、:defer t は要らない。
+  :hook (emacs-startup-hook . my:server-start-maybe)
+  :init
+  ;; 【重要】この defun は :init に置くこと。:config は
+  ;; (with-eval-after-load 'server ...) に包まれるので、server.el が
+  ;; ロードされるまで定義されない。それでは emacs-startup-hook から
+  ;; 呼ばれた時点で void-function になる。
+  (defun my:server-start-maybe ()
+    "サーバが動いていなければ起動する。"
+    ;; server-start は autoload されているが `server-running-p' はされて
+    ;; いない (実測: emacs -Q で fboundp が nil)。判定より先に require する。
+    (require 'server)
+    ;; server-running-p は「動いている」(t)、「動いていない」(nil) のほかに
+    ;; 「すぐには判定できない」(それ以外) を返す。nil のときだけ起動すれば、
+    ;; 既に別の Emacs が同じ名前で待ち受けている場合にソケットを奪わない。
+    (unless (server-running-p)
+      (server-start))))
+
 ;;; [3] 自分の Blog (myblog-hugo) 用のものは削除した
 
 ;; 計画書の J-9。Hugo のドラフト作成・公開を行う myblog-hugo/* 一式
