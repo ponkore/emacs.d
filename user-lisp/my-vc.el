@@ -81,6 +81,120 @@
   :config
   (global-diff-hl-mode +1)
   (diff-hl-flydiff-mode +1)
+  :init
+  ;; --------------------------------------------------
+  ;; diff-hl-dired の再入対策 (2026-09-05)
+  ;;
+  ;; 症状: dired を開いていると
+  ;;   Buffer " *diff-hl-dired* tmp status" has a running process; kill it?
+  ;; が頻繁に出る。
+  ;;
+  ;; 出所は `process-kill-buffer-query-function' (subr.el)。`kill-buffer' した
+  ;; バッファに status が run のプロセスがぶら下がっていると聞いてくる。
+  ;; そのバッファを作って kill しているのは diff-hl-dired だけ:
+  ;;
+  ;;   diff-hl-dired.el:101  前回のチェーンが生きていれば kill-process して
+  ;;                         一時バッファ (1 個だけ) を使い回す
+  ;;   diff-hl-dired.el:143  チェーンが終わったら kill-buffer する
+  ;;
+  ;; vc-git の dir-status-files は update-index -> diff-index ->
+  ;; ls-files-missing -> ... -> ls-files-ignored とプロセスを 6 回前後
+  ;; リレーする (vc-git.el の `vc-git-after-dir-status-stage')。Windows は
+  ;; spawn 1 回が 55 ms 前後なので、1 チェーンで 0.5〜1 秒かかる。
+  ;;
+  ;; `diff-hl-dired-update' は `dired-after-readin-hook' に載っているので、
+  ;; my-dired.el で dired を auto-revert させて以降 (2026-09-04)、この 1 秒の
+  ;; 間に次の update が来るようになった。
+  ;;
+  ;; 再入したとき kill-process で前のチェーンを止められるのは「そのプロセスが
+  ;; まだ生きている」ときだけ。プロセスは終了済みで sentinel がまだ走って
+  ;; いない瞬間に再入すると kill-process は何もせず、旧チェーンが後から再開
+  ;; して新チェーンと同じバッファで交錯する (タイマーと sentinel はどちらも
+  ;; コマンドループの同じ場所で回るので、どちらが先かは保証されない)。
+  ;; 先に終わった側が kill-buffer を呼び、そこには相手のプロセスが走って
+  ;; いる、というのがあのプロンプト。
+  ;;
+  ;; 困るのはプロンプトだけではない。両チェーンが同じバッファを erase-buffer
+  ;; し合うので、dired のマーカーが欠けたり古いままになったりする。
+  ;;
+  ;; 対策は 2 つ。
+  ;;
+  ;;   (1) 一時バッファで `kill-buffer-query-functions' を nil にする。
+  ;;       中身は読み取り専用の git なので、途中で殺して困るものは無い。
+  ;;   (2) 前のチェーンが走っている間は新しいチェーンを始めない。
+  ;;       交錯そのものを避け、連続する revert を 1 回に畳む。
+  ;;
+  ;; (2) は「遅らせる」のではなく「走っていなければ即実行、走っていれば
+  ;; 終わるのを待って 1 回だけ」にしてある。dired を開いた直後や g を押した
+  ;; ときは従来どおり即座に走る。
+
+  (defvar my:diff-hl-dired-poll-interval 0.5
+    "前のチェーンが終わったかを見に行く間隔 (秒)。")
+
+  (defvar my:diff-hl-dired-max-wait 5.0
+    "前のチェーンの終了を待つ上限 (秒)。
+
+これを超えたら待たずに走らせる (= diff-hl 本来の kill-process する動作)。
+一時バッファが何かの理由で残ったままになったときに、更新が永久に
+止まってしまうのを防ぐための保険。")
+
+  (defvar-local my:diff-hl-dired--timer nil
+    "待ち直し用のタイマー。dired バッファごとに 1 本。")
+
+  (defvar-local my:diff-hl-dired--deadline nil
+    "待ちを諦める時刻 (`float-time')。待っていないときは nil。")
+
+  (defun my:diff-hl-dired--in-flight-p ()
+    "この dired バッファの status チェーンがまだ走っているなら非 nil。
+
+一時バッファはチェーンの最後に kill されるので、生きていることが
+そのまま「走っている」ことの印になる。"
+    (buffer-live-p (bound-and-true-p diff-hl-dired-process-buffer)))
+
+  (defun my:diff-hl-dired--start (orig)
+    "ORIG (`diff-hl-dired-update') を実際に呼び、一時バッファを黙らせる。"
+    (setq my:diff-hl-dired--deadline nil)
+    (funcall orig)
+    ;; 一時バッファはここで (再) 生成されている。バッファは使い回されるうえ
+    ;; チェーンの終わりに kill されるので、毎回張り直す。
+    (let ((buffer (bound-and-true-p diff-hl-dired-process-buffer)))
+      (when (buffer-live-p buffer)
+        (with-current-buffer buffer
+          (setq-local kill-buffer-query-functions nil)))))
+
+  (defun my:diff-hl-dired--rearm (buffer orig)
+    "BUFFER で ORIG を呼び直すタイマーを張り直す。"
+    (when (timerp my:diff-hl-dired--timer)
+      (cancel-timer my:diff-hl-dired--timer))
+    (setq my:diff-hl-dired--timer
+          (run-at-time my:diff-hl-dired-poll-interval nil
+                       #'my:diff-hl-dired--run buffer orig)))
+
+  (defun my:diff-hl-dired--run (buffer orig)
+    "待ちから復帰したときの入口。BUFFER が生きていれば ORIG を呼ぶ。"
+    (when (buffer-live-p buffer)
+      (with-current-buffer buffer
+        (setq my:diff-hl-dired--timer nil)
+        (if (and (my:diff-hl-dired--in-flight-p)
+                 (< (float-time) (or my:diff-hl-dired--deadline 0)))
+            (my:diff-hl-dired--rearm buffer orig)
+          (my:diff-hl-dired--start orig)))))
+
+  (defun my:diff-hl-dired-update-guard (orig &rest _args)
+    "`diff-hl-dired-update' の再入を防ぐ。
+
+走っているチェーンが無ければそのまま呼ぶ。走っていれば呼ばず、
+終わるのを待って 1 回だけ呼ぶ (待っている間に来た分は畳まれる)。"
+    (let ((buffer (current-buffer)))
+      (if (not (my:diff-hl-dired--in-flight-p))
+          (my:diff-hl-dired--start orig)
+        (unless my:diff-hl-dired--deadline
+          (setq my:diff-hl-dired--deadline
+                (+ (float-time) my:diff-hl-dired-max-wait)))
+        (my:diff-hl-dired--rearm buffer orig))))
+
+  (advice-add 'diff-hl-dired-update :around #'my:diff-hl-dired-update-guard)
+
   ;; leaf の :hydra 相当 (init 時にインライン展開される)。
   :init
   (defhydra hydra-diff-hl nil

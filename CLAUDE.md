@@ -2211,7 +2211,7 @@ dired 側は受け入れ準備が済んでいる（`dired.el:2906`）。
 - `diff-hl-dired-mode` が `dired-after-readin-hook` に載っている（`my-vc.el`）
   ので、自動更新のたびに vc 経由の git 呼び出しが増える。watch は非再帰で
   `.git/` の中の変化は届かないため、git の書き込みで更新が誘発される
-  ループにはならない
+  ループにはならない（この再入が別の問題を起こす。後述）
 
 GUI プローブでの実測:
 
@@ -2221,6 +2221,71 @@ GUI プローブでの実測:
 | マークの維持 | **t**（`*` 1 個が残った） |
 | magit バッファの `auto-revert-mode` / `auto-revert--global-mode` | **どちらも nil** |
 | `magit-refresh-buffer` | 従来どおり成功 |
+
+### 【重要】diff-hl-dired が再入する（2026-09-05 に対処）
+
+自動更新を入れてから
+
+```
+Buffer " *diff-hl-dired* tmp status" has a running process; kill it? (yes or no)
+```
+
+が頻繁に出るようになった。出所は `process-kill-buffer-query-function`
+（`subr.el`）で、`kill-buffer` した先に status が `run` のプロセスが
+ぶら下がっていると聞いてくる。そのバッファを作って kill しているのは
+diff-hl-dired だけ。
+
+| | |
+|---|---|
+| `diff-hl-dired.el:101` | 前のチェーンが生きていれば `kill-process` して**一時バッファ 1 個を使い回す** |
+| `diff-hl-dired.el:143` | チェーンが終わったら `kill-buffer` する |
+
+vc-git の `dir-status-files` は `update-index` → `diff-index` →
+`ls-files-missing` → … → `ls-files-ignored` と**プロセスを 6 回前後リレー**する
+（`vc-git.el` の `vc-git-after-dir-status-stage`）。Windows は spawn 1 回が
+55 ms 前後なので 1 チェーンで 0.5〜1 秒かかり、**auto-revert で
+`dired-after-readin-hook` が再び走るには十分な長さ**になる。
+
+再入したとき `kill-process` で前のチェーンを止められるのは「そのプロセスが
+まだ生きている」ときだけ。**プロセスは終了済みで sentinel がまだ走っていない
+瞬間**に再入すると `kill-process` は何もせず、旧チェーンが後から再開して
+新チェーンと同じバッファで交錯する（タイマーと sentinel はどちらも
+コマンドループの同じ場所で回るので、どちらが先かは保証されない）。
+先に終わった側が `kill-buffer` を呼び、そこには相手のプロセスが走っている、
+というのがあのプロンプト。**両チェーンが同じバッファを `erase-buffer` し合う
+ので、プロンプトを別にしても dired のマーカーが欠けたり古いままになる。**
+
+`my-vc.el` で 2 つ入れてある。
+
+1. 一時バッファで `kill-buffer-query-functions` を nil にする。中身は
+   読み取り専用の git なので、途中で殺して困るものは無い
+2. `diff-hl-dired-update` に `:around`（`my:diff-hl-dired-update-guard`）。
+   **走っているチェーンが無ければ従来どおり即実行**、走っていれば呼ばずに
+   0.5 秒間隔で終了を待って 1 回だけ呼ぶ。待っている間に来た分は畳まれる。
+   5 秒（`my:diff-hl-dired-max-wait`）で待ちを打ち切る保険付き
+   （一時バッファが残ったときに更新が永久に止まらないように）
+
+「走っているか」の判定は**一時バッファの生死**で足りる（チェーンの最後に
+kill されるので、生きていること自体が印になる）。
+
+batch プローブでの実測（`user-lisp/` を `dired-noselect` し、チェーンが
+走っている最中に `diff-hl-dired-update` を呼ぶ）:
+
+| | 対処後 | 対処前 |
+|---|---|---|
+| 一時バッファの `kill-buffer-query-functions` | **nil** | `(process-kill-buffer-query-function)` |
+| 再入後にプロセスが同一か | **t**（新チェーンを始めない） | **nil**（殺して差し替え） |
+| 待ちタイマー | t | nil |
+| `run` のまま `kill-buffer` | **t**（黙って通る） | **`inhibited-interaction`** |
+
+畳んだ更新が失われないことも確認した。開いた直後に 3 連続で呼ぶと
+タイマー 1 本にまとまり、8 秒後にはチェーン完了・一時バッファ無し・
+マーカーは変更済みの 2 ファイルに付いている。
+
+**`inhibit-interaction` を立てずに測ってはいけない。** batch の `yes-or-no-p`
+は stdin を待つので、対処前の `kill-buffer` でプローブが固まる
+（最初の 1 回で実際に固まった。それはそれで「本当に聞いてくる」ことの
+証明にはなる）。
 
 ## markdown のプレビューと外部エディタ
 
