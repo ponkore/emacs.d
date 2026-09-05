@@ -2490,7 +2490,17 @@ C-1 のようにテキストプロパティを貼る仕掛けは要らない。�
   ;; まとめて消えるので、文言を書き換えたときに黙って壊れないようにしておく。
   (setq-local header-line-format
               (my:claude--header-segment
-               "C-c C-c 送信して閉じる / C-c C-k 閉じる / C-c C-z 最大化 / 行頭 / は TAB 補完 / M-p 履歴"
+               ;; `C-c a k' だけプレフィックスが違うのは、中断がこのバッファ
+               ;; ではなく**セッション**への操作だから。C-c C-* はこの
+               ;; バッファの操作 (送信・閉じる・最大化)、C-c a * はセッション
+               ;; の操作 (中断・終了・環境切り替え) という区別が付いている。
+               ;;
+               ;; `C-c C-k' を中断にはしない。org-capture / git-commit /
+               ;; message-mode と同じく、下書きバッファの C-c C-k は「書き
+               ;; かけをやめる」が慣習で、変えると入力バッファを畳む手段が
+               ;; 無くなる。会話バッファ側の C-c C-k が中断なのは、あちらが
+               ;; compilation の kill-compilation と同じ性格だから。
+               "C-c C-c 送信 / C-c C-k 閉じる / C-c a k 中断 / C-c C-z 最大化 / 行頭 / は TAB 補完 / M-p 履歴"
                'my:claude-input-header-face))
   ;; cape-file が深さ 90 にいる。念のため明示的に先頭へ置く。
   (add-hook 'completion-at-point-functions #'my:claude--capf -100 t))
