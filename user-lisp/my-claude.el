@@ -2325,7 +2325,14 @@ Opus と Haiku を行き来してもそれまでの話は消えない。"
         (select-window cw)))))
 
 (defun my:claude-input-send ()
-  "入力バッファの内容を送って空にする。"
+  "入力バッファの内容を送って空にし、入力ウィンドウを畳む。
+
+送ったあとに書くことはもう無いので、`C-c C-k\' (`my:claude-input-quit\')
+と同じ形にして下半分を *claude* だけにする。応答は読む一方なので、
+入力用の数行を残しておく理由が無い。
+
+書き足すときは会話バッファで `i\' (`my:claude-input\') を押せば
+`my:claude-layout\' が元の 3 分割に組み直す。"
   (interactive)
   (let ((text (buffer-substring-no-properties (point-min) (point-max)))
         (session my:claude--session))
@@ -2348,7 +2355,11 @@ Opus と Haiku を行き来してもそれまでの話は消えない。"
       (with-current-buffer buf
         (goto-char (point-max))
         (dolist (w (get-buffer-window-list buf nil t))
-          (set-window-point w (point-max)))))))
+          (set-window-point w (point-max)))))
+    ;; 畳むのはいちばん最後。`my:claude-input-quit' が消すのは入力
+    ;; ウィンドウなので、上の `display-buffer' で会話バッファを出して
+    ;; からでないと、空いた領域を受け取る窓が無い。
+    (my:claude-input-quit)))
 
 (defun my:claude-toggle-fold ()
   "折りたたんだツール出力の全体を別バッファで見る。"
@@ -2383,6 +2394,9 @@ Opus と Haiku を行き来してもそれまでの話は消えない。"
 (define-derived-mode my:claude-mode special-mode "Claude"
   "claude との会話を表示するモード。
 
+i / C-c C-i で入力バッファを開く (`C-c a i' と同じ)。送信すると入力
+ウィンドウは畳まれてこのバッファだけになるので、次を書くときはここから
+`i' で戻る。
 TAB で折りたたんだツール出力の全体を別バッファに出す。
 z / C-c C-z でこのウィンドウを最大化 (もう一度で元のレイアウト)。"
   (setq-local truncate-lines nil))
@@ -2427,7 +2441,7 @@ C-1 のようにテキストプロパティを貼る仕掛けは要らない。�
   ;; まとめて消えるので、文言を書き換えたときに黙って壊れないようにしておく。
   (setq-local header-line-format
               (my:claude--header-segment
-               "C-c C-c 送信 / C-c C-k 閉じる / C-c C-z 最大化 / 行頭 / は TAB 補完 / M-p 履歴"
+               "C-c C-c 送信して閉じる / C-c C-k 閉じる / C-c C-z 最大化 / 行頭 / は TAB 補完 / M-p 履歴"
                'my:claude-input-header-face))
   ;; cape-file が深さ 90 にいる。念のため明示的に先頭へ置く。
   (add-hook 'completion-at-point-functions #'my:claude--capf -100 t))
