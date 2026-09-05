@@ -41,6 +41,38 @@
           (my:open-file-externally file)
         (dired-find-file))))
 
+  (defun my:dired-copy-git-relative-filename-as-kill ()
+    "選択行のファイル/ディレクトリを git root からの相対パスで kill-ring へ入れる。
+
+パスセパレータは常に \"/\" にする (Windows の \"\\\" は置換する)。
+マークが付いていればマークされた全件を改行区切りで入れる。
+git 管理下でなければメッセージを出すだけで kill-ring は触らない。
+
+`dired-copy-filename-as-kill' (w) のファイル名・
+\\[universal-argument] 0 w の絶対パスに対して、
+リポジトリ相対パスが欲しいときに使う。ソースの場所を人に伝えたり、
+issue やコミットメッセージへ貼るのはこの形が多い。
+
+**git は呼ばない** (`locate-dominating-file' で上へ探すだけ)。
+Windows では `call-process' が遅く、この操作は 1 キーで即返したいため
+(`my:claude--git-dir' と同じ方針)。worktree や submodule では `.git' が
+ファイルだが、`locate-dominating-file' はどちらにも一致するので
+ルートの判定はこれで足りる (gitdir を辿る必要は無い)。"
+    (interactive)
+    ;; ERROR 引数を t にしているので、対象が無ければ dired 側が signal する。
+    (let* ((files (dired-get-marked-files nil nil nil nil t))
+           ;; ルートはカレント行のディレクトリから 1 回だけ探す。マークした
+           ;; ファイルはすべてこの下にあるので、ファイルごとに探す必要は無い。
+           (root (locate-dominating-file (dired-current-directory) ".git")))
+      (if (not root)
+          (message "git 管理下ではありません: %s" (dired-current-directory))
+        (let ((paths (mapconcat
+                      (lambda (f)
+                        (subst-char-in-string ?\\ ?/ (file-relative-name f root)))
+                      files "\n")))
+          (kill-new paths)
+          (message "%s" paths)))))
+
   (defun my:dired-auto-revert-setup ()
     "この dired バッファを外部の変更に追随させる。
 
@@ -74,6 +106,10 @@
    ;; (my-utils.el で定義)。従来ここが本家に割り当たっていたため、
    ;; せっかく定義した my:ripgrep-regexp が使われていなかった。
    ("G" . my:ripgrep-regexp)
+   ;; w (ファイル名) / C-u 0 w (絶対パス) に対する「git root 相対パス」。
+   ;; w W y など 1 文字キーは dired と dired-x が使い切っているので、
+   ;; 衝突しない C-c 側に置く。
+   ("C-c w" . my:dired-copy-git-relative-filename-as-kill)
    ("." . hydra-dired/body))
   :custom
   ;;
@@ -121,7 +157,7 @@
   :init
   (defhydra hydra-dired (:hint nil :color pink)
                "
-_+_ mkdir   _v_iew         _m_ark         _z_ip     _w_ get filename
+_+_ mkdir   _v_iew         _m_ark         _z_ip     _w_ get filename    _y_ git rel path
 _C_opy      view _o_ther   _U_nmark all   un_Z_ip   _W_ get fullpath
 _D_elete    open _f_ile    _u_nmark       _s_ort    _g_ revert buffer
 _R_ename    ch_M_od        _t_oggle       _e_dit    _[_ hide detail     _._togggle hydra
@@ -150,6 +186,7 @@ _R_ename    ch_M_od        _t_oggle       _e_dit    _[_ hide detail     _._toggg
     ("v" dired-view-file :exit t)
     ("w" dired-copy-filename-as-kill)
     ("W" dired-get-fullpath-filename)
+    ("y" my:dired-copy-git-relative-filename-as-kill)
     ("z" dired-zip-files)
     ("Z" dired-do-compress)
                ;; ("F" my:finder-app)
