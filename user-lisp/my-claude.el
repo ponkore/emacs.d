@@ -101,6 +101,25 @@ subscriptionType を返すので、選択時にそちらを見せる。"
 nil なら毎回聞く。"
   :type '(choice (const :tag "毎回聞く" nil) regexp function))
 
+(defcustom my:claude-answer-questions t
+  "非 nil なら AskUserQuestion の質問をミニバッファで答える。
+
+AskUserQuestion は **ホスト側が実行するツール**で、選択 UI を出して
+答えを `tool_result' の `answers' に載せるのは端末 TUI の仕事になって
+いる。`-p' (stream-json) にはその UI が無いので、allow を返しても
+答えは返らない。
+
+そこで `can_use_tool' を横取りして Emacs 側で聞き、**答えを deny の
+`message' に載せて返す**。deny の message はそのまま claude に届く
+ (`my:claude--respond-permission') ので、この経路しか残っていない。
+
+【重要】許可を聞かれない設定では効かない。`--permission-mode' が
+dontAsk / bypassPermissions のとき、settings.json の permissions.allow に
+AskUserQuestion があるとき、`my:claude-auto-approve' が一致するときは
+`can_use_tool' 自体が飛んで来ない (この関数は `my:claude-auto-approve'
+より先に判定するので、後者だけは踏まない)。"
+  :type 'boolean)
+
 (defcustom my:claude-stream t
   "非 nil なら応答を書かれる端から表示する。
 
@@ -1609,10 +1628,14 @@ point が末尾から外れて自動スクロールが止まっていた**。"
 (defun my:claude--tool-summary (block)
   "tool_use の入力を 1 行にまとめる。"
   (let* ((input (alist-get 'input block))
+         ;; AskUserQuestion だけは決まったキーを持たない。空のままだと
+         ;; 名前しか出ないので、最初の質問文を出す。
+         (questions (append (alist-get 'questions input) nil))
          (s (or (alist-get 'command input)
                 (alist-get 'file_path input)
                 (alist-get 'pattern input)
                 (alist-get 'description input)
+                (and questions (alist-get 'question (car questions)))
                 "")))
     (truncate-string-to-width (replace-regexp-in-string "\n" " " s) 100 nil nil "…")))
 
@@ -1735,17 +1758,138 @@ point が末尾から外れて自動スクロールが止まっていた**。"
        (other (format "%s" other))))
    (append suggestions nil) " / "))
 
+;;; --------------------------------------------------
+;;; AskUserQuestion
+;;; --------------------------------------------------
+
+(defun my:claude--question-options (q)
+  "質問 Q の選択肢を (LABEL . DESCRIPTION) の alist にする。
+JSON の配列はベクタで来るのでリストに直す。"
+  (mapcar (lambda (o) (cons (or (alist-get 'label o) "")
+                            (or (alist-get 'description o) "")))
+          (append (alist-get 'options q) nil)))
+
+(defun my:claude--question-table (opts)
+  "選択肢の alist OPTS から `completing-read' 用のテーブルを作る。
+
+説明を注釈に出し、**並び順は claude が並べたまま**にする
+ (推奨が先頭に来ることがあるので、アルファベット順に並べ替えない)。"
+  (let ((labels (mapcar #'car opts)))
+    (lambda (str pred action)
+      (if (eq action 'metadata)
+          `(metadata
+            (annotation-function
+             . ,(lambda (s)
+                  (let ((d (alist-get s opts nil nil #'equal)))
+                    (unless (or (null d) (string-empty-p d))
+                      (concat "  " (truncate-string-to-width
+                                    (replace-regexp-in-string "[ \t\n]+" " " d)
+                                    70 nil nil "…"))))))
+            (display-sort-function . identity)
+            (cycle-sort-function . identity))
+        (complete-with-action action labels str pred)))))
+
+(defun my:claude--show-question (session q)
+  "質問 Q と選択肢を会話バッファに出す。
+
+説明は長いのでミニバッファの注釈だけでは読み切れない。聞く前にここへ
+出しておけば、選ぶときの材料になり、そのまま会話の記録にもなる。"
+  (my:claude--insert session
+                     (format "  ? %s%s\n"
+                             (or (alist-get 'question q) "")
+                             (let ((h (alist-get 'header q)))
+                               (if (and (stringp h) (not (string-empty-p h)))
+                                   (format " [%s]" h) "")))
+                     'my:claude-tool-face)
+  (let ((n 0))
+    (dolist (o (my:claude--question-options q))
+      (setq n (1+ n))
+      (my:claude--insert session (format "    %d. %s\n" n (car o))
+                         'my:claude-assistant-face)
+      (unless (string-empty-p (cdr o))
+        (my:claude--insert session (format "       %s\n" (cdr o))
+                           'my:claude-meta-face)))))
+
+(defun my:claude--read-answer (q)
+  "質問 Q をミニバッファで聞いて答えの文字列を返す。
+
+候補に無い文字列も返せる (本家の UI の「Other」に当たる) ので
+`require-match' は nil。空で確定されたら聞き直す。中断は `quit' が
+そのまま外へ飛び、呼び出し元が deny を返す。"
+  (let* ((opts (my:claude--question-options q))
+         (multi (eq t (alist-get 'multiSelect q)))
+         (prompt (format "%s%s: "
+                         (string-trim (or (alist-get 'question q) "回答"))
+                         (if multi " (複数可)" "")))
+         (table (my:claude--question-table opts))
+         ;; 許可プロンプトと同じくプロセスフィルタの中で聞くので、
+         ;; ミニバッファが既に開いていることがある。
+         (enable-recursive-minibuffers t)
+         (ans ""))
+    (while (string-empty-p ans)
+      (setq ans
+            (string-trim
+             (if multi
+                 (string-join (completing-read-multiple prompt table) ", ")
+               (completing-read prompt table)))))
+    ans))
+
+(defun my:claude--answer-questions (session rid input)
+  "AskUserQuestion の質問に Emacs で答えて control_response を返す。
+
+【重要】答えは **deny の `message'** に載せる。allow を返すと実行は
+ホスト側に回り、`-p' には選択 UI が無いので答えが返らない
+ (`my:claude-answer-questions' を参照)。"
+  (condition-case err
+      (let ((answers nil))
+        (dolist (q (append (alist-get 'questions input) nil))
+          (my:claude--show-question session q)
+          (let ((a (my:claude--read-answer q)))
+            (push (cons (or (alist-get 'question q) "") a) answers)
+            (my:claude--insert session (format "  → %s\n" a) 'my:claude-user-face)))
+        (my:claude--respond-deny
+         session rid
+         (concat "Your questions have been answered: "
+                 (mapconcat (lambda (a) (format "\"%s\"=\"%s\"" (car a) (cdr a)))
+                            (nreverse answers) ", ")
+                 ". You can now continue with these answers in mind."
+                 " (Answered by the user in Emacs; AskUserQuestion has no UI here,"
+                 " so the answers arrive as a denial. Do not retry the tool.)")))
+    (quit
+     (my:claude--insert session "  (質問をキャンセルしました)\n"
+                        'my:claude-error-face)
+     (my:claude--respond-deny
+      session rid
+      (concat "The user cancelled the question in Emacs."
+              " Do not retry AskUserQuestion; state your assumption and continue,"
+              " or ask in plain text.")))
+    (error
+     (my:claude--insert session
+                        (format "  (質問の処理に失敗: %s)\n" (error-message-string err))
+                        'my:claude-error-face)
+     (my:claude--respond-deny
+      session rid
+      (format "Failed to present the question in Emacs: %s. Ask in plain text instead."
+              (error-message-string err))))))
+
 (defun my:claude--ask-permission (_obj session rid req)
   "ツール使用の可否を尋ねて control_response を返す。"
   (let* ((name (or (alist-get 'tool_name req) "?"))
          (desc (or (alist-get 'description req) ""))
          (input (alist-get 'input req))
          (sugg (alist-get 'permission_suggestions req)))
-    (if (my:claude--auto-approve-p session name)
-        (progn
-          (my:claude--insert session (format "  (自動許可: %s)\n" name)
-                             'my:claude-meta-face)
-          (my:claude--respond-allow session rid input))
+    (cond
+     ;; 【重要】自動許可より先に見る。AskUserQuestion を allow で通すと
+     ;; 質問がどこにも出ないまま答えが返らない。
+     ((and my:claude-answer-questions
+           (equal name "AskUserQuestion")
+           (alist-get 'questions input))
+      (my:claude--answer-questions session rid input))
+     ((my:claude--auto-approve-p session name)
+      (my:claude--insert session (format "  (自動許可: %s)\n" name)
+                         'my:claude-meta-face)
+      (my:claude--respond-allow session rid input))
+     (t
       (let (done)
         (while (not done)
           (pcase (car (read-multiple-choice
@@ -1792,7 +1936,7 @@ point が末尾から外れて自動スクロールが止まっていた**。"
                   (push name (my:claude-session-approved session))
                   (my:claude--respond-allow session rid input))
                 (setq done t))
-            (?v (my:claude--show-input name input))))))))
+            (?v (my:claude--show-input name input)))))))))
 
 (defun my:claude--show-input (name input)
   "ツールの入力を別バッファに出す。"

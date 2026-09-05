@@ -1214,6 +1214,51 @@ Edit の入力は置換前と置換後がそのまま来るので、行単位で
 許可プロンプトの `a` がこれを使う。候補が付いていないときだけ
 Emacs 側で覚える従来動作に落ちる。
 
+### 【重要】AskUserQuestion の答えは `deny` の `message` に載せる
+
+**AskUserQuestion はホスト側が実行するツール**で、選択 UI を出して答えを
+`tool_result` の `answers` に載せるのは端末 TUI の仕事になっている。
+`-p`（stream-json）にはその UI が無いので、**allow を返しても答えは返らない**。
+
+しかし **ツール自体は `-p` でも提供されている**（`system/init` の `tools` に
+入っている。149 個中に `AskUserQuestion` があることを実測）ので、claude は
+普通に呼んでくる。放っておくと質問が出ないまま止まる。
+
+そこで `can_use_tool` を横取りして Emacs 側で聞き、**答えを `deny` の
+`message` に載せて返す**（`my:claude--answer-questions`）。deny の message は
+そのまま claude に届く（別節）ので、これが唯一の回答経路になる。
+
+実測（`--model haiku`、実際に 1 往復させた）:
+
+| | |
+|---|---|
+| `tool_use` の入力 | `questions` が丸ごと来る（`question` / `header` / `multiSelect` / `options[].label` / `options[].description`） |
+| `control_request` | `subtype=can_use_tool` / `tool_name=AskUserQuestion` で**必ず飛んで来る** |
+| `permission_suggestions` | **`null`**（このツールには付かない） |
+| deny の message | `is_error=true` の `tool_result` として**逐語で届く** |
+| claude の反応 | 「**青**をお選びになりました」= **答えとして解釈された** |
+
+`is_error` が立つのは避けられないので、message には
+「Emacs には UI が無いので拒否の形で答えが届く。ツールを呼び直すな」を
+併記してある。これが無いと claude が失敗と見て再試行しかねない。
+
+- **`my:claude-auto-approve` より先に判定する**（`my:claude--ask-permission` の
+  `cond` の先頭）。auto-approve に一致して allow で通すと、質問がどこにも
+  出ないまま答えが返らない
+- 質問と選択肢は**聞く前に会話バッファへ出す**。説明文は長く、ミニバッファの
+  注釈だけでは読み切れない。出しておけば会話の記録にもなる
+- 候補の並びは `display-sort-function` を `identity` にして**claude が並べた
+  ままにする**（推奨が先頭に来ることがある）
+- `require-match` は nil。候補に無い文字列も返せる（本家 UI の「Other」）。
+  空で確定されたら聞き直す
+- `multiSelect` が `t` なら `completing-read-multiple`。答えは `, ` で連結する
+- **`C-g` でも必ず応答を返す**（`condition-case` の `quit` 節）。返さないと
+  claude が待ち続ける。エラー時も同じ
+- 切るときは `my:claude-answer-questions` を nil にする（従来の許可プロンプトに
+  戻る）。ただし `--permission-mode` が `dontAsk` / `bypassPermissions` のときや
+  `permissions.allow` に `AskUserQuestion` があるときは `can_use_tool` 自体が
+  飛んで来ないので、そもそもこの経路は効かない
+
 ### 会話バッファの markdown 装飾
 
 `my:claude--fontify-markdown` が 3 つを順に行う。**この順でなければ
