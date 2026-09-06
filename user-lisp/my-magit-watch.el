@@ -13,7 +13,7 @@
 ;; `file-notify-add-watch' は `subtree' を渡さないので非再帰**であり、
 ;; 汎用 API 経由では使えない。
 ;;
-;; 設計と実測は tmp/magit-autorefresh-stage1-design.md を参照。
+;; 設計と実測は docs/magit/magit-autorefresh-stage1-design.md を参照。
 ;;
 ;;; gitd との協調 (段階 2b)
 ;;

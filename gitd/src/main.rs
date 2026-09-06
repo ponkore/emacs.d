@@ -35,7 +35,7 @@
 //! token が違えば問答無用でミスにする。**無効化通知は存在しない**ので、
 //! 「通知を 1 つ落とすと永久に古いまま」という壊れ方をしない。
 //!
-//! 詳細は ../tmp/magit-gitd-2b-design.md を参照。
+//! 詳細は ../docs/magit/magit-gitd-2b-design.md を参照。
 
 use std::collections::HashMap;
 use std::io::{self, BufRead, BufReader, Write};

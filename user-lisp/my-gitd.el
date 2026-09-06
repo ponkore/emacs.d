@@ -19,7 +19,8 @@
 ;;
 ;; 段階 2b でキャッシュと並列先読みを足した。残っていた「29 回の git 起動を
 ;; 直列に待つ 0.6 秒」を潰すためで、変化が無ければ git を 1 回も起動しない。
-;; 設計と実測の詳細は tmp/magit-gitd-2a-design.md と tmp/magit-gitd-2b-design.md。
+;; 設計と実測の詳細は docs/magit/magit-gitd-2a-design.md と
+;; docs/magit/magit-gitd-2b-design.md。
 ;;
 ;;; キャッシュの正しさ (2b でいちばん難しいところ)
 ;;
