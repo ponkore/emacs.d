@@ -2363,20 +2363,13 @@ dired と dired-x が使い切っているので、`C-c w`（git 相対パス）
 - git / svn の判別は `exceldiff vcs` 側がやるが、あちらは非同期でエラーが出力
   バッファ越しにしか見えないので、`locate-dominating-file` で先に弾く
   （git は起動しない。`my:dired-copy-git-relative-filename-as-kill` と同じ方針）
+- 実行ファイルは `executable-find` で見つける。無ければ `user-error`
 
 引数のエンコーディングは何も束縛しない。`default-process-coding-system` の
 cdr が Windows では既に cp932 なので、`start-process` の引数もそのまま正しい
 （`call-process` と同じ経路。CLAUDE.md の「`call-process` の引数は cp932 で
 エンコードすること」）。GUI 実測で `見積書_①テスト.xlsx` を渡すと、
 exceldiff のエラーメッセージに**同じ綴りで出てくる**ことを確認した。
-
-### `%USERPROFILE%\bin` は起動時期によって `exec-path` に無い
-
-`exceldiff.exe` は `~/bin` にあり、そこが PATH（`HKCU\Environment`）に入った
-のは yazi 用。**それより前に起動した Emacs の `exec-path` には無い**（実測で
-`executable-find` が nil）。起動し直せば見つかるが、それまで使えないのは
-不便なので `my:exceldiff-program-fallbacks` で既知の場所も見る
-（`my:markdown-external-editor` が Typora のパスを並べているのと同じ）。
 
 ### markdown は `markdown-open` と同じ経路を使う
 

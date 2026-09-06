@@ -79,25 +79,8 @@ Windows では `call-process' が遅く、この操作は 1 キーで即返し�
   ;; ようにする。CLI は https://github.com/ponkore/exceldiff。
 
   (defvar my:exceldiff-program "exceldiff"
-    "Excel ブックの差分を取る CLI。`executable-find' で解決するので
-PATH 上にあれば名前だけでよい。")
-
-  (defvar my:exceldiff-program-fallbacks
-    (list (expand-file-name "bin/exceldiff.exe" "~"))
-    "PATH に無かったときに `my:exceldiff--executable' が探す場所。
-
-%USERPROFILE%\\bin が PATH (HKCU\\Environment) に入ったのは yazi 用で、
-それより前に起動した Emacs の `exec-path' には無い (実測)。起動し直せば
-`executable-find' で見つかるが、それまで使えないのは不便なので既知の場所も見る。
-`my:markdown-external-editor' が Typora のインストール先を並べているのと同じ。")
-
-  (defun my:exceldiff--executable ()
-    "exceldiff の実行ファイルを返す。見つからなければ `user-error'。"
-    (or (executable-find my:exceldiff-program)
-        (seq-find #'file-executable-p my:exceldiff-program-fallbacks)
-        (user-error "%s が見つからない (PATH と %s を探した)"
-                    my:exceldiff-program
-                    (string-join my:exceldiff-program-fallbacks ", "))))
+    "Excel ブックの差分を取る CLI。`executable-find' で解決する。
+見つからなければ `user-error'。")
 
   (defvar my:exceldiff-file-regexp "\\.\\(?:xlsx\\|xlsm\\)\\'"
     "exceldiff に渡せるファイル名の正規表現。大文字小文字は区別しない。
@@ -141,7 +124,8 @@ Emacs が固まる。yazi のプラグインが block = true を避けている�
 `default-process-coding-system' の cdr が Windows では既に cp932 なので
 ここでは何も束縛しない (my-japanese.el)。utf-8 に戻すと日本語を含むパスが
 壊れて「起動するが何も起きない」になる。"
-    (let* ((exe (my:exceldiff--executable))
+    (let* ((exe (or (executable-find my:exceldiff-program)
+                    (user-error "%s が PATH に無い" my:exceldiff-program)))
            ;; 前の差分ブックを Excel で開いたまま次を起動することがあるので
            ;; (そのあいだ前のプロセスは生きている)、バッファは実行ごとに作る。
            ;; 成功したら sentinel が捨てるので溜まらない。
