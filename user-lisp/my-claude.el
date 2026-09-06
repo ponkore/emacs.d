@@ -418,15 +418,40 @@ DIR が nil なら従来どおりプロジェクト名を付けない (`*claude*
               (file-name-nondirectory (directory-file-name dir)))
     (format "*%s*" base)))
 
+(defun my:claude--session-usable-p (session)
+  "SESSION が使える状態なら非 nil。
+
+プロセスが生きているだけでは足りない。**会話バッファが kill されて
+いたら使えない**。書き出す先も見せる先も無いうえ、`my:claude-layout'
+がその死んだバッファを `display-buffer' して
+\"Selecting deleted buffer\" になる。"
+  (and session
+       (process-live-p (my:claude-session-process session))
+       (buffer-live-p (my:claude-session-buffer session))
+       session))
+
 (defun my:claude--session-for-buffer ()
   "いま使うセッション。無ければ nil。"
-  (or my:claude--session (my:claude--live-session)))
+  (or (my:claude--session-usable-p my:claude--session)
+      (my:claude--live-session)))
 
 (defun my:claude--live-session ()
-  "セッションが生きていれば返す。"
-  (and my:claude--the-session
-       (process-live-p (my:claude-session-process my:claude--the-session))
-       my:claude--the-session))
+  "セッションが生きていれば返す。
+
+会話バッファを kill しただけではプロセスは死なない (`make-process' の
+:buffer は nil で、出力は自前のフィルタが捌いている)。そのまま返すと
+`C-c a a' が消えたバッファを使い回そうとして失敗するので、**ここで
+畳んで nil を返す**。呼び出し側は新しいセッションを起こす。
+
+`my:claude-mode' の `kill-buffer-hook' でも畳んでいるが、EOF を送って
+から sentinel が走るまでには間があるので、その隙に `C-c a a' しても
+古いセッションを掴まないようにこちらでも見る。"
+  (cond
+   ((null my:claude--the-session) nil)
+   ((my:claude--session-usable-p my:claude--the-session) my:claude--the-session)
+   (t
+    (my:claude-quit-session my:claude--the-session)
+    (setq my:claude--the-session nil))))
 
 ;;; --------------------------------------------------
 ;;; 環境 (アカウント) の切り替え
@@ -2591,8 +2616,25 @@ i / C-c C-i で入力バッファを開く (`C-c a i' と同じ)。送信する�
 ウィンドウは畳まれてこのバッファだけになるので、次を書くときはここから
 `i' で戻る。
 TAB で折りたたんだツール出力の全体を別バッファに出す。
-z / C-c C-z でこのウィンドウを最大化 (もう一度で元のレイアウト)。"
-  (setq-local truncate-lines nil))
+z / C-c C-z でこのウィンドウを最大化 (もう一度で元のレイアウト)。
+
+**このバッファを kill するとセッションも終わる** (`C-c a q' 相当)。
+会話が消えたあとにプロセスだけ残しても送り先が無く、次の `C-c a a' が
+それを掴んで失敗するため。別プロジェクトへ移るときは、このバッファを
+kill してから `C-c a a' すればよい。"
+  (setq-local truncate-lines nil)
+  (add-hook 'kill-buffer-hook #'my:claude--kill-buffer-hook nil t))
+
+(defun my:claude--kill-buffer-hook ()
+  "会話バッファが kill されたらセッションを畳む。
+
+`my:claude-quit-session' は EOF を送るだけなので、実際に死ぬのは
+少しあと。`my:claude--the-session' はここで落としておく
+ (`my:claude--live-session' も同じ判断をするが、こちらが先に効く)。"
+  (when-let* ((session my:claude--session))
+    (my:claude-quit-session session)
+    (when (eq session my:claude--the-session)
+      (setq my:claude--the-session nil))))
 
 (defvar my:claude-input-mode-map
   (let ((map (make-sparse-keymap)))

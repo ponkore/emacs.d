@@ -845,6 +845,25 @@ Windows の Emacs には PTY が無いので claude の対話 TUI は動かな�
   `my:claude--buffer-p` が claude 系と見なせず、上半分に選んでしまう
 - 作った会話バッファにはその場で `my:claude-mode` を立てる（同じ理由）
 
+### 会話バッファを kill したらセッションも終わる
+
+別プロジェクトに移るときは `*claude(...)*` を kill して `C-c a a` すればよい。
+
+**「セッションが生きているか」をプロセスだけで判定してはいけない。**
+`make-process` の `:buffer` は nil（出力は自前のフィルタが捌く）なので、
+会話バッファを kill してもプロセスは生き残る。プロセスだけを見ていると
+`C-c a a` が消えたバッファを持つセッションを使い回そうとして
+`Selecting deleted buffer` になる（2026-09-06 に修正）。
+
+- `my:claude--session-usable-p` が**プロセスとバッファの両方**を見る。
+  `my:claude--live-session` / `my:claude--session-for-buffer` はこれを通す
+- バッファが死んでいたら `my:claude--live-session` がその場で
+  `my:claude-quit-session`（EOF）を送って `my:claude--the-session` を落とし、
+  nil を返す。呼び出し側は新しいセッションを起こす
+- `my:claude-mode` の `kill-buffer-hook` でも同じことをする。ただし EOF を
+  送ってから sentinel が走るまでには間があるので、**その隙に `C-c a a` しても
+  古いセッションを掴まないよう `my:claude--live-session` 側でも見る**
+
 ### 作業ディレクトリの決め方
 
 **さかのぼりはしない。**
