@@ -73,6 +73,173 @@ Windows では `call-process' が遅く、この操作は 1 キーで即返し�
           (kill-new paths)
           (message "%s" paths)))))
 
+  ;; --- exceldiff (Excel ブックの差分) ---
+  ;;
+  ;; yazi の exceldiff プラグイン (X v / X d) と同じことを dired からもできる
+  ;; ようにする。CLI は https://github.com/ponkore/exceldiff。
+
+  (defvar my:exceldiff-program "exceldiff"
+    "Excel ブックの差分を取る CLI。`executable-find' で解決するので
+PATH 上にあれば名前だけでよい。")
+
+  (defvar my:exceldiff-program-fallbacks
+    (list (expand-file-name "bin/exceldiff.exe" "~"))
+    "PATH に無かったときに `my:exceldiff--executable' が探す場所。
+
+%USERPROFILE%\\bin が PATH (HKCU\\Environment) に入ったのは yazi 用で、
+それより前に起動した Emacs の `exec-path' には無い (実測)。起動し直せば
+`executable-find' で見つかるが、それまで使えないのは不便なので既知の場所も見る。
+`my:markdown-external-editor' が Typora のインストール先を並べているのと同じ。")
+
+  (defun my:exceldiff--executable ()
+    "exceldiff の実行ファイルを返す。見つからなければ `user-error'。"
+    (or (executable-find my:exceldiff-program)
+        (seq-find #'file-executable-p my:exceldiff-program-fallbacks)
+        (user-error "%s が見つからない (PATH と %s を探した)"
+                    my:exceldiff-program
+                    (string-join my:exceldiff-program-fallbacks ", "))))
+
+  (defvar my:exceldiff-file-regexp "\\.\\(?:xlsx\\|xlsm\\)\\'"
+    "exceldiff に渡せるファイル名の正規表現。大文字小文字は区別しない。
+
+`my:dired-external-open-regexp' が .xls を含むのとは別物。exceldiff が使う
+excelize は旧形式を読めず、exceldiff 側でも validateExcelPath で弾かれる。")
+
+  (defun my:exceldiff--check-files (files)
+    "FILES がすべて exceldiff に渡せる Excel ブックなら FILES を返す。
+そうでなければ `user-error'。"
+    (let ((case-fold-search t))
+      (dolist (f files)
+        (unless (string-match-p my:exceldiff-file-regexp f)
+          (user-error "Excel ブック (.xlsx / .xlsm) ではない: %s"
+                      (file-name-nondirectory f)))))
+    files)
+
+  (defun my:exceldiff--sentinel (process _event)
+    "exceldiff の終了を知らせる。失敗したときだけ出力バッファを見せる。"
+    (when (memq (process-status process) '(exit signal))
+      (let ((buffer (process-buffer process))
+            (label (process-get process 'my:exceldiff-label))
+            (code (process-exit-status process)))
+        (if (eq code 0)
+            (progn
+              (message "exceldiff: %s 完了" label)
+              (when (buffer-live-p buffer) (kill-buffer buffer)))
+          (message "exceldiff: %s 失敗 (exit %s)" label code)
+          (when (buffer-live-p buffer) (display-buffer buffer))))))
+
+  (defun my:exceldiff--run (dir args label)
+    "DIR を作業ディレクトリにして exceldiff を ARGS で起動する。
+LABEL はメッセージに出す表示名。
+
+【重要】同期実行してはいけない。exceldiff は出力先 (-o) を省略すると差分
+ブックを一時ファイルに書いて Excel で開き、**閉じられるまで戻らない**
+\(cmd/common.go の diffFiles)。`call-process' にすると Excel を閉じるまで
+Emacs が固まる。yazi のプラグインが block = true を避けているのと同じ理由。
+
+引数は ANSI コードページ (cp932) でエンコードされる必要があるが、
+`default-process-coding-system' の cdr が Windows では既に cp932 なので
+ここでは何も束縛しない (my-japanese.el)。utf-8 に戻すと日本語を含むパスが
+壊れて「起動するが何も起きない」になる。"
+    (let* ((exe (my:exceldiff--executable))
+           ;; 前の差分ブックを Excel で開いたまま次を起動することがあるので
+           ;; (そのあいだ前のプロセスは生きている)、バッファは実行ごとに作る。
+           ;; 成功したら sentinel が捨てるので溜まらない。
+           (buffer (generate-new-buffer "*exceldiff*"))
+           (default-directory (expand-file-name dir))
+           (process (apply #'start-process "exceldiff" buffer exe args)))
+      (with-current-buffer buffer (special-mode))
+      (process-put process 'my:exceldiff-label label)
+      (set-process-sentinel process #'my:exceldiff--sentinel)
+      ;; Emacs 終了時に「実行中のプロセスがある」と聞かれないようにする。
+      ;; 差分ブックは既に Excel が握っていて exceldiff とは独立なので、
+      ;; ここで殺しても失われるのは %TEMP% の後始末だけ。
+      (set-process-query-on-exit-flag process nil)
+      (message "exceldiff: %s ..." label)
+      process))
+
+  (defun my:dired-exceldiff-vcs (&optional rev)
+    "point の Excel ブックを、コミット済みリビジョンと比較する。
+
+git なら HEAD、svn なら BASE との比較で、向きは git diff と同じ
+\(旧＝リビジョン / 新＝作業コピー)。\\[universal-argument] を付けると
+リビジョンを聞く (git の HEAD~1、svn のリビジョン番号など)。
+
+yazi の X v / X r に相当する。git / svn の判別とリビジョンの取り出しは
+exceldiff vcs 側が行うので、こちらはファイルを渡すだけ。"
+    (interactive
+     (list (when current-prefix-arg
+             (read-string "リビジョン (git: HEAD~1 / svn: BASE, 1234): " "HEAD~1"))))
+    (let* ((file (dired-get-file-for-visit))
+           (dir (file-name-directory file)))
+      (my:exceldiff--check-files (list file))
+      ;; 管理下かどうかは exceldiff vcs も見るが、あちらは非同期なので
+      ;; エラーが出力バッファ越しにしか見えない。ここで先に弾く。git は
+      ;; 起動しない (my:dired-copy-git-relative-filename-as-kill と同じ方針)。
+      (unless (or (locate-dominating-file dir ".git")
+                  (locate-dominating-file dir ".svn"))
+        (user-error "git / svn の管理下ではない: %s" dir))
+      (my:exceldiff--run dir
+                         (append '("vcs")
+                                 (when rev (list "-r" rev))
+                                 (list file))
+                         (format "%s ← %s" (file-name-nondirectory file)
+                                 (or rev "HEAD / BASE")))))
+
+  (defun my:dired-exceldiff-marked (&optional swap)
+    "マークした 2 つの Excel ブックを比較する。
+
+一覧で上にある方が A (旧)、下が B (新)。\\[universal-argument] を付けると
+A と B を入れ替える。マークが 2 件でなければエラーにする。
+yazi の X d / X D に相当する。"
+    (interactive "P")
+    (let* ((marked (dired-get-marked-files nil nil nil t t))
+           ;; DISTINGUISH-ONE-MARKED が t なので、ちょうど 1 件マークされて
+           ;; いるときだけ (t FILE) が返る。マークが無いときは point の
+           ;; ファイル 1 件のリストになり、どちらも下の件数チェックで落ちる。
+           (files (if (eq (car marked) t) (cdr marked) marked)))
+      (unless (= (length files) 2)
+        (user-error "2 つの Excel ブックをマーク (m) してください (現在 %d 件)"
+                    (length files)))
+      (my:exceldiff--check-files files)
+      (when swap
+        (setq files (reverse files)))
+      (let ((a (nth 0 files))
+            (b (nth 1 files)))
+        (message "exceldiff A(旧): %s / B(新): %s"
+                 (file-name-nondirectory a) (file-name-nondirectory b))
+        (my:exceldiff--run (dired-current-directory) (list a b)
+                           (format "%s → %s"
+                                   (file-name-nondirectory a)
+                                   (file-name-nondirectory b))))))
+
+  ;; --- markdown を外部エディタ (MarkText) で開く ---
+
+  (defvar my:dired-markdown-regexp "\\.\\(?:markdown\\|md\\|mkd\\)\\'"
+    "`my:dired-markdown-open' が対象にするファイル名の正規表現。
+大文字小文字は区別しない。markdown-mode の `:mode' と同じ範囲。")
+
+  (defun my:dired-markdown-open ()
+    "point の markdown を外部エディタ (MarkText) で開く。
+
+markdown-mode の C-c C-c o (`markdown-open') と同じ経路 —
+`my:markdown-open-external' (my-text.el) — をファイル指定で呼ぶ。
+一度バッファに読み込んでから開き直す必要が無くなる。"
+    (interactive)
+    (let ((file (dired-get-file-for-visit)))
+      (let ((case-fold-search t))
+        (unless (string-match-p my:dired-markdown-regexp file)
+          (user-error "markdown ファイルではない: %s"
+                      (file-name-nondirectory file))))
+      ;; 外部エディタはディスク上の中身を読む。開いてあるバッファに未保存の
+      ;; 変更があると古い内容が表示されるが、dired からはそれに気づけない。
+      (let ((buffer (find-buffer-visiting file)))
+        (when (and buffer (buffer-modified-p buffer)
+                   (y-or-n-p (format "%s には未保存の変更がある。保存する? "
+                                     (file-name-nondirectory file))))
+          (with-current-buffer buffer (save-buffer))))
+      (my:markdown-open-external file)))
+
   (defun my:dired-auto-revert-setup ()
     "この dired バッファを外部の変更に追随させる。
 
@@ -110,6 +277,14 @@ Windows では `call-process' が遅く、この操作は 1 キーで即返し�
    ;; w W y など 1 文字キーは dired と dired-x が使い切っているので、
    ;; 衝突しない C-c 側に置く。
    ("C-c w" . my:dired-copy-git-relative-filename-as-kill)
+   ;; exceldiff。yazi の X プレフィクス (X v / X d) に合わせて x でまとめる。
+   ;; 1 文字キーは dired と dired-x が使い切っているので C-c 側に置く。
+   ;;   C-c x v  コミット済みリビジョンと比較 (C-u でリビジョン指定 = X r)
+   ;;   C-c x d  マークした 2 つを比較        (C-u で A/B 入れ替え   = X D)
+   ("C-c x v" . my:dired-exceldiff-vcs)
+   ("C-c x d" . my:dired-exceldiff-marked)
+   ;; markdown を MarkText で開く (markdown-mode の C-c C-c o 相当)。
+   ("C-c m" . my:dired-markdown-open)
    ("." . hydra-dired/body))
   :custom
   ;;
@@ -161,6 +336,7 @@ _+_ mkdir   _v_iew         _m_ark         _z_ip     _w_ get filename    _y_ git 
 _C_opy      view _o_ther   _U_nmark all   un_Z_ip   _W_ get fullpath
 _D_elete    open _f_ile    _u_nmark       _s_ort    _g_ revert buffer
 _R_ename    ch_M_od        _t_oggle       _e_dit    _[_ hide detail     _._togggle hydra
+excel diff: _x_ 前のリビジョンと   _X_ マークした 2 つ   markdown: _O_ MarkText で開く
 "
     ("[" dired-hide-details-mode)
     ("+" dired-create-directory)
@@ -187,6 +363,11 @@ _R_ename    ch_M_od        _t_oggle       _e_dit    _[_ hide detail     _._toggg
     ("w" dired-copy-filename-as-kill)
     ("W" dired-get-fullpath-filename)
     ("y" my:dired-copy-git-relative-filename-as-kill)
+    ;; exceldiff / MarkText。C-u が使えないので、リビジョン指定と A/B の
+    ;; 入れ替えは C-c x v / C-c x d に C-u を付けて呼ぶ。
+    ("x" my:dired-exceldiff-vcs :exit t)
+    ("X" my:dired-exceldiff-marked :exit t)
+    ("O" my:dired-markdown-open :exit t)
     ("z" dired-zip-files)
     ("Z" dired-do-compress)
                ;; ("F" my:finder-app)

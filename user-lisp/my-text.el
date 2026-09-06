@@ -306,43 +306,51 @@ executable-find は Windows では exec-suffixes (.exe .com .bat .cmd ...) を�
   ;; 関数ならそれを funcall するので、文字列ではなくこれを渡す。文字列を渡すと
   ;; markdown-open 自身が call-process するため、引数のエンコーディングを
   ;; 束縛する隙が無い (下記)。
-  (defun my:markdown-open-external ()
-    "現在のバッファのファイルを `my:markdown-external-editor' で開く。"
+  ;;
+  ;; FILE を取れる形にしてあるのは dired からも呼ぶため (my-dired.el の
+  ;; my:dired-markdown-open)。markdown-open は引数無しで funcall するので
+  ;; &optional で足りる。
+  (defun my:markdown-open-external (&optional file)
+    "FILE を `my:markdown-external-editor' で開く。
+FILE を省略したときは現在のバッファのファイルを、保存してから開く。"
     (unless my:markdown-external-editor
       (user-error "外部 markdown エディタが見つからない"))
-    (unless buffer-file-name
-      (user-error "Must be visiting a file"))
-    (save-buffer)
-    ;; 【重要】引数は ANSI コードページ (cp932) でエンコードすること。
-    ;;
-    ;; my-japanese.el が Windows で default-process-coding-system を
-    ;; (utf-8 . utf-8) にしている。call-process の引数はこの cdr で
-    ;; エンコードされる一方、Emacs のプロセス起動は ANSI API なので、
-    ;; 送った UTF-8 のバイト列が受け取り側で cp932 として解釈される。
-    ;; 結果、日本語を含むパスは存在しないファイル名になる (実測で
-    ;; cmd の `if exist' が MISSING を返す)。
-    ;;
-    ;; MarkText はこれを isMarkdownFile (存在チェックを含む) で黙って捨て、
-    ;; ログにも何も残さずに startUpAction (blank) にフォールバックするため、
-    ;; 「起動するが空白」という分かりにくい壊れ方をする。
-    ;;
-    ;; grep (my-utils.el) や org-pandoc (下記) と同じく cdr だけ戻す。
-    (let* ((default-process-coding-system
-            (cons (car default-process-coding-system) locale-coding-system))
-           (exit-code (call-process my:markdown-external-editor nil nil nil
-                                    buffer-file-name)))
-      ;; marktext.cmd は start で投げっぱなしなので常に 0 を返す。外部エディタ
-      ;; 側の失敗は検出できないので、せめて「そもそも渡せないパス」だけは
-      ;; 知らせる (cp932 に無い文字を含む場合。往復して一致するかで見る)。
-      (unless (equal buffer-file-name
-                     (decode-coding-string
-                      (encode-coding-string buffer-file-name locale-coding-system)
-                      locale-coding-system))
-        (message "警告: %s は %s で表現できない文字を含むため外部エディタに渡せない"
-                 (file-name-nondirectory buffer-file-name) locale-coding-system))
-      (unless (eq exit-code 0)
-        (user-error "%s failed with exit code %s"
-                    my:markdown-external-editor exit-code))))
+    (let ((path (or file buffer-file-name)))
+      (unless path
+        (user-error "Must be visiting a file"))
+      ;; 呼び出し側がファイルを指定したときは、そのバッファを持っているとは
+      ;; 限らない (dired から呼ぶ場合など)。保存の面倒は呼び出し側が見る。
+      (unless file
+        (save-buffer))
+      ;; 【重要】引数は ANSI コードページ (cp932) でエンコードすること。
+      ;;
+      ;; my-japanese.el が Windows で default-process-coding-system を
+      ;; (utf-8 . utf-8) にしている。call-process の引数はこの cdr で
+      ;; エンコードされる一方、Emacs のプロセス起動は ANSI API なので、
+      ;; 送った UTF-8 のバイト列が受け取り側で cp932 として解釈される。
+      ;; 結果、日本語を含むパスは存在しないファイル名になる (実測で
+      ;; cmd の `if exist' が MISSING を返す)。
+      ;;
+      ;; MarkText はこれを isMarkdownFile (存在チェックを含む) で黙って捨て、
+      ;; ログにも何も残さずに startUpAction (blank) にフォールバックするため、
+      ;; 「起動するが空白」という分かりにくい壊れ方をする。
+      ;;
+      ;; grep (my-utils.el) や org-pandoc (下記) と同じく cdr だけ戻す。
+      (let* ((default-process-coding-system
+              (cons (car default-process-coding-system) locale-coding-system))
+             (exit-code (call-process my:markdown-external-editor nil nil nil path)))
+        ;; marktext.cmd は start で投げっぱなしなので常に 0 を返す。外部エディタ
+        ;; 側の失敗は検出できないので、せめて「そもそも渡せないパス」だけは
+        ;; 知らせる (cp932 に無い文字を含む場合。往復して一致するかで見る)。
+        (unless (equal path
+                       (decode-coding-string
+                        (encode-coding-string path locale-coding-system)
+                        locale-coding-system))
+          (message "警告: %s は %s で表現できない文字を含むため外部エディタに渡せない"
+                   (file-name-nondirectory path) locale-coding-system))
+        (unless (eq exit-code 0)
+          (user-error "%s failed with exit code %s"
+                      my:markdown-external-editor exit-code)))))
   :bind
   (:map markdown-mode-map ("C-c ." . hydra-markdown/body))
   :hook

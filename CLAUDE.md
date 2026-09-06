@@ -145,7 +145,7 @@ lexical-binding の検証（後述）と同じく、一時ディレクトリに�
 | `my-completion` | vertico、consult、marginalia、orderless、corfu、cape |
 | `my-keybind` | グローバルキーバインド（`C-h` → `delete-backward-char`、`C-z` → `scroll-down`） |
 | `my-editor` | hydra、symbol-overlay、smartparens、whitespace、yasnippet、recentf ほか |
-| `my-dired` | dired、hydra-dired、dired-sidebar（`F8`。差分表示は my-vc の diff-hl）、dired-x の上書き対策 |
+| `my-dired` | dired、hydra-dired、dired-sidebar（`F8`。差分表示は my-vc の diff-hl）、dired-x の上書き対策、exceldiff / MarkText の起動 |
 | `my-text` | org-mode、ox-pandoc、markdown、rst、adoc |
 | `my-lang-lisp` | Emacs Lisp、Clojure（cider）、Common Lisp（slime） |
 | `my-lang-python` | Python（python-ts-mode、pyvenv、py-isort、blacken） |
@@ -2329,6 +2329,65 @@ dedicated window であることに由来する。ディレクトリならサイ
 
 `dired-mode-map` に置いたキーが効かないときは、**まず `dired-x` を疑う**こと。
 奪われるのは上の 5 つと `*(` / `*O` / `*.`。
+
+## dired から exceldiff / MarkText を起動する（2026-09-06）
+
+yazi に入れてある操作を dired からもできるようにしたもの。1 文字キーは
+dired と dired-x が使い切っているので、`C-c w`（git 相対パス）と同じく
+`C-c` 側に置く。yazi の `X` プレフィクスに合わせて exceldiff は `x` で束ねた。
+
+| キー | hydra（`.`） | |
+|---|---|---|
+| `C-c x v` | `x` | point の Excel をコミット済みリビジョンと比較（`C-u` でリビジョン指定） |
+| `C-c x d` | `X` | マークした 2 つの Excel を比較（`C-u` で A/B 入れ替え） |
+| `C-c m` | `O` | point の markdown を MarkText で開く |
+
+サイドバー（`F8`）のキーマップは `dired-mode-map` を親に持つのでそのまま効く。
+
+### exceldiff は必ず非同期で起動する
+
+[exceldiff](https://github.com/ponkore/exceldiff) は `-o` を省略すると差分
+ブックを一時ファイルに書いて **Excel で開き、閉じられるまで戻らない**
+（`cmd/common.go` の `diffFiles` → `viewer.OpenAndWait`）。`call-process` に
+すると Excel を閉じるまで Emacs が固まる。yazi のプラグインが
+`block = true` を避けているのと同じ理由で、`start-process` を使う。
+
+- 出力バッファは実行ごとに作る。前の差分ブックを開いたままだと前のプロセスが
+  生きているので、1 つのバッファを使い回せない。**成功したら sentinel が
+  捨てる**ので溜まらない。失敗したときだけ `display-buffer` で見せる
+- `set-process-query-on-exit-flag` は nil。差分ブックは既に Excel が握っていて
+  exceldiff とは独立なので、Emacs 終了時に殺しても失われるのは `%TEMP%` の
+  後始末だけ
+- 対象は `.xlsx` / `.xlsm` のみ。excelize が旧形式を読めないため
+  **`.xls` は入れない**（`my:dired-external-open-regexp` が `.xls` を含むのとは別物）
+- git / svn の判別は `exceldiff vcs` 側がやるが、あちらは非同期でエラーが出力
+  バッファ越しにしか見えないので、`locate-dominating-file` で先に弾く
+  （git は起動しない。`my:dired-copy-git-relative-filename-as-kill` と同じ方針）
+
+引数のエンコーディングは何も束縛しない。`default-process-coding-system` の
+cdr が Windows では既に cp932 なので、`start-process` の引数もそのまま正しい
+（`call-process` と同じ経路。CLAUDE.md の「`call-process` の引数は cp932 で
+エンコードすること」）。GUI 実測で `見積書_①テスト.xlsx` を渡すと、
+exceldiff のエラーメッセージに**同じ綴りで出てくる**ことを確認した。
+
+### `%USERPROFILE%\bin` は起動時期によって `exec-path` に無い
+
+`exceldiff.exe` は `~/bin` にあり、そこが PATH（`HKCU\Environment`）に入った
+のは yazi 用。**それより前に起動した Emacs の `exec-path` には無い**（実測で
+`executable-find` が nil）。起動し直せば見つかるが、それまで使えないのは
+不便なので `my:exceldiff-program-fallbacks` で既知の場所も見る
+（`my:markdown-external-editor` が Typora のパスを並べているのと同じ）。
+
+### markdown は `markdown-open` と同じ経路を使う
+
+`my:markdown-open-external`（`my-text.el`）に `&optional FILE` を足しただけで、
+`C-c C-c o`（`markdown-open`）とまったく同じ関数を通る。`markdown-open` は
+`markdown-open-command` を**引数無しで funcall** するので `&optional` で足りる。
+
+FILE を渡した場合は `save-buffer` しない（呼び出し側がそのバッファを持っている
+とは限らない）。代わりに dired 側で、そのファイルを開いてあるバッファに未保存の
+変更があれば保存するか聞く。**外部エディタはディスク上の中身を読むので、
+聞かないと古い内容が表示されるのに dired からは気づけない。**
 
 ## dired の自動更新（2026-09-04）
 
