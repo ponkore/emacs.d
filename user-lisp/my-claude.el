@@ -191,6 +191,30 @@ nil にするとブロックが確定してから一度に出る (段階 3 ま�
   "`my:claude-layout' で入力バッファに使う行数。"
   :type 'integer)
 
+(defcustom my:claude-image-max-bytes (* 3500 1024)
+  "添付できる画像 1 枚あたりの上限 (エンコード前のバイト数)。
+
+Anthropic API の上限は **base64 にしたあとで 5 MB** なので、生の
+バイト数ではその 3/4 (約 3.75 MB) が天井になる。少し余裕を見てある。
+超えたときは `user-error' で断る。黙って送っても API がリクエストごと
+弾くだけで、こちらには理由の分からないエラーが返るため。"
+  :type 'integer)
+
+(defcustom my:claude-image-preview-lines 2
+  "入力バッファに出すサムネイルの高さ (行数)。0 なら出さない。
+
+入力ウィンドウは既定で 6 行しかないので、貼ったものが分かる最小限に
+留める。プレースホルダ (`[Image #1]') のテキストは常に入るので、
+0 にしても添付そのものは見える。"
+  :type 'integer)
+
+(defcustom my:claude-image-echo-lines 8
+  "送信時に会話バッファへ出すサムネイルの高さ (行数)。0 なら出さない。
+
+会話の記録として「何を送ったか」を残すためのもの。入力バッファの
+プレースホルダは送信後に消えるので、ここに残さないと後から分からない。"
+  :type 'integer)
+
 ;;; --------------------------------------------------
 ;;; face
 ;;; --------------------------------------------------
@@ -253,6 +277,10 @@ nil にするとブロックが確定してから一度に出る (段階 3 ま�
 (defface my:claude-meta-face
   '((t :inherit shadow :height 0.9))
   "コスト・所要時間などの補足。")
+
+(defface my:claude-image-face
+  '((t :inherit font-lock-constant-face :weight bold))
+  "添付画像のプレースホルダ (`[Image #1]')。")
 
 ;; ヘッダ行の 6 列。`~/.claude/statusline-command.sh' が端末の TUI で
 ;; 使っている ANSI 色に合わせてある (plan=マゼンタ / dir=シアン /
@@ -630,6 +658,18 @@ RESUME は `my:claude--command' に渡す (t で --continue、文字列で --res
 ;;; 送受信
 ;;; --------------------------------------------------
 
+(defun my:claude--log-line (line)
+  "ログに残す LINE。添付画像の base64 は長さだけにする。
+
+画像 1 枚で数百 KB になり、そのまま残すとログが読めなくなるうえ
+`*claude-log(PROJ)*' のフォントロックが詰まる。200 文字以上続く
+base64 だけを対象にするので、本文に出てくる短い文字列は潰さない。"
+  (replace-regexp-in-string
+   "\"data\":\"\\([A-Za-z0-9+/]\\{200,\\}=*\\)\""
+   ;; マッチ全体は "data":"…" (前後の 9 文字を除いたぶんが base64)。
+   (lambda (m) (format "\"data\":\"<%d 文字>\"" (- (length m) 9)))
+   line t t))
+
 (defun my:claude--send-json (session obj)
   "OBJ を 1 行の JSON にして SESSION に送る。"
   (let ((proc (my:claude-session-process session)))
@@ -639,7 +679,7 @@ RESUME は `my:claude--command' に渡す (t で --continue、文字列で --res
       (when-let* ((log (my:claude-session-log-buffer session)))
         (with-current-buffer log
           (goto-char (point-max))
-          (insert ">>> " line)))
+          (insert ">>> " (my:claude--log-line line))))
       (process-send-string proc line))))
 
 (defun my:claude--filter (session str)
@@ -2415,21 +2455,154 @@ Opus と Haiku を行き来してもそれまでの話は消えない。"
       (my:claude-layout)
       session)))
 
-(defun my:claude-send-string (text &optional session)
-  "TEXT を claude に送る。"
+;;; --------------------------------------------------
+;;; 画像の添付
+;;; --------------------------------------------------
+;;
+;; 端末版の claude は M-v でクリップボードの画像を送れる。同じことを
+;; stream-json 経路でやる。user メッセージの content は **ブロックの配列**
+;; なので、Anthropic API と同じ形の image ブロックをそこに混ぜればよい。
+;;
+;;   {"type":"image","source":{"type":"base64",
+;;                             "media_type":"image/png","data":"..."}}
+;;
+;; 実測 (haiku、320x160 の PNG): claude はこれを受け取って画像の内容を
+;; 正しく答えた。一時ファイルに保存して Read ツールに読ませる手もあるが、
+;; それだと 1 往復とツールの許可が余計に要る。
+
+(defconst my:claude--image-media-types
+  '(image/png image/jpeg image/gif image/webp)
+  "claude に送れる画像の MIME 型。優先順に並べる。
+Anthropic API がこの 4 つしか受け付けない。")
+
+(defconst my:claude--image-extension-types
+  '(("png" . "image/png") ("jpg" . "image/jpeg") ("jpeg" . "image/jpeg")
+    ("gif" . "image/gif") ("webp" . "image/webp"))
+  "ファイルから添付するときに拡張子から MIME 型を決める表。")
+
+(cl-defstruct (my:claude-image (:constructor my:claude--make-image)
+                               (:copier nil))
+  index          ; 入力バッファ内での通し番号 ([Image #N] の N)
+  media-type     ; "image/png" など
+  data           ; 生のバイト列 (unibyte 文字列)
+  size)          ; (WIDTH . HEIGHT)。GUI でなければ nil
+
+(defvar-local my:claude--input-images nil
+  "この入力バッファに添付した画像 (`my:claude-image' のリスト)。
+
+**送るかどうかを決めるのはここではなくバッファの中身**。送信時に
+`[Image #N]' が本文に残っているものだけを送る (`my:claude--input-attachments')。
+プレースホルダを消せば添付も取り消せる、という単純な規則にしてある。")
+
+(defun my:claude--image-placeholder (index)
+  "INDEX 番の添付画像を指すプレースホルダ文字列。"
+  (format "[Image #%d]" index))
+
+(defconst my:claude--image-placeholder-regexp "\\[Image #\\([0-9]+\\)\\]"
+  "本文に残っているプレースホルダを拾う正規表現。")
+
+(defun my:claude--image-size (data)
+  "画像 DATA のピクセルサイズ (WIDTH . HEIGHT)。取れなければ nil。
+batch や画像を扱えない環境では `image-size' がエラーになる。"
+  (ignore-errors (image-size (create-image data nil t) t)))
+
+(defun my:claude--clipboard-image ()
+  "クリップボードの画像を (MEDIA-TYPE . DATA) で返す。無ければ nil。
+
+**OS ごとの分岐は要らない。** Emacs 30 で MS-Windows も `yank-media' に
+対応し、クリップボードの DIB を PNG に変換して `image/png' として
+提供する。実測 (Emacs 31.1 / Windows 11) では TARGETS が
+
+  [DataObject BITMAP System.Drawing.Bitmap Ole\\ Private\\ Data DIB image/png]
+
+を返し、`image/png' から PNG シグネチャ付きの unibyte 文字列が取れた。"
+  (let ((targets (ignore-errors (gui-get-selection 'CLIPBOARD 'TARGETS))))
+    (catch 'found
+      (dolist (type my:claude--image-media-types)
+        (when (seq-contains-p targets type)
+          (when-let* ((data (ignore-errors (gui-get-selection 'CLIPBOARD type))))
+            ;; 念のため。画像は本来 unibyte で返るが、multibyte で来ると
+            ;; `base64-encode-string' が落ちる。
+            (throw 'found
+                   (cons (symbol-name type)
+                         (if (multibyte-string-p data)
+                             (encode-coding-string data 'binary)
+                           data)))))))))
+
+(defun my:claude--thumbnail (image lines)
+  "IMAGE を LINES 行の高さに収めた画像オブジェクトを返す。出せなければ nil。"
+  (when (and (> lines 0) (display-graphic-p))
+    (ignore-errors
+      (create-image (my:claude-image-data image) nil t
+                    :max-height (* lines (default-line-height))
+                    ;; ウィンドウからはみ出すと横スクロールが要る。
+                    :max-width (max 200 (- (window-body-width nil t) 20))
+                    :ascent 'center))))
+
+(defun my:claude--image-description (image)
+  "IMAGE の 1 行の説明。プレースホルダ・寸法・型・バイト数。"
+  (let ((size (my:claude-image-size image)))
+    (format "%s %s%s %s"
+            (my:claude--image-placeholder (my:claude-image-index image))
+            (if size (format "%dx%d " (car size) (cdr size)) "")
+            (my:claude-image-media-type image)
+            (file-size-human-readable (length (my:claude-image-data image))))))
+
+(defun my:claude--insert-image (session image)
+  "会話バッファに送信した IMAGE の見出しとサムネイルを出す。"
+  (my:claude--at-end session
+    (insert (propertize (concat "> " (my:claude--image-description image) "\n")
+                        'font-lock-face 'my:claude-image-face))
+    (when-let* ((thumb (my:claude--thumbnail image my:claude-image-echo-lines)))
+      (insert-image thumb)
+      (insert "\n"))))
+
+(defun my:claude--user-content (text images)
+  "user メッセージの content ブロック配列を組む。
+
+画像はテキストより **前** に置き、それぞれの直前に `[Image #N]' の
+text ブロックを添える。Anthropic のドキュメントが複数画像のときは
+ラベルを付けて先に置くことを勧めており、本文からも同じ表記で参照できる。
+
+TEXT が空 (画像だけ) なら text ブロックは入れない。空文字列のブロックは
+API が弾く。"
+  (let (blocks)
+    (dolist (image images)
+      (push `((type . "text")
+              (text . ,(my:claude--image-placeholder
+                        (my:claude-image-index image))))
+            blocks)
+      (push `((type . "image")
+              (source . ((type . "base64")
+                         (media_type . ,(my:claude-image-media-type image))
+                         ;; NO-LINE-BREAK。JSON には載るが要らない改行。
+                         (data . ,(base64-encode-string
+                                   (my:claude-image-data image) t)))))
+            blocks))
+    (unless (string-empty-p (string-trim text))
+      (push `((type . "text") (text . ,text)) blocks))
+    (vconcat (nreverse blocks))))
+
+(defun my:claude-send-string (text &optional session images)
+  "TEXT を claude に送る。IMAGES があれば添付する。"
   ;; リージョン送信など、他所から呼ばれることがある。ここで
   ;; `my:claude' を呼ぶとウィンドウを組み替えてしまうので使わない。
   (let ((session (or session (my:claude--session-for-buffer)
                      (my:claude--ensure-session))))
-    (unless (string-empty-p (string-trim text))
-      (my:claude--insert session (format "\n> %s\n\n" (string-trim text))
-                         'my:claude-user-face)
+    (when (or images (not (string-empty-p (string-trim text))))
+      (my:claude--insert session "\n")
+      (unless (string-empty-p (string-trim text))
+        (my:claude--insert session (format "> %s\n" (string-trim text))
+                           'my:claude-user-face))
+      (dolist (image images)
+        (my:claude--insert-image session image))
+      (my:claude--insert session "\n")
       (setf (my:claude-session-busy session) t)
       (my:claude--send-json
        session
        `((type . "user")
          (message . ((role . "user")
-                     (content . [((type . "text") (text . ,text))])))))
+                     (content . ,(my:claude--user-content text images))))))
       (force-mode-line-update t))
     session))
 
@@ -2480,7 +2653,131 @@ Opus と Haiku を行き来してもそれまでの話は消えない。"
 (defvar-local my:claude--input-draft nil
   "履歴をたどり始めたときに書きかけだった内容。")
 
+;;; 添付画像 (入力バッファ側の操作)
+
+(defun my:claude--input-clear-images ()
+  "添付をすべて捨て、プレビューの overlay も外す。"
+  (setq my:claude--input-images nil)
+  (remove-overlays (point-min) (point-max) 'my:claude-image t))
+
+(defun my:claude--input-prune-images ()
+  "本文からプレースホルダが消えた添付を捨てる。
+
+**消すのは取り消しの意思表示**なので、データも番号も持ち続けない。
+`[Image #1]' を消して貼り直せばまた #1 になる (持ち続けると #2 になり、
+消したはずのものが番号として残る)。
+
+呼ぶのは新しく貼るときだけ。編集のたびに掃除すると、undo で戻した
+プレースホルダに対応する画像が無くなる。"
+  (setq my:claude--input-images (my:claude--input-attachments)))
+
+(defun my:claude--input-next-index ()
+  "次に使う添付画像の番号。"
+  (1+ (apply #'max 0 (mapcar #'my:claude-image-index my:claude--input-images))))
+
+(defun my:claude--image-overlay (beg end image)
+  "BEG..END のプレースホルダに IMAGE のサムネイルと face を重ねる。
+
+**テキストプロパティではなく overlay** を使う。プレースホルダの文字は
+そのまま残しておきたい (消せば添付も取り消せる、という規則の要)ので、
+`display' でテキストを画像に置き換えるわけにはいかない。`before-string'
+なら文字の前にサムネイルが並ぶだけで、編集の邪魔にならない。
+
+`evaporate' を立てておくと、プレースホルダを消したときに overlay も
+消える。face も overlay に載せる。`markdown-mode' の font-lock は
+`[...]' を参照リンクとして着色するが、overlay の face はその上に重なる。"
+  (let ((ov (make-overlay beg end))
+        (thumb (my:claude--thumbnail image my:claude-image-preview-lines)))
+    (overlay-put ov 'my:claude-image t)
+    (overlay-put ov 'evaporate t)
+    (overlay-put ov 'face 'my:claude-image-face)
+    (when thumb
+      (overlay-put ov 'before-string (propertize " " 'display thumb)))
+    ov))
+
+(defun my:claude--attach-image (media-type data)
+  "画像 DATA を添付して、point にプレースホルダを挿入する。"
+  (unless (derived-mode-p 'my:claude-input-mode)
+    (user-error "画像を添付できるのは claude の入力バッファだけ (C-c a i)"))
+  (when (> (length data) my:claude-image-max-bytes)
+    (user-error "画像が大きすぎる: %s (上限 %s)。範囲を絞って撮り直すこと"
+                (file-size-human-readable (length data))
+                (file-size-human-readable my:claude-image-max-bytes)))
+  ;; 消されたぶんを先に捨てる。番号を詰め直すため。
+  (my:claude--input-prune-images)
+  (let* ((index (my:claude--input-next-index))
+         (image (my:claude--make-image :index index
+                                       :media-type media-type
+                                       :data data
+                                       :size (my:claude--image-size data)))
+         (text (my:claude--image-placeholder index)))
+    (push image my:claude--input-images)
+    ;; 直前の文字とくっつけない。文中に貼っても読めるように。
+    (unless (or (bolp) (memq (char-before) '(?\s ?\t)))
+      (insert " "))
+    (let ((beg (point)))
+      (insert text " ")
+      (my:claude--image-overlay beg (+ beg (length text)) image))
+    (message "添付: %s" (my:claude--image-description image))
+    image))
+
+(defun my:claude-input-yank-image ()
+  "クリップボードの画像を添付する (端末版 claude の M-v と同じ操作)。
+
+画像そのものは送信 (`C-c C-c') のときに base64 で送る。ここで入るのは
+`[Image #1]' というプレースホルダで、**これが本文に残っているものだけ
+が送られる**。要らなくなったら消せばよい。"
+  (interactive)
+  (let ((clip (my:claude--clipboard-image)))
+    (unless clip
+      (user-error "クリップボードに画像が無い (Win+Shift+S で撮ってから)"))
+    (my:claude--attach-image (car clip) (cdr clip))))
+
+(defun my:claude-input-attach-file (file)
+  "画像ファイル FILE を添付する。"
+  (interactive "fclaude に送る画像: ")
+  (let* ((ext (downcase (or (file-name-extension file) "")))
+         (media-type (cdr (assoc ext my:claude--image-extension-types))))
+    (unless media-type
+      (user-error "送れない形式: %s (png / jpg / jpeg / gif / webp のみ)" ext))
+    (my:claude--attach-image
+     media-type
+     (with-temp-buffer
+       ;; `insert-file-contents-literally' に multibyte バッファを渡すと
+       ;; 生バイトが eight-bit 文字になり `base64-encode-string' が落ちる。
+       (set-buffer-multibyte nil)
+       (insert-file-contents-literally file)
+       (buffer-string)))))
+
+(defun my:claude--input-attachments ()
+  "本文に残っているプレースホルダの **出現順** に添付画像を返す。
+
+添付リストの順ではないので、書きながら順番を入れ替えられる。
+同じ番号を 2 回書いても 1 枚しか送らない。"
+  (save-excursion
+    (goto-char (point-min))
+    (let (found)
+      (while (re-search-forward my:claude--image-placeholder-regexp nil t)
+        (let* ((n (string-to-number (match-string 1)))
+               (image (seq-find (lambda (i) (= (my:claude-image-index i) n))
+                                my:claude--input-images)))
+          (when (and image (not (memq image found)))
+            (push image found))))
+      (nreverse found))))
+
+(defun my:claude--strip-placeholders (text)
+  "TEXT から添付画像のプレースホルダを取り除く。
+
+履歴に残すのは文字だけ。`M-p' で呼び出しても画像は付いてこないので、
+`[Image #1]' が残っていると本文だけが claude に届いて話が食い違う。"
+  (string-trim (replace-regexp-in-string
+                (concat my:claude--image-placeholder-regexp " ?") "" text)))
+
+;;; 履歴
+
 (defun my:claude--input-replace (text)
+  ;; 履歴のテキストに画像は付いてこない。overlay ごと捨てる。
+  (my:claude--input-clear-images)
   (erase-buffer)
   (insert (or text ""))
   (goto-char (point-max)))
@@ -2552,12 +2849,22 @@ Opus と Haiku を行き来してもそれまでの話は消えない。"
 書き足すときは会話バッファで `i\' (`my:claude-input\') を押せば
 `my:claude-layout\' が元の 3 分割に組み直す。"
   (interactive)
-  (let ((text (buffer-substring-no-properties (point-min) (point-max)))
-        (session my:claude--session))
-    (my:claude-send-string text session)
-    (unless (string-empty-p (string-trim text))
-      (setq my:claude--input-history
-            (cons text (delete text my:claude--input-history))))
+  ;; 本文に残っているプレースホルダのぶんだけを送る。消えているものに
+  ;; ついては**何も言わない**。消すのは取り消しの意思表示で、ユーザーは
+  ;; 承知の上でやっている。かつては「N 枚は送っていない」と知らせて
+  ;; いたが、貼り直したときにも出てしまい (消す→貼るの 2 手が要るので
+  ;; 必ず出る)、送れているのに失敗したように見えた。
+  (let* ((text (buffer-substring-no-properties (point-min) (point-max)))
+         (images (my:claude--input-attachments))
+         (session my:claude--session))
+    (my:claude-send-string text session images)
+    (let ((history-text (my:claude--strip-placeholders text)))
+      (unless (string-empty-p history-text)
+        (setq my:claude--input-history
+              (cons history-text
+                    (delete history-text my:claude--input-history)))))
+    ;; overlay を外すのは `erase-buffer' より先。
+    (my:claude--input-clear-images)
     (erase-buffer)
     (setq my:claude--input-index -1
           my:claude--input-draft nil)
@@ -2643,12 +2950,20 @@ kill してから `C-c a a' すればよい。"
     (define-key map (kbd "C-c C-z") #'my:claude-toggle-maximize)
     (define-key map (kbd "M-p") #'my:claude-input-previous)
     (define-key map (kbd "M-n") #'my:claude-input-next)
+    (define-key map (kbd "M-v") #'my:claude-input-yank-image)
+    (define-key map (kbd "C-c C-v") #'my:claude-input-attach-file)
     map)
   "`my:claude-input-mode' のキーマップ。
 
 `markdown-mode-map' が親になるが、ここに書いたものが優先される。
 とくに `C-c C-c' は markdown 側では prefix (`markdown-mode-command-map')
-なので、この束縛が無いと送信できなくなる。")
+なので、この束縛が無いと送信できなくなる。
+
+`M-v' (`scroll-down-command') はここでは画像の貼り付けに潰す。端末版の
+claude が同じキーでクリップボードの画像を送るのに合わせたもので、
+`my-text.el' が org バッファで `my:org-yank-image' に潰しているのと
+同じ流儀。数行しかないバッファなので画面送りは要らず、要るときは
+`C-z' (`my-keybind.el') が使える。")
 
 (define-derived-mode my:claude-input-mode markdown-mode "Claude-Input"
   "claude に送るテキストを書くモード。
@@ -2657,6 +2972,11 @@ markdown として書くので `markdown-mode' から派生させる。会話バ
  (`my:claude-mode') と違って **font-lock をそのまま使える** ので、
 C-1 のようにテキストプロパティを貼る仕掛けは要らない。コードブロックの
 言語判別は `markdown-fontify-code-blocks-natively' に任せる。
+
+`M-v' (`my:claude-input-yank-image') でクリップボードの画像を添付する
+ (端末版 claude と同じ操作)。ファイルからは `C-c C-v'。入るのは
+`[Image #1]' というプレースホルダで、**送信時に本文へ残っているものだけ
+が送られる**。消せば取り消せる。
 
 【重要】`markdown-mode-hook' は走らせない。`my-text.el' の
 `my:setup-markdown-mode' は「.md ファイルを編集する」前提の設定
@@ -2686,7 +3006,7 @@ C-1 のようにテキストプロパティを貼る仕掛けは要らない。�
                ;; かけをやめる」が慣習で、変えると入力バッファを畳む手段が
                ;; 無くなる。会話バッファ側の C-c C-k が中断なのは、あちらが
                ;; compilation の kill-compilation と同じ性格だから。
-               "C-c C-c 送信 / C-c C-k 閉じる / C-c a k 中断 / C-c C-z 最大化 / 行頭 / は TAB 補完 / M-p 履歴"
+               "C-c C-c 送信 / C-c C-k 閉じる / C-c a k 中断 / M-v 画像 / 行頭 / は TAB 補完 / M-p 履歴"
                'my:claude-input-header-face))
   ;; cape-file が深さ 90 にいる。念のため明示的に先頭へ置く。
   (add-hook 'completion-at-point-functions #'my:claude--capf -100 t))

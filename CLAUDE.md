@@ -821,6 +821,8 @@ Windows の Emacs には PTY が無いので claude の対話 TUI は動かな�
 | `i` / `C-c C-i` | 入力バッファを開く（`*claude*`。`C-c a i` と同じ） |
 | `C-c C-c` | 送信（`*claude-input*`。**送ると入力ウィンドウは畳まれる**。`M-p` / `M-n` で履歴） |
 | `C-c C-k` | 入力バッファを閉じる（`*claude-input*`。`*claude*` では中断） |
+| `M-v` | クリップボードの画像を添付（`*claude-input*`。端末版 claude と同じ操作） |
+| `C-c C-v` | 画像ファイルを添付（`*claude-input*`） |
 
 ### バッファ名にはプロジェクト名が入る
 
@@ -1434,6 +1436,123 @@ font-lock をそのまま使える）。
 親のキーマップを**モード関数の中で** `set-keymap-parent` する
 （`derived.el` のコメントが「親がまだロードされていないことがある」と
 明記している）。
+
+### 画像を送る（`M-v`）
+
+端末版の claude は `M-v` でクリップボードの画像を送れる。同じことを
+stream-json 経路でやる。user メッセージの content は**ブロックの配列**
+なので、Anthropic API と同じ形の image ブロックを混ぜればよい。
+
+```json
+{"type":"image","source":{"type":"base64","media_type":"image/png","data":"..."}}
+```
+
+**一時ファイルに保存して Read ツールに読ませる必要は無い。** それだと
+1 往復とツールの許可が余計に要る。実測（`--model haiku`、320x160 の PNG を
+`赤い円 + BANANA` で作って送った）:
+
+| | |
+|---|---|
+| CLI に直接パイプ | 「赤い円と BANANA という英単語が描かれています」 |
+| **Emacs が組み立てた JSON をパイプ** | 「赤いピンク色の円と、青色で『BANANA』と書かれています」 |
+
+後者は `my:claude--user-content` が作った 2903 バイトの行をそのまま
+`claude -p --input-format stream-json` に流したもの。日本語のプロンプトと
+画像が同居しても壊れない（base64 は ASCII なので
+`default-process-coding-system` の影響を受けない）。
+
+#### クリップボードからは `image/png` が直接取れる
+
+**OS ごとの分岐は要らない。** Emacs 30 で MS-Windows も `yank-media` に
+対応し、クリップボードの DIB を PNG に変換して提供する。実測
+（Emacs 31.1 / Windows 11、PowerShell の `Clipboard::SetImage` で載せた）:
+
+```elisp
+(gui-get-selection 'CLIPBOARD 'TARGETS)
+;; => [DataObject BITMAP System.Drawing.Bitmap Ole\ Private\ Data DIB image/png]
+(gui-get-selection 'CLIPBOARD 'image/png)
+;; => 1960 バイトの **unibyte** 文字列。先頭は "\211PNG\n\n"
+```
+
+そのまま `base64-encode-string` に渡せる（multibyte だと落ちるので
+`my:claude--clipboard-image` は念のため `encode-coding-string` を通す）。
+送れる型は API の制約で png / jpeg / gif / webp の 4 つだけ。
+
+#### 送るかどうかはバッファの中身で決める
+
+`M-v` が入力バッファに挿すのは `[Image #1]` というプレースホルダで、
+画像そのものはバッファローカルの `my:claude--input-images` が持つ。
+**送信時に本文へ残っているプレースホルダだけを送る**
+（`my:claude--input-attachments`）。
+
+- 消せば取り消せる。添付の管理コマンドが要らない
+- 並べ替えれば送る順も変わる（**添付リストの順ではなく本文の出現順**）
+- 同じ番号を 2 回書いても 1 枚しか送らない
+
+**消えたことを警告してはいけない。** 当初は送信時に「プレースホルダが
+消えていた画像 N 枚は送っていない」と知らせていたが、**貼り直すには
+「消す → 貼る」の 2 手が要る**ので、正常な操作のたびに必ず出る。
+画像は送れているのに失敗したように見えるだけだった。
+
+代わりに、新しく貼るときに**本文から消えている添付を捨てて番号を
+詰め直す**（`my:claude--input-prune-images`）。`[Image #1]` を消して
+貼り直せばまた #1 になる。掃除を「貼るとき」に限るのは、編集のたびに
+やると undo で戻したプレースホルダの画像が失われるため。
+
+content は「ラベル → 画像 → …→ 本文」の順に並べる。Anthropic の
+ドキュメントが複数画像のときはラベルを付けて先に置くことを勧めており、
+本文からも `[Image #1]` と同じ表記で参照できる。
+
+```
+[{"type":"text","text":"[Image #1]"}, {"type":"image",...}, {"type":"text","text":"本文"}]
+```
+
+**履歴に残すテキストからはプレースホルダを外す**
+（`my:claude--strip-placeholders`）。`M-p` で呼び出しても画像は付いて
+こないので、`[Image #1]` だけが claude に届いて話が食い違う。
+
+#### プレビューは overlay。テキストプロパティでは駄目
+
+`display` でプレースホルダを画像に置き換えてしまうと、上の
+「消せば取り消せる」が壊れる（文字が見えないものは消しにくいし、
+1 文字消しても残りに `display` が残る）。overlay の `before-string` なら
+文字の前にサムネイルが並ぶだけで編集の邪魔にならず、`evaporate` を
+立てておけばプレースホルダを消したときに overlay も消える。
+
+face も overlay に載せる。`markdown-mode` の font-lock は `[...]` を
+参照リンクとして着色するが、overlay の face はその上に重なる。
+
+サムネイルは `create-image` の `:max-height` で行数に合わせる
+（入力バッファ 2 行、会話バッファ 8 行）。ImageMagick は要らない
+（Emacs 27 以降はネイティブに拡縮する）。実測で 320x160 → 272x136。
+
+#### ログの base64 は落とす
+
+`my:claude-log` が t のとき、画像を送ると数百 KB の base64 が
+`*claude-log(PROJ)*` に残ってログが読めなくなる。`my:claude--log-line`
+が 200 文字以上続く `"data":"..."` だけを `<2616 文字>` に潰す。
+
+#### `M-v` は cua に奪われない
+
+`cua-mode` は `emulation-mode-map-alists` 経由なのでメジャーモードの
+ローカルマップより先に引かれるが、`cua-global-keymap` の `M-v`
+（`cua-scroll-down`）が出るのは**ローカルマップに `M-v` が無いとき
+だけ**。実測（`cua-enable-cua-keys` は nil）:
+
+| バッファ | `M-v` |
+|---|---|
+| `my:claude-input-mode` | `my:claude-input-yank-image` |
+| `org-mode` | `my:org-yank-image` |
+| `fundamental-mode` | `cua-scroll-down` |
+
+画面送りが要るときは `C-z`（`my-keybind.el`）。org で `M-v` を
+潰しているのと同じ流儀。
+
+#### 上限は 3.5 MB（エンコード前）
+
+API の上限は**base64 にしたあとで 5 MB** なので、生バイトではその 3/4 が
+天井（`my:claude-image-max-bytes`）。超えたら `user-error` で断る。黙って
+送っても API がリクエストごと弾くだけで、理由の分からないエラーが返る。
 
 ### セッションの再開とモデルの変更
 
