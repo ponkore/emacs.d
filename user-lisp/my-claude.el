@@ -63,6 +63,28 @@ subscriptionType を返すので、選択時にそちらを見せる。"
   "claude の実行ファイル。"
   :type 'string)
 
+(defcustom my:claude-uppercase-cwd (eq system-type 'windows-nt)
+  "非 nil なら claude の作業ディレクトリのドライブレターを大文字に揃える。
+
+Windows の Emacs は子プロセスの作業ディレクトリのドライブレターを
+**必ず小文字に落とす** (`my:claude--dos-path' に実測)。claude は
+その cwd をそのまま `.claude.json' の projects のキーに使うので、
+端末から起動したぶん (大文字) と Emacs から起動したぶん (小文字) で
+同じプロジェクトが 2 つに割れる。
+
+  C:/Users/masao/.emacs.d   ← 端末の TUI が書いた
+  c:/Users/masao/.emacs.d   ← Emacs 経由で作られた
+
+JSON のキーなので claude 側は別物として扱い、MCP サーバの設定も
+信頼設定 (`my:claude-trust-workspace') も履歴も片方にしか効かない。
+非 nil のときは cmd.exe の `cd /d' を挟んで起こすことで揃える
+\(`my:claude--wrap-command')。
+
+`~/.claude/projects/' のディレクトリ名は大小が混ざっても
+Windows のファイルシステムが同じ場所を指すため、そちらは元から
+分かれていない。"
+  :type 'boolean)
+
 (defcustom my:claude-model nil
   "使うモデル。nil なら claude の既定に任せる。
 変更はプロセスの起動時にしか効かない。"
@@ -589,6 +611,78 @@ RESUME が t なら `--continue' (そのディレクトリの直近の会話を�
      (list "--permission-mode" my:claude-permission-mode))
    my:claude-extra-args))
 
+(defun my:claude--upcase-drive (path)
+  "PATH のドライブレターを大文字にして返す。ドライブが無ければそのまま。"
+  (if (string-match "\\`\\([a-z]\\):" path)
+      (concat (upcase (match-string 1 path)) (substring path 1))
+    path))
+
+(defun my:claude--dos-path (path)
+  "PATH を、ドライブレターを大文字にした DOS 形式にして返す。
+
+**`expand-file-name' や `directory-file-name' を通してはいけない。**
+Windows の Emacs はこれらでドライブレターを小文字に落とす。実測
+\(Emacs 31.1 / Windows 11):
+
+  (expand-file-name \"C:/Users/masao/.emacs.d/\")
+    => \"C:/Users/masao/.emacs.d/\"      ← 明示した大文字は保つ
+  (expand-file-name \"~/.emacs.d/\")
+    => \"c:/Users/masao/.emacs.d/\"      ← ~ の展開で小文字になる
+  (directory-file-name \"C:/Users/masao/.emacs.d/\")
+    => \"c:/Users/masao/.emacs.d\"       ← 末尾を落とすだけで小文字になる
+
+`make-process' が子プロセスに渡す作業ディレクトリも後者と同じ経路を
+通るので、`default-directory' を大文字にしておいても効かない。"
+  (let ((dos (subst-char-in-string ?/ ?\\ path)))
+    ;; 末尾の \ を落とす。ルート ("C:\\") だけは残す。
+    (when (and (> (length dos) 3)
+               (eq (aref dos (1- (length dos))) ?\\))
+      (setq dos (substring dos 0 (1- (length dos)))))
+    (my:claude--upcase-drive dos)))
+
+(defconst my:claude--cmd-metacharacters "[&|<>^\"%]"
+  "cmd.exe が解釈してしまう文字。
+これを含む引数があるときは cmd.exe を挟まない
+\(`my:claude--wrap-command')。")
+
+(defun my:claude--wrap-command (dir command)
+  "COMMAND を DIR で起こす形にして返す。
+
+Windows の Emacs は子プロセスの作業ディレクトリのドライブレターを
+必ず小文字に落とす (`my:claude--dos-path')。cmd.exe の `cd /d' は逆に
+**大文字に正規化する** (実測。ドライブレター以外もディスク上の綴りに
+揃う) ので、そこを通して起こすと端末から起動したときと同じ cwd に
+なる。引数はそのまま素通しされ、空白を含む引数も壊れない (実測で
+argv が直接起動した場合と一致することを確認した)。
+
+包まない条件が 3 つある。どれも黙って従来どおり直接起こす。
+
+- Windows でない、または `my:claude-uppercase-cwd' が nil
+- DIR がドライブレターで始まらない
+  (cmd.exe は UNC パスをカレントディレクトリにできない)
+- 引数に cmd.exe が解釈する文字が混じっている
+  (`my:claude-extra-args' には何でも書けるので、壊すより諦める)
+
+プロセスの木に cmd.exe が 1 つ挟まるが、cmd.exe は stdin を自分で
+読まないので stdin / stdout はそのまま claude に繋がる。EOF での
+終了 (`my:claude-quit-session') もそのまま効く。"
+  (if (and my:claude-uppercase-cwd
+           (eq system-type 'windows-nt)
+           (string-match-p "\\`[A-Za-z]:[/\\\\]" dir)
+           (not (seq-some
+                 (lambda (a) (string-match-p my:claude--cmd-metacharacters a))
+                 command)))
+      (append (list (or (executable-find "cmd.exe")
+                        (expand-file-name "System32/cmd.exe"
+                                          (or (getenv "SystemRoot") "C:/Windows")))
+                    "/d" "/c"
+                    "cd" "/d" (my:claude--dos-path dir) "&&"
+                    ;; cmd.exe に渡す実行ファイルは / 区切りだと
+                    ;; スイッチと見なされることがあるので \ にする。
+                    (my:claude--dos-path (car command)))
+              (cdr command))
+    command))
+
 (defun my:claude--start (dir env &optional resume)
   "環境 ENV で DIR に claude を起動して session 構造体を返す。
 RESUME は `my:claude--command' に渡す (t で --continue、文字列で --resume)。"
@@ -625,7 +719,7 @@ RESUME は `my:claude--command' に渡す (t で --continue、文字列で --res
              :buffer nil                ; 出力は自前のフィルタで捌く
              :connection-type 'pipe
              :noquery t
-             :command (my:claude--command resume)
+             :command (my:claude--wrap-command dir (my:claude--command resume))
              :filter (lambda (_p str) (my:claude--filter session str))
              :sentinel (lambda (_p e) (my:claude--sentinel session e)))))
     (setf (my:claude-session-process session) proc)
@@ -2209,26 +2303,25 @@ C: 直下のディレクトリ一覧が出る。実際にそうなっていた�
 ;;; ワークスペースの信頼
 
 (defun my:claude--workspace-key (dir)
-  "claude が `.claude.json' の projects に使うキーを DIR から作る。
+  "claude が DIR に対して使うワークスペースのパス。
 
-Emacs から起動した claude は **必ずドライブレターが小文字**の
-ワークスペースを見る。`expand-file-name' は大文字を保つのに、
-`make-process' が子プロセスの作業ディレクトリを設定する経路で
-小文字になる。実測 (Emacs 31.1 / Windows 11):
+`.claude.json' の projects のキーであり、`~/.claude/projects/' の
+ディレクトリ名の元でもある (`my:claude--session-directory')。
+どちらも claude が見る cwd の綴りそのままなので、**起こし方と
+同じ規則で組み立てないと別のプロジェクトを指す。**
 
-  default-directory      = C:/Projects/Foo/
-  expand-file-name       = C:/Projects/Foo/
-  子が見る cwd           = c:\\Projects\\Foo     ← 小文字
-
-一方、端末で対話的に起動した claude は大文字のまま記録するので、
-同じディレクトリに対して大小 2 つのエントリができる。Emacs 側は
-必ず信頼されていない方を引くため、プロジェクトの
-`.claude/settings.json' の permissions.allow が毎回まるごと無視される。
-gopls が大文字のドライブレターを返して診断が出なかったのと同じ罠。"
-  (let ((path (directory-file-name (expand-file-name dir))))
-    (if (string-match "\\`\\([A-Za-z]\\):" path)
-        (concat (downcase (match-string 1 path)) (substring path 1))
-      path)))
+ドライブレターの大小がそれで決まる。`my:claude-uppercase-cwd' が
+非 nil なら cmd.exe を挟んで大文字で起こすので大文字、nil なら
+Emacs が小文字に落としたまま起こすので小文字。
+`directory-file-name' はそれ自体が小文字に落とすので、
+大文字はここで付け直す。"
+  (let* ((path (directory-file-name (expand-file-name dir)))
+         (drive (and (string-match "\\`\\([A-Za-z]\\):" path)
+                     (match-string 1 path))))
+    (if (null drive)
+        path
+      (concat (if my:claude-uppercase-cwd (upcase drive) (downcase drive))
+              (substring path 1)))))
 
 (defun my:claude--config-json (session)
   "SESSION の設定ディレクトリにある `.claude.json' のパス。"
@@ -2321,10 +2414,12 @@ RESUME は `my:claude--command' に渡す。ENV を省くと今の環境のま�
 claude はワークスペースのパスの **英数字以外をすべて `-' に置き換えた**
 名前を使う。`C:/Users/masao/.emacs.d' なら `C--Users-masao--emacs-d'。
 手元の 10 個で突き合わせて確かめた (合わなかった 1 つはドライブレターの
-大小違いだけで、Windows のファイルシステムでは同じ場所を指す)。"
+大小違いだけで、Windows のファイルシステムでは同じ場所を指す)。
+
+パスは `my:claude--workspace-key' から採る。あちらと同じ綴りに
+しておかないと、`.claude.json' のキーと履歴の置き場がずれる。"
   (let ((name (replace-regexp-in-string
-               "[^A-Za-z0-9]" "-"
-               (directory-file-name (expand-file-name dir)))))
+               "[^A-Za-z0-9]" "-" (my:claude--workspace-key dir))))
     (expand-file-name name (my:claude--projects-directory env))))
 
 (defun my:claude--session-preview (file)

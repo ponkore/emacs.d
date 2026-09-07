@@ -1647,10 +1647,10 @@ Expected {behavior: 'allow', updatedInput?: object}
 `init` の `terminal_slash_commands`（`doctor` / `color` / `reload-plugins`）は
 端末が要るもので、補完の注釈に `[端末専用]` と出るようにしてある。
 
-### 【重要】Emacs から起動すると必ず「信頼されていないワークスペース」になる
+### 【重要】Emacs から起動すると cwd のドライブレターが小文字になる
 
 `.claude/settings.json` を置いてあるプロジェクトで `C-c a a` すると、
-会話バッファにこれが出る。
+かつては会話バッファにこれが出ていた。
 
 ```
 Ignoring 17 permissions.allow entries from .claude/settings.json:
@@ -1661,14 +1661,16 @@ set projects["c:/Projects/ESC-Web/WebCoreSystem_v1"].hasTrustDialogAccepted: tru
 原因は **Emacs が子プロセスの作業ディレクトリのドライブレターを小文字にする**こと。
 実測（Emacs 31.1 / Windows 11）:
 
-| | |
+| 式 | 値 |
 |---|---|
-| `default-directory` | `C:/Projects/Foo/` |
-| `expand-file-name` | `C:/Projects/Foo/`（大文字のまま） |
-| **子プロセスが見る cwd** | **`c:\Projects\Foo`** |
+| `(expand-file-name "C:/Users/masao/.emacs.d/")` | `C:/Users/masao/.emacs.d/`（明示した大文字は保つ） |
+| `(expand-file-name "~/.emacs.d/")` | **`c:/Users/masao/.emacs.d/`** |
+| `(directory-file-name "C:/Users/masao/.emacs.d/")` | **`c:/Users/masao/.emacs.d`** |
+| **子プロセスが見る cwd** | **`c:\Users\masao\.emacs.d`** |
 
-`default-directory` を大文字にしても変わらない。`make-process` が
-作業ディレクトリを設定する経路で小文字になる。
+`default-directory` を大文字にしても変わらない。`make-process` は
+`directory-file-name` と同じ経路で作業ディレクトリを組み立てるので、
+そこで小文字に落ちる。**Lisp 側に逃げ道は無い。**
 
 一方、端末で対話的に起動した claude は大文字のまま記録するので、
 `.claude.json` の `projects` に**大小 2 つのエントリができる**。
@@ -1678,13 +1680,55 @@ C:/Projects/ESC-Web/WebCoreSystem_v1   trusted=True    ← 端末の TUI が書�
 c:/Projects/ESC-Web/WebCoreSystem_v1   trusted=False   ← Emacs 経由で作られた
 ```
 
-Emacs 側は必ず信頼されていない方を引くため、プロジェクトの
-`permissions.allow` がまるごと無視される。**壊れはしないが許可の確認が
-増えるだけになる。** gopls が大文字のドライブレターを返して診断が出なかった
-のとまったく同じ罠。
+JSON のキーなので claude は別のプロジェクトとして扱う。信頼設定も
+MCP サーバの設定も片方にしか効かない。gopls が大文字のドライブレターを
+返して診断が出なかったのとまったく同じ罠。
+
+**`~/.claude/projects/` のディレクトリ名は分かれない。** Windows の
+ファイルシステムが大小を区別しないので、`c--…` を作ろうとしても既にある
+`C--…` が再利用される。記録された `cwd` は小文字なのにディレクトリ名は
+大文字、という状態になっていた。**分かれるのは `.claude.json` のキーだけ。**
 
 `--settings` でファイルや JSON 文字列を明示しても回避できない（実測）。
 `-p` は仕様として信頼ダイアログを出さない。
+
+#### cmd.exe の `cd /d` を挟んで大文字に揃える（2026-09-07）
+
+`cmd.exe` の `cd /d` は**ドライブレターを大文字に正規化する**（残りの桁も
+ディスク上の綴りに揃う）。そこを通して起こせば、端末から起動したときと
+同じ cwd になる。
+
+```
+cmd.exe /d /c cd /d C:\Users\masao\.emacs.d && C:\Users\masao\.local\bin\claude.exe -p …
+```
+
+`my:claude--wrap-command` がこれを組み立てる（`my:claude-uppercase-cwd`、
+Windows で既定 t）。実測（`tmp/` に作った新しいディレクトリで `-p` を 1 往復）:
+
+| | 出来た `projects/` のディレクトリ | 記録された `cwd` |
+|---|---|---|
+| `my:claude-uppercase-cwd` = t | `C--…-cwd-probe-dir` | **`C:\Users\masao\.emacs.d\tmp\cwd-probe-dir`** |
+| `my:claude-uppercase-cwd` = nil | `c--…-cwd-probe-dir2` | — |
+
+- **引数はそのまま素通しされる。** 空白を含む引数も壊れない（同じ引数列を
+  node に直接渡した場合と cmd.exe 越しの場合で `argv` が一致することを実測）
+- **cmd.exe が解釈する文字（`& | < > ^ " %`）が引数にあれば包まない。**
+  `my:claude-extra-args` には何でも書けるので、壊すより諦める
+- **UNC パスでも包まない。** cmd.exe は UNC をカレントディレクトリにできない
+- プロセスの木に cmd.exe が 1 つ挟まるが、cmd.exe は stdin を自分では
+  読まないので stdin / stdout はそのまま claude に繋がる。EOF での終了も効く
+- **パスを `directory-file-name` / `expand-file-name` で組み立てないこと**
+  （上の表のとおり、そこで小文字に落ちる）。`my:claude--dos-path` が
+  文字列として `/` → `\` の置換と末尾の除去をして、ドライブレターを大文字にする
+
+`.claude.json` のキー（`my:claude--workspace-key`）と過去セッションの
+置き場（`my:claude--session-directory`）も**同じ関数から採る**。
+起こし方と綴りがずれると別のプロジェクトを指してしまう。
+`my:claude-uppercase-cwd` を nil にすれば両方とも小文字に戻る。
+
+**既にできてしまった小文字のエントリは消えない。** `.claude.json` の
+`projects` に大小 2 つ並んでいるなら、小文字側の設定（MCP サーバ、信頼）を
+大文字側へ移してから消す。
 
 `C-c a t`（`my:claude-trust-workspace`）が
 `projects[KEY].hasTrustDialogAccepted` を `t` にする。KEY は claude が
