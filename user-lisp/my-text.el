@@ -132,11 +132,177 @@ NOSELECT (前置引数) を付けると MIME 型を選ばせる (`yank-media' �
   (defun my:org-assets-enable-check ()
     "このバッファの `after-save-hook' に `my:org-assets-check-on-save' を足す。"
     (add-hook 'after-save-hook #'my:org-assets-check-on-save nil t))
+
+  ;; --- #+FOLD_REGION: で指定した範囲を畳む ---
+  ;;
+  ;; org ファイルの冒頭に
+  ;;   #+FOLD_REGION: 過去分
+  ;; と書いておくと、バッファ内の
+  ;;   -- 過去分(begin)
+  ;;   ...
+  ;;   -- 過去分(end)
+  ;; に挟まれた部分を隠す。名前を変えて何行でも書ける。
+  ;;
+  ;; narrowing ではなく invisible overlay にしてある。narrow-to-region は
+  ;; 「その範囲だけを見せる」ものなので、隠したい範囲がバッファの末尾か
+  ;; 先頭にあるときしか使えない。overlay なら中間にあっても複数あっても効く。
+  ;;
+  ;; org 自身の折りたたみ (TAB / #+STARTUP:) は org-fold の spec で動いており、
+  ;; こちらは独自の invisibility spec なので干渉しない。
+  (defcustom my:org-fold-region-begin-format "^[ \t]*--[ \t]*%s(begin)[ \t]*$"
+    "畳む範囲の開始行にマッチする正規表現。
+%s には `#+FOLD_REGION:' に書かれた名前が `regexp-quote' して入る。"
+    :type 'regexp
+    :group 'org)
+
+  (defcustom my:org-fold-region-end-format "^[ \t]*--[ \t]*%s(end)[ \t]*$"
+    "畳む範囲の終了行にマッチする正規表現。
+%s には `#+FOLD_REGION:' に書かれた名前が `regexp-quote' して入る。"
+    :type 'regexp
+    :group 'org)
+
+  (defcustom my:org-fold-region-hide-on-open t
+    "非 nil なら `#+FOLD_REGION:' のある org バッファを開いた時点で畳む。"
+    :type 'boolean
+    :group 'org)
+
+  (defun my:org-fold-region--names ()
+    "バッファの `#+FOLD_REGION:' に書かれた名前を出現順に返す。"
+    (org-with-wide-buffer
+     (goto-char (point-min))
+     (let ((case-fold-search t)
+           (names nil))
+       (while (re-search-forward "^[ \t]*#\\+FOLD_REGION:[ \t]*\\(.*\\)$" nil t)
+         (let ((name (string-trim (match-string-no-properties 1))))
+           (unless (or (string-empty-p name) (member name names))
+             (push name names))))
+       (nreverse names))))
+
+  (defun my:org-fold-region--bounds (name)
+    "NAME の範囲を (BEG . END) で返す。見つからなければ nil。
+BEG は開始行の行末、END は終了行の行末。開始行だけが残って見えるようにする。"
+    (org-with-wide-buffer
+     (goto-char (point-min))
+     (let ((case-fold-search t)
+           (beg-re (format my:org-fold-region-begin-format (regexp-quote name)))
+           (end-re (format my:org-fold-region-end-format (regexp-quote name))))
+       (when (re-search-forward beg-re nil t)
+         (let ((beg (line-end-position)))
+           (when (re-search-forward end-re nil t)
+             (cons beg (line-end-position))))))))
+
+  (defun my:org-fold-region--overlay (name)
+    "NAME を隠している overlay を返す。無ければ nil。"
+    ;; ナローイングされていても取りこぼさないよう全体を見る。
+    (org-with-wide-buffer
+     (seq-find (lambda (ov)
+                 (equal name (overlay-get ov 'my:org-fold-region)))
+               (overlays-in (point-min) (point-max)))))
+
+  (defun my:org-fold-region--hidden-p (name)
+    "NAME の範囲がいま畳まれているなら非 nil。
+overlay の有無ではなく `invisible' が生きているかで見る。isearch は
+一時的に開くとき overlay を残したまま `invisible' を nil にするので、
+overlay があること自体は「畳まれている」ことを意味しない。"
+    (let ((ov (my:org-fold-region--overlay name)))
+      (and ov (eq (overlay-get ov 'invisible) 'my:org-fold-region))))
+
+  (defun my:org-fold-region--isearch-open (ov)
+    "isearch がマッチを見つけた範囲を恒久的に開く。"
+    (delete-overlay ov))
+
+  (defun my:org-fold-region--isearch-open-temporary (ov hide-p)
+    "isearch が範囲を一時的に開け閉めするときに呼ばれる。
+この関数を持たない overlay に対して isearch は `invisible' を自分で
+退避・復元するが、復元は isearch の終わり方に左右される。自前で持てば
+戻し方が一意になる。"
+    (overlay-put ov 'invisible (and hide-p 'my:org-fold-region)))
+
+  (defun my:org-fold-region--name-at-point (names)
+    "NAMES のうち point がその範囲にあるものを返す。"
+    (seq-find (lambda (name)
+                (let ((b (my:org-fold-region--bounds name)))
+                  ;; 開始行に point があるときは (car b) = (line-end-position)。
+                  (and b (<= (car b) (line-end-position)) (<= (point) (cdr b)))))
+              names))
+
+  (defun my:org-fold-region--read-name ()
+    "操作対象の範囲名を決める。
+候補が 1 つならそれ、複数なら point 位置のものを優先し、
+決まらなければ選ばせる。"
+    (let ((names (my:org-fold-region--names)))
+      (cond
+       ((null names)
+        (user-error "このバッファに #+FOLD_REGION: がありません"))
+       ((null (cdr names)) (car names))
+       ((my:org-fold-region--name-at-point names))
+       (t (completing-read "範囲: " names nil t)))))
+
+  (defun my:org-fold-region-hide (name)
+    "NAME の範囲を隠す。"
+    (interactive (list (my:org-fold-region--read-name)))
+    (let ((bounds (my:org-fold-region--bounds name)))
+      (unless bounds
+        (user-error "「%s」の範囲が見つかりません" name))
+      ;; 既存の overlay は捨てて作り直す。マーカー行を書き換えたときに
+      ;; 追随できるし、isearch に一時的に開かれたまま残っていても直る。
+      (my:org-fold-region-show name)
+      ;; 隠した位置に ... を出す。add-to-invisibility-spec は重複を見ないので
+      ;; 自分で確かめる (buffer-invisibility-spec はバッファローカル)。
+      (unless (and (listp buffer-invisibility-spec)
+                   (member '(my:org-fold-region . t) buffer-invisibility-spec))
+        (add-to-invisibility-spec '(my:org-fold-region . t)))
+      (let ((ov (make-overlay (car bounds) (cdr bounds) nil t nil)))
+        (overlay-put ov 'invisible 'my:org-fold-region)
+        (overlay-put ov 'my:org-fold-region name)
+        (overlay-put ov 'evaporate t)
+        (overlay-put ov 'isearch-open-invisible
+                     #'my:org-fold-region--isearch-open)
+        (overlay-put ov 'isearch-open-invisible-temporary
+                     #'my:org-fold-region--isearch-open-temporary))))
+
+  (defun my:org-fold-region-show (name)
+    "NAME の範囲を開く。"
+    (interactive (list (my:org-fold-region--read-name)))
+    (let ((ov (my:org-fold-region--overlay name)))
+      (when ov (delete-overlay ov))))
+
+  (defun my:org-fold-region-toggle (name)
+    "NAME の範囲を畳む / 開くを切り替える。"
+    (interactive (list (my:org-fold-region--read-name)))
+    (if (my:org-fold-region--hidden-p name)
+        (progn (my:org-fold-region-show name)
+               (message "「%s」を開きました" name))
+      (my:org-fold-region-hide name)
+      (message "「%s」を畳みました" name)))
+
+  (defun my:org-fold-region-hide-all ()
+    "`#+FOLD_REGION:' に挙がっている範囲をすべて畳む。"
+    (interactive)
+    (dolist (name (my:org-fold-region--names))
+      ;; 名前だけ書いてマーカーがまだ無い場合は黙って飛ばす。
+      (when (my:org-fold-region--bounds name)
+        (my:org-fold-region-hide name))))
+
+  (defun my:org-fold-region-show-all ()
+    "`#+FOLD_REGION:' に挙がっている範囲をすべて開く。"
+    (interactive)
+    (dolist (name (my:org-fold-region--names))
+      (my:org-fold-region-show name)))
+
+  (defun my:org-fold-region-setup ()
+    "org バッファを開いた時点で `#+FOLD_REGION:' の範囲を畳む。"
+    (when my:org-fold-region-hide-on-open
+      (my:org-fold-region-hide-all)))
   :hook ((org-mode-hook . turn-on-font-lock)
-         (org-mode-hook . my:org-assets-enable-check))
+         (org-mode-hook . my:org-assets-enable-check)
+         (org-mode-hook . my:org-fold-region-setup))
   ;; M-v (scroll-down-command) を org-mode でだけ潰す。
   ;; スクロールは my-keybind.el の C-z が使える。
-  :bind (:map org-mode-map ("M-v" . my:org-yank-image))
+  ;; C-c C-x h は org では空いている (C-c C-x - は org-timer-item)。
+  :bind (:map org-mode-map
+              ("M-v" . my:org-yank-image)
+              ("C-c C-x h" . my:org-fold-region-toggle))
   :custom
   ;; クリップボード画像 (と D&D した画像) の保存先。
   ;; 既定の attach (org-attach 管理下) ではなくバッファの隣に置く。

@@ -2182,6 +2182,84 @@ v2 世代の API（`modus-themes-load-themes` / `modus-themes-load-vivendi` /
 この関数に渡すので、`#+ARCHIVE:` / `ARCHIVE` プロパティ / 変数のどれで
 指定しても効く（`org-archive-all-*` からの呼び出しも同様）。
 
+## org で範囲を畳む（`#+FOLD_REGION:`）
+
+org ファイルの冒頭に `#+FOLD_REGION: 過去分` と書いておくと、バッファ内の
+
+```org
+-- 過去分(begin)
+  ...
+-- 過去分(end)
+```
+
+に挟まれた部分を畳んで隠す（`my-text.el`）。名前を変えて何行でも書ける。
+
+| | |
+|---|---|
+| `C-c C-x h` | 範囲の開閉（`my:org-fold-region-toggle`） |
+| `M-x my:org-fold-region-hide-all` / `-show-all` | すべて畳む / 開く |
+
+`C-c C-x -` ではなく `h` なのは、前者を `org-timer-item` が持っているため。
+
+| 変数 | 既定 |
+|---|---|
+| `my:org-fold-region-begin-format` | `"^[ \t]*--[ \t]*%s(begin)[ \t]*$"` |
+| `my:org-fold-region-end-format` | `"^[ \t]*--[ \t]*%s(end)[ \t]*$"` |
+| `my:org-fold-region-hide-on-open` | `t`（開いた時点で畳む） |
+
+`%s` に名前が `regexp-quote` されて入るので、マーカーの書式ごと変えられる。
+候補が複数あるときは point 位置の範囲を優先し、決まらなければ選ばせる。
+
+### narrowing ではなく invisible overlay を使う
+
+`narrow-to-region` は「その範囲**だけ**を見せる」ものなので、隠したい範囲が
+バッファの末尾か先頭にあるときしか使えない。overlay なら中間にあっても
+複数あっても効く。
+
+org 自身の折りたたみ（TAB / `#+STARTUP:`）は `org-fold` の spec で動いており、
+こちらは独自の invisibility spec なので干渉しない（`org-fold-show-all` を
+呼んでも畳まれたままであることを実測）。
+
+隠すのは**開始行の行末から終了行の行末まで**。開始行は残るので、そこに
+ellipsis の `...` が出る。バッファの中身は変わらないので保存内容にも影響しない
+（実測で `buffer-size` も `buffer-modified-p` も変化なし）。
+
+### 【重要】isearch は overlay を残したまま `invisible` を nil にする
+
+`isearch-invisible` の既定は `open` なので、畳んだ中に検索が入ると isearch は
+その範囲を一時的に開く。このとき **overlay は消えず、`invisible` プロパティ
+だけが nil になる**。
+
+そのため「overlay があるか」で畳まれているかを判定してはいけない。実際に踏んだ:
+overlay の有無で見ていたため、isearch が開いたあと `my:org-fold-region-hide` が
+「既にある」と判断して何もせず、**そのバッファでは二度と畳めなくなった**。
+
+- `my:org-fold-region--hidden-p` が `invisible` プロパティで判定する
+- `hide` は既存 overlay を捨てて作り直す（マーカー行を書き換えたときに
+  追随する役目も兼ねる）
+- `isearch-open-invisible-temporary` を自前で持たせて、一時開放の戻し方を
+  一意にする。持たない overlay に対しては isearch が `invisible` を自分で
+  退避・復元するが、復元は isearch の終わり方に左右される
+
+実測（一時開放を模して `invisible` を nil にしてから操作）:
+
+| | 修正前 | 修正後 |
+|---|---|---|
+| その状態から `hide-all` / `toggle` | **畳まれない** | **畳まれる** |
+| 恒久的に開いた（overlay 削除）あと `hide-all` | 畳まれる | 畳まれる |
+
+### 検証での注意
+
+**`#+FOLD_REGION` は "OLD" を含む。** `case-fold-search` は org バッファでは t
+なので、プローブに `(search-forward "old")` と書くとキーワード行にマッチして
+「畳まれていない」と誤診する。実際に 1 度誤診した。
+
+`org-mode-hook` 経由で畳むので、`ec.sh -l` でモジュールを読み直しただけでは
+`setup` は走らない（`:hook` は use-package ブロックの評価で張られる）。
+プローブ側で
+`(let ((org-mode-hook (cons #'my:org-fold-region-setup org-mode-hook))) (org-mode))`
+と束縛して測ること。
+
 ## org でクリップボードの画像を貼る（`M-v`）
 
 org バッファで `M-v` を押すと、クリップボードの画像を
