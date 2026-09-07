@@ -161,6 +161,7 @@ lexical-binding の検証（後述）と同じく、一時ディレクトリに�
 | `my-shell` | exec-path-from-shell、Windows 用 shell 設定 |
 | `my-utils` | calendar、open-junk-file、grep/ripgrep、server（emacsclient 用） |
 | `my-claude` | Claude Code を stream-json で使う（プレフィクス: `C-c a`） |
+| `my-htnblog` | はてなブログ AtomPub API へ投稿する（`M-x htnblog`） |
 | `my-pty` | ConPTY 経由で対話 TUI を動かす（`ptyd/`）。Windows のみ |
 | `my-platform` | Windows / macOS 固有設定 |
 
@@ -1820,6 +1821,74 @@ claude -p --verbose --input-format stream-json --output-format stream-json      
 （大半はシステムプロンプトのキャッシュ作成）。
 `my:claude-log` を t にすると生の JSON Lines が残るので、
 上流のイベント種別が変わったときに気づける。
+
+## はてなブログへ投稿する (`my-htnblog.el`)
+
+毎日 1 記事、カテゴリー・タイトル・本文 1 行目が決まっているので、
+`M-x htnblog` でそれをプリセットしたバッファを開き、本文を書いて `C-c C-c`
+すると公開される。外部コマンドは要らない。
+
+| キー | |
+|---|---|
+| `M-x htnblog` | 記事を書くバッファを開く（`C-u` で書きかけを捨ててひな形を入れ直す） |
+| `C-c C-c` | 確認して投稿。成功したらバッファを閉じ、記事 URL を kill-ring に入れる |
+| `C-c C-k` | 書きかけを捨てて閉じる |
+
+ヘッダの書式は [htnblog コマンド](https://github.com/hymkor/htnblog-go) の
+`new` と同じにしてある。あちらで書いた下書きをそのまま貼っても通る。
+`Category` は複数行書ける。`Draft: yes` を足すと公開せず下書きになる。
+
+````
+```header
+Category: 体調管理
+Title: 9月7日(月)の記録
+```
+
+* 9月7日(月)
+````
+
+### API は薄い。Basic 認証 1 本で足りる
+
+WSSE も OAuth も要らない（htnblog-go の `post.go` も `SetBasicAuth` 1 行）。
+認証情報は htnblog コマンドと同じ `~/.htnblog` から読む
+（`userid` / `endpointurl` / `apikey`）。投稿は `<endpointurl>/entry` へ
+Atom の entry を POST するだけ。
+
+**`app:draft` を `no` にすれば最初から公開状態で投稿できる。**
+htnblog コマンドの `new` → `publish` が 2 手なのは、あちらの `new` が
+下書き固定だからで、API の制約ではない。
+
+HTTP は組み込みの url.el。子プロセスを起こさないので、この設定の持病である
+「Windows の `call-process` が遅い」とは無関係。
+
+### 踏みやすい 3 点
+
+- **`url-request-data` は unibyte にする。** `encode-coding-string` を通さないと
+  日本語が化ける。`default-process-coding-system` の話（別節）と同じ構図だが、
+  こちらはプロセスを通らないので `encode-coding-string` で明示するしかない
+- **CDATA に `]]>` が現れたら分割する**（`]]]]><![CDATA[>`）。本文は
+  ユーザーが自由に書くので必ず起こりうる。実測で `]]>` 単体・連続とも往復した
+- **曜日は `format-time-string` の `%a` に頼らない。** `system-time-locale` 次第で
+  英語になる。`my:htnblog--day-names` に自前で持つ（`decoded-time-weekday` は
+  0 = 日曜）
+
+`apikey` を残さないため、`url-debug` を nil に束縛し、応答バッファは
+`unwind-protect` で必ず kill する。失敗した応答だけ `*htnblog-error*` に出す
+（本文に認証情報は含まれない）。
+
+### 実測（2026-09-07）
+
+| | |
+|---|---|
+| `GET <endpointurl>/entry`（記事一覧） | **0.31 秒** / 18465 バイト / entry 10 件 |
+| `Draft: yes` で 1 本 POST | 成功。サーバ側で `app:draft` が `yes`、`rel=alternate` から記事 URL が取れた |
+
+`M-x htnblog` から `C-c C-c` までの経路（ヘッダ解析 → 確認 → POST →
+URL を kill-ring → バッファ kill）を batch で通してある。**`y-or-n-p` だけは
+batch では stdin を待つので `cl-letf` でスタブする。**
+
+なお既存の記事はタイトルが揺れていた（`9月7日の記録` / `9月05日(土)の記録`）。
+手で打っている限り避けられないので、ひな形を固定する動機はここにある。
 
 ## 対話 TUI を Emacs で動かす (`ptyd/` + `my-pty.el`)
 
