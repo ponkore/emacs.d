@@ -14,22 +14,52 @@
   ;; leaf は (require) を出さなかったので :defer t で揃える。
   :defer t
   :custom
-  (mark-holidays-in-calendar t) ; 祝日をカレンダーに表示
+  ;; 祝日をカレンダーにマークする。
+  ;; かつて mark-holidays-in-calendar と書いてあったが、この名前は Emacs 23 で
+  ;; calendar-mark-holidays-flag に改名されており、obsolete alias も残って
+  ;; いない (31.1 の calendar/ を grep しても 1 件も出ない)。
+  ;; customize-set-variable は defcustom でない変数にも set-default するため、
+  ;; エラーも警告も出ないまま同名の変数が 1 つ増えるだけで、本物のフラグは
+  ;; nil のままだった。つまり祝日のマークは一度も効いていなかった。
+  (calendar-mark-holidays-flag t)
   (calendar-month-name-array ["01" "02" "03" "04" "05" "06" "07" "08" "09" "10" "11" "12" ])
   (calendar-day-name-array   ["日" "月" "火" "水" "木" "金" "土"])
   (calendar-day-header-array ["日" "月" "火" "水" "木" "金" "土"])
   (calendar-week-start-day   0)) ;; 日曜開始
 
+;; 日本の祝日は Emacs 本体に入っていない (31.1 の calendar/ には japan という
+;; 語すら出てこない) ので、これが要る。upstream は 2020-12 で止まっているが、
+;; 祝日法が 2021 年以降変わっていないため現行法に完全対応しており、春分・秋分は
+;; 天文計算、振替休日と国民の休日も導出しているので将来の年も正しく出る
+;; (2026 年の 18 件が内閣府の一覧と一致することを実測。CLAUDE.md 参照)。
 (use-package japanese-holidays
   :straight t
+  ;; calendar と一緒に読む。祝日のマーク (calendar-mark-holidays) は
+  ;; calendar-generate の中で走るので、calendar-today-visible-hook 経由の
+  ;; 遅延ロードでは初回の表示に間に合わない。
+  :after calendar
+  :demand t
   :custom
   (japanese-holiday-weekend '(0 6)) ; 土日を祝日として表示
   (japanese-holiday-weekend-marker '(holiday nil nil nil nil nil japanese-holiday-saturday)) ; 土曜日を水色で表示
-  ;;    `((calendar-holidays . ,(append japanese-holidays holiday-local-holidays holiday-other-holidays))) ; 他の国の祝日も表示させたい場合は適当に調整
   :hook
   (calendar-today-visible-hook . japanese-holiday-mark-weekend)
   (calendar-today-invisible-hook . japanese-holiday-mark-weekend)
-  (calendar-today-visible-hook . calendar-mark-today))
+  (calendar-today-visible-hook . calendar-mark-today)
+  :config
+  ;; calendar-holidays を日本の祝日に差し替える。**この 1 行が無いと祝日は
+  ;; 1 つも出ない。** 既定値はアメリカ・キリスト教・ユダヤ・イスラム・バハイ・
+  ;; 中国の祝日 39 件で、日本のものは含まれない。
+  ;; :custom ではなく :config に置くこと。:custom は require より前に展開
+  ;; されるので、値の式にある japanese-holidays がまだ void になる。
+  ;; holiday-local-holidays / holiday-other-holidays は holidays.el の
+  ;; defcustom で、calendar.el はそれを autoload するだけなのでここで require
+  ;; する。記念日を足したいときは holiday-other-holidays に書く。
+  (require 'holidays)
+  (customize-set-variable
+   'calendar-holidays (append japanese-holidays
+                              holiday-local-holidays
+                              holiday-other-holidays)))
 
 ;;; [3] open-junk-file
 
