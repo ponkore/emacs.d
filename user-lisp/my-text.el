@@ -12,6 +12,27 @@
 ;;; テキストモード
 ;;; --------------------------------------------------
 
+;;; [3] text-mode
+
+;; text-mode は ispell-completion-at-point を capf に足す (text-mode.el:155)。
+;; ところが ispell-alternate-dictionary の既定値は /usr/dict/words などを
+;; file-readable-p で探す cond なので、それらが無い環境では nil になり、
+;; ispell-lookup-words が問答無用で error を投げる (ispell.el:2620)。
+;; corfu はそれを handler-bind で拾って backtrace を *Messages* に流すため、
+;; 日本語を打つたびにトレースが積まれていた (61 件で 1000 行中 915 行を占有)。
+;;
+;; capf の最後尾 (ローカル値は (t ispell-completion-at-point)) にいるので、
+;; 他の capf が全滅したときにしか到達せず候補は失われない。壊れるのはログと
+;; エコーエリアと 1 回 38.4 ms の待ちだけだが、実用上は他のメッセージが
+;; 押し流されるのが痛い。ispell 本体を使っていないので capf ごと外す。
+;;
+;; nil にしても C-M-i は変わらない。:set 関数が ispell-complete-word を
+;; text-mode-map に張るのは「非 nil かつ completion-at-point 以外」のときだけ。
+(use-package text-mode
+  :defer t
+  :custom
+  (text-mode-ispell-word-completion nil))
+
 ;;; [3] org-mode
 
 (use-package org
