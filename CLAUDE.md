@@ -825,18 +825,73 @@ Windows の Emacs には PTY が無いので claude の対話 TUI は動かな�
 | `M-v` | クリップボードの画像を添付（`*claude-input*`。端末版 claude と同じ操作） |
 | `C-c C-v` | 画像ファイルを添付（`*claude-input*`） |
 
+### セッションはプロジェクトごとに持てる（2026-09-08）
+
+`~/.emacs.d` と `~/.config` でそれぞれ `C-c a a` すると、
+`*claude(.emacs.d)*` と `*claude(.config)*` が別の claude プロセスとして並ぶ。
+同じプロジェクトで押したときは動いているものに戻るだけ。
+**環境（アカウント）はセッションごと**なので、プロジェクトごとに別の
+アカウントを当てることもできる。
+
+以前は「Emacs 全体で 1 つ」に限っていた（`my:claude--the-session`）。
+`CLAUDE_CONFIG_DIR` はプロセス起動時にしか読まれず、複数あるとどちらに
+送っているのか分からなくなる、というのが理由だった。**その心配は
+「送り先をバッファで決める」ことで消える**ので、一覧
+（`my:claude--sessions`）に変えた。
+
+| 関数 | |
+|---|---|
+| `my:claude--current-session` | いま操作の対象。①バッファローカル ②このバッファのプロジェクト ③生きているのが 1 つだけならそれ |
+| `my:claude--read-session` | 決まらないときに選ばせる（`C-c a k` / `C-c a q` / `C-c a l`） |
+| `my:claude--session-for-directory` | ディレクトリで引く |
+| `my:claude--live-sessions` | 使えなくなったものを畳んで捨てながら返す |
+
+**③ で止めること。** 複数あるときに「直近のもの」で代用すると、別の
+プロジェクトに向かって送ってしまう。決まらないなら選ばせるか、
+`C-c a a` なら新しく起こす。
+
+`C-c a a`（`my:claude--ensure-session`）だけは③を**プロジェクトが
+決まらないバッファ（`*scratch*` など）に限る**。プロジェクトが決まる
+バッファからは、そのプロジェクトのセッションしか使わない。そうしないと
+「別プロジェクトで開いたつもりが、たまたま 1 つだけ動いていた別の
+セッションに繋がる」ことになる。
+
 ### バッファ名にはプロジェクト名が入る
 
-`my:claude--buffer-name` が作業ディレクトリの名前を付ける。上の表で
+`my:claude--project-label` が作業ディレクトリの名前を付ける。上の表で
 `*claude*` / `*claude-input*` と書いてあるものは実際には
 `*claude(.emacs.d)*` / `*claude-input(.emacs.d)*` になる（`*claude-log*` も同じ）。
-セッションは 1 つに限っているので衝突避けではなく、**どのプロジェクトに向かって
-話しているのかをバッファ一覧から見えるようにするため**。
+
+**basename が同じプロジェクトを 2 つ開いたら親をたどる。**
+`~/work/foo/src` を開いている状態で `~/other/src` を開くと、後者は
+`*claude(other/src)*` になる。同じディレクトリなら `#2` を付ける。
+**先に開いていたほうの名前は変えない**（見えているバッファの名前が
+後から変わるほうが分かりにくい）。名前は起動時に 1 回決めて
+`my:claude-session-label` に持たせ、ヘッダ行の 2 列目にも同じものを出す。
 
 **そのため「claude のバッファか」を名前で判定してはいけない。**
 `my:claude--buffer-p` はメジャーモード（`my:claude-mode` /
 `my:claude-input-mode`）で見る。セッションが無いときに会話バッファを探す
 `my:claude--conversation-buffer` も同じ。
+
+**バッファは名前で `get-buffer-create` しない**（`my:claude--buffer-for`）。
+死んだセッションの会話バッファは記録として残るので、別プロジェクトの
+セッションが同じ名前を取ると、他人の記録の続きに書き足してしまう。
+持ち主のディレクトリが違えば `generate-new-buffer` で別名にする。
+
+### 会話バッファと入力バッファは 1 対 1 で紐づく
+
+対応付けは**バッファローカルの `my:claude--peer`**（会話 ↔ 入力）で持つ。
+`*claude(.emacs.d)*` で `i` を押せば `*claude-input(.emacs.d)*` だけが出る。
+
+**セッション構造体に持たせない。** `C-c a l` はセッションが無くても
+画面を組める（会話・入力バッファだけ作る）ので、そこで辿れなくなる。
+逆に会話バッファは立て直し（`C-c a m` / `C-c a r` / `C-c a e`）をまたいで
+同じものを使い回すため、セッションが差し替わっても対は生き残る。
+`permanent-local` を付けてあるのはそのため。
+
+**名前から引いてはいけない。** `*claude(src)*` が 2 つあるとき
+（basename が同じプロジェクト）に取り違える。
 
 `my:claude-layout` はセッションより先に呼ばれることがある（`C-c a l`）ので、
 そのときは `my:claude--guess-directory`（**確認を出さない版**）で名前を決める。
@@ -850,7 +905,15 @@ Windows の Emacs には PTY が無いので claude の対話 TUI は動かな�
 
 ### 会話バッファを kill したらセッションも終わる
 
-別プロジェクトに移るときは `*claude(...)*` を kill して `C-c a a` すればよい。
+別プロジェクトに移るのに kill する必要は無い（そちらで `C-c a a` すれば
+並ぶ）。**入力バッファも kill するか `yes/no` で聞く。** 書きかけが
+残っていることがあるので黙っては捨てない。
+
+- **対は答えに関わらず先に切る。** kill するときは向こうの
+  `kill-buffer-hook` がこちらを触りに戻ってこないように、残すときは
+  死んだ会話バッファへの参照を持ち越さないため
+- 入力バッファだけを kill したときは**会話バッファは消さない**。
+  「書きかけをやめる」だけの操作で、セッションを終える意図は無い
 
 **「セッションが生きているか」をプロセスだけで判定してはいけない。**
 `make-process` の `:buffer` は nil（出力は自前のフィルタが捌く）なので、
@@ -859,13 +922,13 @@ Windows の Emacs には PTY が無いので claude の対話 TUI は動かな�
 `Selecting deleted buffer` になる（2026-09-06 に修正）。
 
 - `my:claude--session-usable-p` が**プロセスとバッファの両方**を見る。
-  `my:claude--live-session` / `my:claude--session-for-buffer` はこれを通す
-- バッファが死んでいたら `my:claude--live-session` がその場で
-  `my:claude-quit-session`（EOF）を送って `my:claude--the-session` を落とし、
-  nil を返す。呼び出し側は新しいセッションを起こす
+  `my:claude--live-sessions` / `my:claude--current-session` はこれを通す
+- バッファが死んでいたら `my:claude--live-sessions` がその場で
+  `my:claude-quit-session`（EOF）を送って一覧から外す。
+  呼び出し側は新しいセッションを起こす
 - `my:claude-mode` の `kill-buffer-hook` でも同じことをする。ただし EOF を
   送ってから sentinel が走るまでには間があるので、**その隙に `C-c a a` しても
-  古いセッションを掴まないよう `my:claude--live-session` 側でも見る**
+  古いセッションを掴まないよう `my:claude--live-sessions` 側でも見る**
 
 ### 作業ディレクトリの決め方
 
@@ -889,12 +952,12 @@ Windows の Emacs には PTY が無いので claude の対話 TUI は動かな�
 ├──────────────┤
 │ *claude*      │  残り − 5 行
 ├──────────────┤
-│ *claude-input*│  5 行（カーソルはここ）
+│ *claude-input*│  6 行（カーソルはここ）
 └──────────────┘
 ```
 
 `my:claude-window-height-ratio`（既定 0.5）と
-`my:claude-input-window-height`（既定 5）で変えられる。
+`my:claude-input-window-height`（既定 6）で変えられる。
 
 **`window-configuration` は退避しない。** 最大化トグルの復帰先も
 `C-c a l` も同じ関数を呼ぶだけなので、どこから何度押しても同じ形に
@@ -915,9 +978,10 @@ Windows の Emacs には PTY が無いので claude の対話 TUI は動かな�
 ### 環境（アカウント）の切り替え
 
 Pro / Enterprise / Max 20x を `CLAUDE_CONFIG_DIR` で使い分けている。
-claude はこれを**プロセスの起動時にしか読まない**ので、切り替えは
-立て直すことでしか行えない。そのため**セッションは Emacs 全体で 1 つ**に
-限っている（複数あるとどちらに送っているのか分からなくなる）。
+claude はこれを**プロセスの起動時にしか読まない**ので、切り替え
+（`C-c a e`）は立て直すことでしか行えない。**環境はセッションごと**に
+固定される（プロジェクトごとに別のアカウントを当てられる）。
+どれに送っているかはヘッダ行の 1 列目で確かめる。
 
 `my:claude-environments` に `(ラベル . CLAUDE_CONFIG_DIR)` で並べる。
 選択時に `claude auth status --json` を呼んで実際のアカウントを見せる
@@ -2317,6 +2381,37 @@ term.el はプライベートな CSI の目印として `?` しか見ていな�
 - macOS / Linux では `exec-path-from-shell` を使用
 - OS 判定は `(eq system-type 'windows-nt)` / `'darwin` / `'gnu/linux`。
   ウィンドウシステム判定は `window-system` の `'w32` / `'ns` / `'x` / `'pgtk`
+
+### 【重要】この設定では `file-equal-p` が使えない（2026-09-08 に発見）
+
+`my-platform.el` が Windows で `w32-get-true-file-attributes` を `nil` に
+している（`file-attributes` を速くするための設定）。すると **inode が
+常に 0 で返る**。`file-equal-p` は inode とボリューム ID の組で比べるので、
+**同じドライブにあるファイル / ディレクトリはすべて「同じ」と判定される。**
+
+実測（`-l early-init.el -l init.el` の batch）:
+
+| | inode | |
+|---|---|---|
+| `emacs -Q` | 実際の値（`58828270132591113` など） | `file-equal-p` は正しく効く |
+| **この設定** | **`0`**（どのディレクトリでも同じ） | **別物どうしが `t` になる** |
+
+```elisp
+(file-attribute-file-identifier (file-attributes "…/b-project/"))  ; => (0 2431202897)
+(file-equal-p "…/b-project/" "…/y/src/")                           ; => t
+```
+
+**`emacs -Q` では再現しない**ので、`-Q` で書いたコードを持ち込むと
+静かに壊れる。実際、`my-claude.el` で別プロジェクトの `C-c a a` が
+同じセッションに解決された（`my:claude--same-directory-p` を作って回避）。
+
+パスの同一判定は**文字列で**行う。`expand-file-name` +
+`file-name-as-directory` で揃え、`file-name-case-insensitive-p` が真なら
+`string-equal-ignore-case`。stat を打たないので速くもある。
+
+なお `my-dired.el` の `_assets/` 整合性チェックが使っている
+`file-truename` + `downcase` はこの問題を踏まない（truename は
+inode を見ない）。
 
 ## テーマ
 
