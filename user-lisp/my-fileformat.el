@@ -56,12 +56,6 @@
   :straight t
   :defer t)
 
-;;; [3] mayu
-
-(use-package mayu-mode
-  ;; in site-lisp
-  :mode ("\\.\\(mayu\\)\\'" . mayu-mode))
-
 ;;; [3] xxx
 
 (provide 'my-fileformat)

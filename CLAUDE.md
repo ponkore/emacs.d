@@ -153,7 +153,7 @@ lexical-binding の検証（後述）と同じく、一時ディレクトリに�
 | `my-lang-native` | Rust、C++、C#、Go |
 | `my-lang-misc` | SQL、bat、Swift、Lua、VisualBasic |
 | `my-lsp` | eglot（組み込み、プレフィックス: `C-c l`）、flymake（`C-c !`） |
-| `my-fileformat` | yaml、diff、log4j、Dockerfile、vimrc、mayu |
+| `my-fileformat` | yaml、diff、log4j、Dockerfile、vimrc |
 | `my-project` | projectile（プレフィックス: `C-c p`） |
 | `my-vc` | magit、diff-hl（`C-c g` の hydra）、Windows の SVN 対応 |
 | `my-gitd` | magit の同期 git 実行を常駐プロセス（`gitd/`）に肩代わりさせる。Windows のみ |
