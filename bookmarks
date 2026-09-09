@@ -1,5 +1,35 @@
-;;;; Emacs Bookmark Format Version 1 ;;;; -*- coding: utf-8-emacs -*- 
+;;;; Emacs Bookmark Format Version 1;;;; -*- coding: utf-8-emacs; mode: lisp-data -*-
 ;;; This format is meant to be slightly human-readable;
 ;;; nevertheless, you probably don't want to edit it.
 ;;; -*- End Of Bookmark File Format Version Stamp -*-
-()
+(("Downloads"
+  (filename . "~/Downloads/")
+  (front-context-string . "activereportsnet")
+  (rear-context-string . "  0 08-24 16:58 ")
+  (position . 181)
+  (last-modified 27296 61335 866527 700000))
+("Projects"
+ (filename . "~/Projects/")
+ (front-context-string . "AndroidStudio\n  ")
+ (rear-context-string . "o 0 2026-01-16  ")
+ (position . 147)
+ (last-modified 27296 53578 646164 0))
+(".config"
+ (filename . "~/.config/")
+ (front-context-string . "bat\n  drwxrwxrwx")
+ (rear-context-string . "  0 05-13 14:37 ")
+ (position . 167)
+ (last-modified 27296 53398 815536 700000))
+(".emacs.d"
+ (filename . "~/.emacs.d/")
+ (front-context-string . "auto-save-list\n ")
+ (rear-context-string . "  0 09-07 23:37 ")
+ (position . 177)
+ (last-modified 27296 53390 748661 500000))
+("WebCoreSystem_v1"
+ (filename . "~/Projects/ESC-Web/WebCoreSystem_v1/")
+ (front-context-string . ".claude\n  drwxrw")
+ (rear-context-string . "  0 09-07 17:22 ")
+ (position . 184)
+ (last-modified 27296 53372 750344 800000))
+)

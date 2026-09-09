@@ -30,7 +30,33 @@
   ;;
   ;; Windows で ~ を C:\Users\<user> にしたい場合は、設定側ではなく OS の
   ;; ユーザー環境変数 HOME を設定する (このマシンでは設定済み)。
-  (setq w32-get-true-file-attributes nil))
+  (setq w32-get-true-file-attributes nil)
+
+  ;; ~/Projects は C:\Projects へのジャンクション。これを入れておくと
+  ;; c:/Projects/... の側から入ってきたファイルも ~/Projects/... として
+  ;; 記録され、bookmarks を mac / Linux と共有できる。
+  ;;
+  ;; 【一方向にしか効かない】abbreviate-file-name (短くする側) だけが
+  ;; この変数を見る。expand-file-name は見ない。**戻せる省略形は ~ だけ**
+  ;; なので、読む側はジャンクション / symlink が担う。片方だけでは成立しない。
+  ;;
+  ;; TO に ~ を書いてはいけない (files.el:59) が、~ を含む結果は得られる。
+  ;; abbreviate-file-name は「alist を適用してから ~ 置換」の順
+  ;; (files.el:2316 -> 2329) なので、TO には home 配下の絶対パスを書けばよい。
+  ;;
+  ;; 【重要】FROM の末尾のスラッシュを省かないこと。directory-abbrev-apply
+  ;; (files.el:87) は FROM を素の正規表現として使い、マッチ部分を TO で
+  ;; 置き換えるだけなので、"\\`c:/Projects" と書くと
+  ;; c:/ProjectsOld/foo/ が ~/ProjectsOld/foo/ になる (実測)。**存在しない
+  ;; パスができるのにエラーは出ない。** abbreviated-home-dir のほうは
+  ;; directory-abbrev-make-regexp (files.el:71) が \(/\|\'\) の境界を付けて
+  ;; くれるが、手書きのエントリには付かない。
+  ;;
+  ;; 大文字のドライブレターは FROM が小文字でも当たる。abbreviate-file-name
+  ;; が case-fold-search を (file-name-case-insensitive-p filename) に束縛
+  ;; しており (files.el:2313)、Windows では t になるため。
+  (add-to-list 'directory-abbrev-alist
+               (cons "\\`c:/Projects/" (expand-file-name "Projects/" "~"))))
 
 ;;; [3] w32-symlinks (削除済み)
 
