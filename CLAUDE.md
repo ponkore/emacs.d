@@ -874,17 +874,120 @@ Windows の Emacs には PTY が無いので claude の対話 TUI は動かな�
 | `C-c a c` | 直近の会話を継いで開く（`--continue`） |
 | `C-c a r` | 過去のセッションを一覧から選んで再開（`--resume`） |
 | `C-c a m` | モデルを変える（会話は `--resume` で継続） |
-| `C-c a i` | 入力バッファを開く（レイアウトも組む） |
+| `C-c a i` | 会話バッファを出して入力エリアへ（レイアウトも組む） |
 | `C-c a s` | リージョンを送る（**レイアウトは変えない**） |
 | `C-c a k` | 中断 |
 | `C-c a q` | セッション終了 |
-| `C-c C-z` / `z` | 会話・入力ウィンドウの最大化トグル（`z` は `*claude*` のみ） |
-| `TAB` | 畳んだツール出力の全体を別バッファに出す（`*claude*`） |
-| `i` / `C-c C-i` | 入力バッファを開く（`*claude*`。`C-c a i` と同じ） |
-| `C-c C-c` | 送信（`*claude-input*`。**送ると入力ウィンドウは畳まれる**。`M-p` / `M-n` で履歴） |
-| `C-c C-k` | 入力バッファを閉じる（`*claude-input*`。`*claude*` では中断） |
-| `M-v` | クリップボードの画像を添付（`*claude-input*`。端末版 claude と同じ操作） |
-| `C-c C-v` | 画像ファイルを添付（`*claude-input*`） |
+
+`*claude(PROJ)*` の中では、**確定した会話の側と入力エリアでキーが変わる**
+（後述）。
+
+| キー | 確定した会話（区切りより前） | 入力エリア（区切りより後） |
+|---|---|---|
+| `i` | 入力エリアへ移動 | 自己挿入 |
+| `TAB` | 畳んだツール出力を別バッファに出す | `markdown-cycle` |
+| `z` / `q` | 最大化トグル / ウィンドウを閉じる | 自己挿入 |
+| `C-c C-c` | 送信（どちらからでも） | 送信 |
+| `C-c C-k` | 書きかけを捨てる（**中断ではない。中断は `C-c a k`**） | 同左 |
+| `C-c C-z` | 最大化トグル | 同左 |
+| `M-p` / `M-n` | 入力の履歴 | 同左 |
+| `M-v` / `C-c C-v` | クリップボードの画像 / ファイルを添付 | 同左 |
+
+### 入力は会話バッファの中で行う（2026-09-09）
+
+`*claude-input(PROJ)*` は**廃止した**。バッファは区切り
+（`my:claude-prompt-string`）で 2 つに分かれる。
+
+```
+*claude(PROJ)*
+┌────────────────────────────┐
+│ > 前の入力                  │  read-only + keymap プロパティ
+│ ● Read(foo.el) … 42 行      │  1 文字キー (i / TAB / z / q) が効く
+│ 応答テキスト …              │  font-lock は触らない（自前装飾のまま）
+├────────────────────────────┤ ← my:claude--output-marker / --input-marker
+│ 書きかけの入力              │  素の編集領域。markdown の font-lock
+└────────────────────────────┘
+```
+
+**応答は区切りの前に挿さる**ので、読みながら次を書ける。実測（haiku で
+1 往復、応答が流れている最中に入力エリアへ書いた）:
+
+| | |
+|---|---|
+| 応答後の入力エリア | `応答を待ちながら書いている`（**残る**） |
+| 区切りの数 | 1（常に末尾） |
+| 確定領域を `delete-char` | `text-read-only` |
+
+#### マーカーは 2 つ。insertion-type が肝
+
+| | 指す位置 | insertion-type | |
+|---|---|---|---|
+| `my:claude--output-marker` | 区切りの先頭 | **t** | 出力を書くとその後ろへ動く＝常に区切りの先頭 |
+| `my:claude--input-marker` | 区切りの直後 | **nil** | 入力エリアの先頭に打っても動かない |
+
+**区切りを挟むのはこのためでもある。** 区切りが無いと、insertion-type t の
+マーカーは「入力エリアの先頭に打った文字」の後ろへ動き、その文字が確定側に
+取り込まれる。区切りは read-only なのでそこに打つことはできない。
+
+**会話バッファに書き足す処理は `point-max` ではなく
+`my:claude--output-end` を見ること。** `point-max` は入力エリアの末尾で、
+そこに書くと書きかけを壊す。移行のときに直したのは 4 か所
+（`my:claude--fold` / `--fontify-markdown` / `--mark-text-start` /
+`--end-paragraph`）。とくに `--end-paragraph` は
+`(delete-region (point) (point-max))` で**書きかけを丸ごと消す**ところだった。
+
+#### 保護は 3 つのテキストプロパティ
+
+`my:claude--protect` が挿入のたびに載せる。
+
+| | |
+|---|---|
+| `read-only t` | 編集を拒む |
+| `front-sticky (read-only)` | 直前への挿入も拒む |
+| `keymap` | ここでだけ 1 文字キーを効かせる（`my:claude-view-map`） |
+
+**`rear-nonsticky` は区切りの末尾 1 文字にだけ付ける**
+（`my:claude--setup-input-area`）。これが無いと入力エリアに 1 文字も
+打てない。実測での落とし穴が 2 つ:
+
+- **`rear-nonsticky` に `keymap` を入れ忘れると、打った文字がプロパティを
+  継承する。** 入力エリアなのに `i` が `my:claude-goto-input` になり、
+  文字が打てなくなる
+- **プロパティを付ける操作自体が read-only に阻まれる。**
+  `inhibit-read-only` の束縛が要る
+
+#### font-lock は入力エリアだけに効かせる
+
+確定した会話は挿入時に `font-lock-face` を直に載せてある
+（`my:claude--fontify-markdown`）。入力エリアは `markdown-mode` の
+font-lock に任せる。両立させるのが `my:claude--fontify-region`。
+
+**`beg` を入力エリアの先頭まで切り上げるだけでは足りない。**
+`font-lock-extend-region-functions` がリージョンを押し戻すので、確定した
+会話の `# 見出し` が `markdown-header-face-1` に塗り替えられる（実測）。
+**`narrow-to-region` して呼ぶこと**（`font-lock-dont-widen` も立ててある）。
+
+GUI 実測:
+
+| | 確定した会話の見出し | 入力エリアの見出し |
+|---|---|---|
+| 切り上げるだけ | **`markdown-header-face-1`** | `markdown-header-face-1` |
+| narrowing して呼ぶ | **`my:claude-heading-face`** | `markdown-header-face-1` |
+
+#### undo は入力エリアのためだけにある
+
+出力は `buffer-undo-list` を t に束縛して記録しない。加えて、**前方に挿すと
+既存の undo エントリの位置がずれる**（Emacs は調整しない）ので、実際に
+書いたときは履歴ごと捨てる（`my:claude--at-end`）。応答が届くと書きかけの
+undo は効かなくなるが、壊れた位置を undo するよりはよい。
+
+#### 追従（自動スクロール）の仕掛けが要らなくなった
+
+挿入位置が `point` より**前**になったので、`point` も `window-point` も
+自動でずれて相対位置が保たれる。入力エリアにカーソルがある窓は redisplay が
+それを可視に保つので末尾に追いつき、読み返している窓は動かない。
+`my:claude--at-end` から `goto-char` / `set-window-point` を落とした
+（残しておくと、入力の途中にあるカーソルを末尾へ飛ばす**害**になる）。
 
 ### セッションはプロジェクトごとに持てる（2026-09-08）
 
@@ -919,9 +1022,9 @@ Windows の Emacs には PTY が無いので claude の対話 TUI は動かな�
 
 ### バッファ名にはプロジェクト名が入る
 
-`my:claude--project-label` が作業ディレクトリの名前を付ける。上の表で
-`*claude*` / `*claude-input*` と書いてあるものは実際には
-`*claude(.emacs.d)*` / `*claude-input(.emacs.d)*` になる（`*claude-log*` も同じ）。
+`my:claude--project-label` が作業ディレクトリの名前を付ける。上で
+`*claude*` と書いてあるものは実際には `*claude(.emacs.d)*` になる
+（`*claude-log*` も同じ）。
 
 **basename が同じプロジェクトを 2 つ開いたら親をたどる。**
 `~/work/foo/src` を開いている状態で `~/other/src` を開くと、後者は
@@ -931,35 +1034,19 @@ Windows の Emacs には PTY が無いので claude の対話 TUI は動かな�
 `my:claude-session-label` に持たせ、ヘッダ行の 2 列目にも同じものを出す。
 
 **そのため「claude のバッファか」を名前で判定してはいけない。**
-`my:claude--buffer-p` はメジャーモード（`my:claude-mode` /
-`my:claude-input-mode`）で見る。セッションが無いときに会話バッファを探す
-`my:claude--conversation-buffer` も同じ。
+`my:claude--buffer-p` はメジャーモード（`my:claude-mode`）で見る。
 
 **バッファは名前で `get-buffer-create` しない**（`my:claude--buffer-for`）。
 死んだセッションの会話バッファは記録として残るので、別プロジェクトの
 セッションが同じ名前を取ると、他人の記録の続きに書き足してしまう。
 持ち主のディレクトリが違えば `generate-new-buffer` で別名にする。
 
-### 会話バッファと入力バッファは 1 対 1 で紐づく
-
-対応付けは**バッファローカルの `my:claude--peer`**（会話 ↔ 入力）で持つ。
-`*claude(.emacs.d)*` で `i` を押せば `*claude-input(.emacs.d)*` だけが出る。
-
-**セッション構造体に持たせない。** `C-c a l` はセッションが無くても
-画面を組める（会話・入力バッファだけ作る）ので、そこで辿れなくなる。
-逆に会話バッファは立て直し（`C-c a m` / `C-c a r` / `C-c a e`）をまたいで
-同じものを使い回すため、セッションが差し替わっても対は生き残る。
-`permanent-local` を付けてあるのはそのため。
-
-**名前から引いてはいけない。** `*claude(src)*` が 2 つあるとき
-（basename が同じプロジェクト）に取り違える。
-
 `my:claude-layout` はセッションより先に呼ばれることがある（`C-c a l`）ので、
 そのときは `my:claude--guess-directory`（**確認を出さない版**）で名前を決める。
 `my:claude--project-directory` を使うと画面を整えるだけで `y/n` が出る。
 あわせて 2 点:
 
-- **上半分に残すバッファは `conv` / `input` を作るより先に決める。**
+- **上半分に残すバッファは会話バッファを作るより先に決める。**
   あとに回すと、まだメジャーモードが立っていない新品のバッファを
   `my:claude--buffer-p` が claude 系と見なせず、上半分に選んでしまう
 - 作った会話バッファにはその場で `my:claude-mode` を立てる（同じ理由）
@@ -967,14 +1054,12 @@ Windows の Emacs には PTY が無いので claude の対話 TUI は動かな�
 ### 会話バッファを kill したらセッションも終わる
 
 別プロジェクトに移るのに kill する必要は無い（そちらで `C-c a a` すれば
-並ぶ）。**入力バッファも kill するか `yes/no` で聞く。** 書きかけが
-残っていることがあるので黙っては捨てない。
+並ぶ）。**書きかけの入力があるときは `yes/no` で聞く**
+（`my:claude--kill-query`）。入力エリアは会話バッファの中にあるので、
+退避先はもう無い。
 
-- **対は答えに関わらず先に切る。** kill するときは向こうの
-  `kill-buffer-hook` がこちらを触りに戻ってこないように、残すときは
-  死んだ会話バッファへの参照を持ち越さないため
-- 入力バッファだけを kill したときは**会話バッファは消さない**。
-  「書きかけをやめる」だけの操作で、セッションを終える意図は無い
+`kill-buffer-hook` では kill を止められないので
+`kill-buffer-query-functions` に載せること。
 
 **「セッションが生きているか」をプロセスだけで判定してはいけない。**
 `make-process` の `:buffer` は nil（出力は自前のフィルタが捌く）なので、
@@ -1011,30 +1096,18 @@ Windows の Emacs には PTY が無いので claude の対話 TUI は動かな�
 ┌──────────────┐
 │ 編集中のバッファ │  フレームの 1/2
 ├──────────────┤
-│ *claude*      │  残り − 5 行
-├──────────────┤
-│ *claude-input*│  6 行（カーソルはここ）
+│ *claude*      │  残り（カーソルは末尾＝入力エリア）
 └──────────────┘
 ```
 
-`my:claude-window-height-ratio`（既定 0.5）と
-`my:claude-input-window-height`（既定 6）で変えられる。
+`my:claude-window-height-ratio`（既定 0.5）で変えられる。入力エリアは
+会話バッファの中にあるので、**分割は 2 つで足りる**（入力バッファが
+あった頃は 3 分割で、送信のたびに畳んでいた）。
 
 **`window-configuration` は退避しない。** 最大化トグルの復帰先も
 `C-c a l` も同じ関数を呼ぶだけなので、どこから何度押しても同じ形に
 落ち着く。高さは `window-total-height` から採る（`window-body-height`
 だとモードラインとヘッダ行を数え落とす）。
-
-**この 3 分割でいる時間は「入力を書いている間」だけ。** `C-c C-c` で
-送ると `my:claude-input-send` が最後に `my:claude-input-quit` を呼び、
-入力ウィンドウを畳んで下半分を `*claude*` だけにする（`C-c C-k` と
-同じ形）。応答は読む一方なので、入力用の数行を残す理由が無い。
-次を書くときは `*claude*` で `i` を押せば、この関数が 3 分割に組み直す。
-
-畳むのは**会話バッファを `display-buffer` で出したあと**。順序を逆に
-すると、入力ウィンドウを消したときに空いた領域を受け取る窓が無い。
-末尾への追従（`set-window-point`）も畳む前に済ませておく（畳んだあとで
-ウィンドウが伸びても `window-point` は保たれる）。
 
 ### 環境（アカウント）の切り替え
 
@@ -1256,7 +1329,7 @@ GUI 実測（`format-mode-line` を通した実表示。末尾だけ抜粋）:
 | 応答待ち + `result` | `… 52% \| $6.17 ...` |
 | `result` のみ | `… 52% \| $6.17` |
 
-`my:claude-mode` / `my:claude-input-mode` とも `mode-line-process` は空。
+`my:claude-mode` の `mode-line-process` は空。
 **この検証はモードを実際に立てて行うこと。** 変数の既定値を見ても
 「モードが設定しない」ことの証明にはならない。
 
@@ -1491,69 +1564,42 @@ GUI 実測（`string-width` だけでは検算にならないので
 変換するのは**区切り行（`|---|:---:|`）を伴う表だけ**。無いと
 `a | b` のような何気ない行まで拾う。
 
-#### 追従（自動スクロール）はウィンドウごとに判定する
+#### 【重要】会話バッファへの書き込みは必ず `my:claude--at-end` を通す
 
-`my:claude--insert` は「末尾を見ているときだけ追従する」。判定は
-**`window-point` でウィンドウごとに**行う。バッファの `point` 1 つで
-決めていると、会話バッファが 2 つのウィンドウに出たときに
-**読み返し中の窓まで末尾へ飛ぶ**（あるいはその逆で、末尾を見ている窓が
-追従しない）。レイアウトの最大化トグルや `display-buffer` の再利用で
-普通に起きる。
+このマクロが 3 つを引き受ける。**`insert` を直接書いてはいけない。**
 
-バッファ自身の `point` も別に見る。`save-excursion` は挿入前の位置に
-戻す（マーカーの `insertion-type` が nil）ので、末尾にいたぶんは
-明示的に `goto-char` しないと追従が切れる。
+1. 挿す先を区切りの手前（`my:claude--output-end`）にする
+2. 書いたぶんを `my:claude--protect` で確定領域にする
+   （read-only / keymap を付け忘れるとそこだけ編集できてしまう）
+3. undo を汚さない（前掲）
 
-##### 【重要】会話バッファへの書き込みは必ず `my:claude--at-end` を通す
-
-上の作法をマクロ `my:claude--at-end` に括り出してある。**`save-excursion` +
-`goto-char (point-max)` + `insert` を直接書いてはいけない。**
-
+インライン入力にする前は「末尾を見ている窓だけ `set-window-point` で
+追従させる」仕掛けがここにあった。**いまは要らない**（挿入位置が `point`
+より前なので勝手に追従する）。当時の教訓は残しておく価値がある:
 `save-excursion` のマーカーは `insertion-type` が nil なので、**末尾での
-挿入では挿入したテキストの前に取り残される**。
+挿入では挿入したテキストの前に取り残される**。2026-09-04 には
+`my:claude--insert-diff` と `my:claude--end-paragraph` が直接書いていた
+せいで「差分が 1 回出ると自動スクロールが止まる」状態になっていた。
+書き込み口を 1 か所に寄せる理由はこれで、その必要は今も変わらない。
 
-```elisp
-(save-excursion (goto-char (point-max)) (insert "    +new\n"))
-;; => point=5  point-max=14   末尾にいたのに外れる
-```
+#### `my:claude-mode` は markdown-mode 派生
 
-一度外れると `my:claude--insert` の `(>= (point) max)` が偽になるため、
-**以後どれだけ流れても二度と追従しない**。1 回の書き込みでその後ずっと
-壊れるので、原因になった書き込みから離れたところで表面化する。
-
-末尾を削り直す経路も同じ。削除でマーカーが手前に引かれ、そこへ挿入しても
-前に置かれたままになる。
-
-2026-09-04 に `my:claude--insert-diff`（Edit / Write の差分）と
-`my:claude--end-paragraph`（段落の整形）が直接書いていたのを直した。
-**差分が 1 回出ると自動スクロールが止まる**という壊れ方をしていた。
-同じ 6 行を 3 か所に書いていたのが取りこぼしの原因なので、マクロに寄せてある。
-
-GUI 実測（2 窓、修正前 → 修正後）:
-
-| | 修正前 | 修正後 |
-|---|---|---|
-| `insert` のあと末尾か | t | t |
-| `insert-diff` のあと末尾か | **nil**（point=10 / point-max=38） | **t** |
-| `end-paragraph` のあと末尾か | **nil** | **t** |
-| 読み返し中に動かないか | t | t |
-| 末尾を見ている窓だけ追従するか | **nil** | **t** |
-
-#### 入力バッファは markdown-mode 派生
-
-`my:claude-input-mode` は `markdown-mode` から派生させ、着色は
-`markdown-fontify-code-blocks-natively` に任せる（会話バッファと違って
-font-lock をそのまま使える）。
+入力エリアを markdown として書けるようにするため、会話バッファごと
+`markdown-mode` から派生させてある（`special-mode` はやめた。read-only は
+テキストプロパティで実現している）。コードブロックの着色は
+`markdown-fontify-code-blocks-natively` に任せる。
 
 **`markdown-mode-hook` は走らせない。** `my-text.el` の
 `my:setup-markdown-mode` は `.md` ファイルを編集する前提の設定で、
-送信用のバッファに持ち込む理由が無い。`define-derived-mode` は親を
+会話バッファに持ち込む理由が無い。`define-derived-mode` は親を
 `delay-mode-hooks` で包み、最後に `run-mode-hooks` が `run-hooks` で
 回すので、モード本体で `(setq-local markdown-mode-hook nil)` すれば
-親のフックだけを外せる。
+親のフックだけを外せる。**`text-mode-hook` は潰さない**ので、
+`display-line-numbers-mode` は `my:claude-mode-hook` で個別に切る
+（親のフックのほうが先に走るため、モード本体で切っても間に合わない）。
 
 `C-c C-c` は markdown 側では prefix だが、子のキーマップが先に引かれる
-ので `my:claude-input-send` が勝つ。`completion-at-point-functions` の
+ので `my:claude-send` が勝つ。`completion-at-point-functions` の
 `my:claude--capf`（深さ -100）は**必ず張り直すこと**（落とすと行頭の
 `/` が `cape-file` に食われて C: 直下の一覧が出る）。
 
@@ -1606,7 +1652,7 @@ stream-json 経路でやる。user メッセージの content は**ブロック�
 
 #### 送るかどうかはバッファの中身で決める
 
-`M-v` が入力バッファに挿すのは `[Image #1]` というプレースホルダで、
+`M-v` が入力エリアに挿すのは `[Image #1]` というプレースホルダで、
 画像そのものはバッファローカルの `my:claude--input-images` が持つ。
 **送信時に本文へ残っているプレースホルダだけを送る**
 （`my:claude--input-attachments`）。
@@ -1649,7 +1695,7 @@ face も overlay に載せる。`markdown-mode` の font-lock は `[...]` を
 参照リンクとして着色するが、overlay の face はその上に重なる。
 
 サムネイルは `create-image` の `:max-height` で行数に合わせる
-（入力バッファ 2 行、会話バッファ 8 行）。ImageMagick は要らない
+（入力エリア 2 行、送信後のエコー 8 行）。ImageMagick は要らない
 （Emacs 27 以降はネイティブに拡縮する）。実測で 320x160 → 272x136。
 
 #### ログの base64 は落とす
@@ -1667,7 +1713,7 @@ face も overlay に載せる。`markdown-mode` の font-lock は `[...]` を
 
 | バッファ | `M-v` |
 |---|---|
-| `my:claude-input-mode` | `my:claude-input-yank-image` |
+| `my:claude-mode`（入力エリア） | `my:claude-input-yank-image` |
 | `org-mode` | `my:org-yank-image` |
 | `fundamental-mode` | `cua-scroll-down` |
 
@@ -1697,8 +1743,8 @@ Opus と Haiku を行き来しても、それまでの話は消えない（実�
 ### スラッシュコマンドの補完
 
 `initialize` の control_response に `commands`（名前・説明・引数ヒント）が
-入っている。実測で 52 個。これを覚えて入力バッファの `completion-at-point`
-に流す。
+入っている。実測で 52 個。これを覚えて入力エリアの `completion-at-point`
+に流す（確定した会話の側では何も出さない）。
 
 **行頭の `/` だけを対象にすること。** 文中のスラッシュまで拾うと
 `src/foo` のようなパスを書くたびに候補が出て邪魔になる。
@@ -2543,7 +2589,7 @@ Corfu detected an error:
 外してある。`C-M-i` は変わらない（`:set` 関数が `ispell-complete-word` を
 `text-mode-map` に張るのは「非 nil かつ `completion-at-point` 以外」のときだけ。
 実測でも `complete-symbol` のまま）。効き先は `text-mode` 派生の全部
-（`markdown-mode` / `gfm-mode` / `my:claude-input-mode` / `org-mode`）。
+（`markdown-mode` / `gfm-mode` / `my:claude-mode` / `org-mode`）。
 
 **変数を変えても、既に text-mode 派生になっているバッファには効かない。**
 `add-hook` はモードを立てた時点で済んでいるため。その場で直すなら

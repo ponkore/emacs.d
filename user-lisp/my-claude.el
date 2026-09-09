@@ -13,16 +13,22 @@
 ;; ~/.emacs.d と ~/.config でそれぞれ C-c a a すれば、別の claude プロセスが
 ;; 2 つ並ぶ。同じプロジェクトで押したときは動いているものに戻るだけ。
 ;;
-;;   *claude(PROJ)*        会話の記録 (読み取り専用、`my:claude-mode')
-;;   *claude-input(PROJ)*  送信するテキストを書く (`my:claude-input-mode')
+;;   *claude(PROJ)*        会話と入力 (`my:claude-mode')
 ;;   *claude-log(PROJ)*    生の JSON Lines (`my:claude-log' が非 nil のとき)
 ;;
 ;; PROJ は作業ディレクトリの名前 (`my:claude--project-label')。同じ basename の
 ;; プロジェクトを 2 つ開くと親をたどって区別する (`foo/src' と `other/src')。
 ;;
-;; 会話バッファと入力バッファは 1 対 1 で紐づく (`my:claude--peer')。会話
-;; バッファで i を押すと、そのバッファの入力バッファだけが出る。会話バッファを
-;; kill するとセッションが終わり、入力バッファも kill するか聞かれる。
+;; **入力は会話バッファの末尾で行う。** バッファは区切り
+;; (`my:claude-prompt-string') で 2 つに分かれる。
+;;
+;;   区切りより前  確定した会話。read-only で、1 文字キー (i / TAB / z / q) が
+;;                 効く (`my:claude-view-map' をテキストプロパティで載せてある)
+;;   区切りより後  入力エリア。markdown として編集できる。C-c C-c で送る
+;;
+;; 応答は区切りの**前**に挿さる (`my:claude--at-end') ので、読みながら次を
+;; 書ける。会話バッファを kill するとセッションが終わる。書きかけがあれば
+;; 確認する (`my:claude--kill-query')。
 ;;
 ;; アカウント (Pro / Enterprise / Max) の切り替えは CLAUDE_CONFIG_DIR を
 ;; プロセス起動時に渡すことでしか行えないので、C-c a a で環境を選び、
@@ -215,12 +221,19 @@ nil にするとブロックが確定してから一度に出る (段階 3 ま�
   :type 'boolean)
 
 (defcustom my:claude-window-height-ratio 0.5
-  "`my:claude-layout' で会話 + 入力に使うフレーム高さの割合。"
+  "`my:claude-layout' で会話バッファに使うフレーム高さの割合。"
   :type 'number)
 
-(defcustom my:claude-input-window-height 6
-  "`my:claude-layout' で入力バッファに使う行数。"
-  :type 'integer)
+(defcustom my:claude-prompt-string
+  "── 入力 ─ C-c C-c 送信 / C-c C-k 破棄 / M-p 履歴 / M-v 画像\n"
+  "確定した会話と入力エリアを分ける区切り。
+
+**必ず改行で終えること。** 入力エリアはこの直後から始まるので、
+改行が無いと区切りの行の続きに書くことになる。
+
+この文字列自体も read-only になる。ここに案内を書いてあるのは、
+ヘッダ行がセッションの状態表示で埋まっているため。"
+  :type 'string)
 
 (defcustom my:claude-image-max-bytes (* 3500 1024)
   "添付できる画像 1 枚あたりの上限 (エンコード前のバイト数)。
@@ -232,17 +245,17 @@ Anthropic API の上限は **base64 にしたあとで 5 MB** なので、生の
   :type 'integer)
 
 (defcustom my:claude-image-preview-lines 2
-  "入力バッファに出すサムネイルの高さ (行数)。0 なら出さない。
+  "入力エリアに出すサムネイルの高さ (行数)。0 なら出さない。
 
-入力ウィンドウは既定で 6 行しかないので、貼ったものが分かる最小限に
-留める。プレースホルダ (`[Image #1]') のテキストは常に入るので、
+入力エリアは画面の下端にあり高さも限られるので、貼ったものが分かる
+最小限に留める。プレースホルダ (`[Image #1]') のテキストは常に入るので、
 0 にしても添付そのものは見える。"
   :type 'integer)
 
 (defcustom my:claude-image-echo-lines 8
   "送信時に会話バッファへ出すサムネイルの高さ (行数)。0 なら出さない。
 
-会話の記録として「何を送ったか」を残すためのもの。入力バッファの
+会話の記録として「何を送ったか」を残すためのもの。入力エリアの
 プレースホルダは送信後に消えるので、ここに残さないと後から分からない。"
   :type 'integer)
 
@@ -358,17 +371,16 @@ Anthropic API の上限は **base64 にしたあとで 5 MB** なので、生の
 無いため。`shadow' は前景しか持たないので、背景がテーマのまま残る点は
 他の列と同じ。")
 
-(defface my:claude-input-header-face
-  '((((background dark))  :foreground "cyan")
-    (((background light)) :foreground "dark cyan"))
-  "入力バッファ (`my:claude-input-mode') のヘッダ行 (キーの案内)。
+(defface my:claude-prompt-face
+  '((t :inherit shadow))
+  "確定した会話と入力エリアを分ける区切り (`my:claude-prompt-string')。
 
-色は会話バッファのヘッダ行と揃えてシアン。大きさは
-`my:claude-header-size-face' が持つので、ここでは指定しない。")
+案内文なので目立たせない。`shadow' は前景しか持たないので、背景は
+テーマのまま残る。")
 
 (defface my:claude-header-size-face
   '((t :height 0.9))
-  "ヘッダ行の大きさ。会話バッファと入力バッファで共通。
+  "ヘッダ行の大きさ。
 
 `my:claude--header-segment' が色の face と**並べて**載せる。
 face をリストにすると先に書いたものが勝つので、色は列ごとの face から、
@@ -414,31 +426,34 @@ face をリストにすると先に書いたものが勝つので、色は列ご
   last-result)   ; 直近の result イベント (alist)
 
 (defvar-local my:claude--session nil
-  "そのバッファが属するセッション。会話バッファと入力バッファに入る。")
+  "そのバッファが属するセッション。")
 
-(defvar-local my:claude--peer nil
-  "対になるバッファ。会話バッファには入力バッファ、入力バッファには会話バッファ。
+(defvar-local my:claude--output-marker nil
+  "確定した会話の末尾 (= 区切りの先頭)。応答はここに挿さる。
 
-**セッションではなくバッファに持たせる。** `C-c a l' はセッションが
-無くても画面を組める (会話・入力バッファだけ作る) ので、対応付けを
-セッション構造体に置くとその場面で辿れなくなる。逆に会話バッファは
-立て直し (`C-c a m' / `C-c a r' / `C-c a e') をまたいで同じものを
-使い回すので、セッションが差し替わってもこの対応は生き残る。
+**insertion-type は t。** 挿入したテキストの後ろへ動くので、出力を
+何度書いてもこのマーカーは区切りの先頭を指し続ける。
 
-入力バッファが閉じているときに会話バッファで `i' を押すと、**この対で
-決まる入力バッファだけ**が出る (他のプロジェクトのものは出てこない)。")
+ユーザーがこの位置に文字を入れるとマーカーが動いてしまうが、区切りは
+read-only なのでそれは起こらない。**区切りを挟むのはこのため**でもある
+ (区切りが無いと入力エリアの先頭に打った文字が確定側に取り込まれる)。")
 
-;; `my:claude--start' は既にモードの立っている会話バッファをそのまま
-;; 使い回すので通常は消えないが、モードを立て直す経路 (`kill-all-local-variables')
-;; で対を見失うと `i' が別のバッファを作ってしまう。
-(put 'my:claude--peer 'permanent-local t)
+(defvar-local my:claude--input-marker nil
+  "入力エリアの先頭 (= 区切りの直後)。
+
+**insertion-type は nil。** 入力エリアの先頭に打っても挿入テキストの
+前に留まるので、打った文字は入力エリアの側に残る。")
+
+(defvar-local my:claude--fontify-orig nil
+  "モードを立てた時点の `font-lock-fontify-region-function'。
+`my:claude--fontify-region' が入力エリアに限って呼び戻す。")
 
 (defvar my:claude--sessions nil
   "生きているセッション。新しいものが先頭。
 
 **プロジェクト (作業ディレクトリ) ごとに 1 つ持てる。** `~/.emacs.d' と
 `~/.config' でそれぞれ `C-c a a' すれば `*claude(.emacs.d)*' と
-`*claude(.config)*' が並び、入力バッファもそれぞれに紐づく。
+`*claude(.config)*' が並ぶ。
 
 環境 (アカウント) は CLAUDE_CONFIG_DIR をプロセス起動時に渡すことでしか
 変えられないので、**セッションごとに環境が固定される**。どのセッションに
@@ -618,7 +633,7 @@ inode とボリュームの組で比べるので、**同じドライブのディ
 (defun my:claude--current-session ()
   "いま操作の対象になるセッション。決まらなければ nil。
 
-  1. このバッファが属するセッション (会話バッファ・入力バッファ)
+  1. このバッファが属するセッション
   2. このバッファのプロジェクトで動いているセッション
   3. 生きているセッションが 1 つだけならそれ
 
@@ -883,18 +898,12 @@ RESUME は `my:claude--command' に渡す (t で --continue、文字列で --res
       ;; **モードは立っていなければ立てる。** 立て直し (`C-c a m' /
       ;; `C-c a r' / `C-c a e') では同じ会話バッファを使い回すので、
       ;; ここで無条件に `my:claude-mode' を呼ぶと
-      ;; `kill-all-local-variables' が入力バッファとの対
-      ;; (`my:claude--peer') まで捨ててしまう。
+      ;; `kill-all-local-variables' がマーカーごと入力エリアを見失い、
+      ;; 書きかけと区切りが宙に浮く。
       (unless (derived-mode-p 'my:claude-mode) (my:claude-mode))
       (setq my:claude--session session
             default-directory dir
             header-line-format (my:claude--header session)))
-    ;; 対の入力バッファが残っていれば、そちらのセッションも張り替える。
-    ;; 立て直しのあとに `C-c C-c' したとき、古いセッションに送らない
-    ;; ようにするため。
-    (when-let* ((input (buffer-local-value 'my:claude--peer conv)))
-      (when (buffer-live-p input)
-        (with-current-buffer input (setq my:claude--session session))))
     ;; SDK が送るハンドシェイク。返ってくる control_response に
     ;; スラッシュコマンドの一覧が入っている。
     (my:claude--send-json session
@@ -990,46 +999,108 @@ base64 だけを対象にするので、本文に出てくる短い文字列は�
 ;;; 描画
 ;;; --------------------------------------------------
 
+;;; 確定した会話と入力エリアの境界
+
+(defun my:claude--output-end ()
+  "カレントバッファの確定した会話の末尾 (= 区切りの先頭)。
+
+区切りをまだ置いていないバッファでは `point-max'。**会話バッファに
+書き足す処理は、`point-max' ではなくこちらを見ること。**
+`point-max' は入力エリアの末尾で、そこに書くと書きかけの入力を壊す。"
+  (if (and (markerp my:claude--output-marker)
+           (marker-position my:claude--output-marker))
+      (marker-position my:claude--output-marker)
+    (point-max)))
+
+(defun my:claude--input-start ()
+  "カレントバッファの入力エリアの先頭 (= 区切りの直後)。"
+  (if (and (markerp my:claude--input-marker)
+           (marker-position my:claude--input-marker))
+      (marker-position my:claude--input-marker)
+    (point-max)))
+
+(defun my:claude--in-input-p (&optional pos)
+  "POS (既定は `point') が入力エリアにあれば非 nil。"
+  (>= (or pos (point)) (my:claude--input-start)))
+
+(defun my:claude--protect (beg end)
+  "BEG..END を確定領域にする。
+
+3 つのプロパティを載せる。
+
+  read-only     編集を拒む (`text-read-only' が飛ぶ)
+  front-sticky  直前への挿入も拒む
+  keymap        ここでだけ 1 文字キー (i / TAB / z / q) を効かせる
+
+**`rear-nonsticky' は区切りの末尾にだけ付ける**
+ (`my:claude--setup-input-area')。確定領域の末尾には必ず区切りが続くので、
+ここで付ける必要は無い。"
+  (when (< beg end)
+    (let ((inhibit-read-only t))
+      (add-text-properties beg end
+                           `( read-only t
+                              keymap ,my:claude-view-map
+                              front-sticky (read-only))))))
+
+(defun my:claude--setup-input-area ()
+  "バッファの末尾に区切りを置き、その後ろを入力エリアにする。
+
+マーカーの insertion-type が肝 (`my:claude--output-marker' の説明を参照)。"
+  (let ((inhibit-read-only t)
+        (buffer-undo-list t))
+    (save-excursion
+      (goto-char (point-max))
+      (unless (bolp) (insert "\n"))
+      (let ((beg (point)))
+        (insert (propertize my:claude-prompt-string
+                            'font-lock-face 'my:claude-prompt-face))
+        (let ((end (point)))
+          (my:claude--protect beg end)
+          ;; 【重要】末尾の 1 文字だけ、後ろへの挿入と継承を許す。
+          ;; `keymap' を落とすと、打った文字がプロパティを継承して
+          ;; **入力エリアでも `i' が閲覧用のコマンドになる** (実測)。
+          (put-text-property (1- end) end 'rear-nonsticky '(read-only keymap))
+          (setq my:claude--output-marker (copy-marker beg t)
+                my:claude--input-marker (copy-marker end nil)))))))
+
 (defmacro my:claude--at-end (session &rest body)
-  "SESSION の会話バッファの末尾で BODY を評価し、**追従を保つ**。
+  "SESSION の会話バッファの**確定した会話の末尾**で BODY を評価する。
 
-**末尾を見ているときだけ追従する。** 読み返している最中に飛ばされるのは
-鬱陶しいため。判定は **ウィンドウごとに `window-point\' で行う**。
-バッファの `point\' 1 つで決めていると、`my:claude-layout\' のように
-会話バッファが複数のウィンドウに出たとき、片方が末尾にいるだけで
-読み返している側まで飛ばされる (あるいはその逆)。
+挿す先は `point-max' ではなく区切りの手前 (`my:claude--output-end')。
+書きかけの入力も、読み返している位置も動かない。
 
-バッファ自身の `point\' も別に見る。ウィンドウに出ていない間に届いた
-ぶんで追従が切れると、次に表示したときに古い位置から始まってしまう。
+追従 (自動スクロール) のために `goto-char' や `set-window-point' を
+する必要は無い。**挿入位置が `point' より前なので、`point' も
+`window-point' も自動でずれて相対位置が保たれる**。入力エリアに
+カーソルがある窓は redisplay がそれを可視に保つので末尾に追いつき、
+読み返している窓は動かない。かつては末尾に挿していたため、
+`save-excursion' のマーカー (insertion-type nil) が挿入テキストの前に
+取り残されて追従が切れる、という壊れ方をしていた。
 
-【重要】BODY のあとの `goto-char\' / `set-window-point\' を省いてはいけない。
-`save-excursion\' が使うマーカーは insertion-type が nil なので、
-**末尾での挿入では挿入したテキストの前に取り残される**。一度でも
-末尾から外れたバッファは、以後どれだけ流れても二度と追従しない。
+BODY は `inhibit-read-only' の下で走り、書いたぶんは
+`my:claude--protect' で確定領域になる。
 
-  (save-excursion (goto-char (point-max)) (insert \"    +new\\n\"))
-  => point=5 point-max=14   ; 末尾にいたのに外れる (実測)
-
-差分表示 (`my:claude--insert-diff\') と段落の整形
- (`my:claude--end-paragraph\') がこれを持たずに直接書いており、
-**差分が 1 回出ると自動スクロールが止まっていた**。"
+undo は入力エリアのためだけにある。**出力は `buffer-undo-list' を t に
+束縛して記録しない**。加えて、前方に挿すと既存の undo エントリの位置が
+ずれる (Emacs は調整しない) ので、実際に書いたときは履歴ごと捨てる。"
   (declare (indent 1) (debug (form body)))
-  (let ((buf (gensym "buf")) (max (gensym "max"))
-        (at-end (gensym "at-end")) (wins (gensym "wins")) (w (gensym "w")))
+  (let ((buf (gensym "buf")) (beg (gensym "beg")) (before (gensym "before")))
     `(let ((,buf (my:claude-session-buffer ,session)))
        (when (buffer-live-p ,buf)
          (with-current-buffer ,buf
            (let* ((inhibit-read-only t)
-                  (,max (point-max))
-                  (,at-end (>= (point) ,max))
-                  (,wins (seq-filter (lambda (,w) (>= (window-point ,w) ,max))
-                                     (get-buffer-window-list ,buf nil t))))
-             (save-excursion
-               (goto-char (point-max))
-               ,@body)
-             (when ,at-end (goto-char (point-max)))
-             (dolist (,w ,wins)
-               (set-window-point ,w (point-max)))))))))
+                  ;; BODY は末尾を削り直すことがある (`my:claude--end-paragraph')。
+                  ;; マーカーで持たないと保護する範囲を見失う。
+                  (,beg (copy-marker (my:claude--output-end) nil))
+                  (,before (marker-position ,beg)))
+             (let ((buffer-undo-list t))
+               (save-excursion
+                 (goto-char ,beg)
+                 ,@body)
+               (my:claude--protect (marker-position ,beg) (my:claude--output-end)))
+             (unless (= ,before (my:claude--output-end))
+               (setq buffer-undo-list nil))
+             (set-marker ,beg nil)))))))
 
 (defun my:claude--insert (session text &optional face)
   "SESSION の会話バッファの末尾に TEXT を挿入する。
@@ -1069,12 +1140,15 @@ LABEL は `Read(foo.el)\' のような呼び出しの要約 (`my:claude--tool-su
        (if (eq face 'my:claude-error-face) 'my:claude-error-face
          'my:claude-meta-face))
       ;; 全文はテキストプロパティに持たせておく。載せる範囲はいま書いた
-      ;; 1 行だけ。point-max は挿入した改行の**次**の行頭にあるので、
+      ;; 1 行だけ。確定した会話の末尾は挿入した改行の**次**の行頭にあるので、
       ;; そこから 1 行戻ったところが要約行の先頭になる。
+      ;; 【重要】`point-max' ではなく `my:claude--output-end'。
+      ;; `point-max' は入力エリアの末尾なので、書きかけを拾ってしまう。
       (with-current-buffer (my:claude-session-buffer session)
         (let* ((inhibit-read-only t)
-               (beg (save-excursion (goto-char (point-max)) (forward-line -1) (point))))
-          (put-text-property beg (point-max) 'my:claude-full text))))))
+               (end (my:claude--output-end))
+               (beg (save-excursion (goto-char end) (forward-line -1) (point))))
+          (put-text-property beg end 'my:claude-full text))))))
 
 ;;; --------------------------------------------------
 ;;; イベントの処理
@@ -1763,11 +1837,12 @@ ALIGNS は列ごとの寄せ方、HEADER は見出し行の数、INDENT は行�
         (forward-line 1)))))
 
 (defun my:claude--fontify-markdown (session beg)
-  "SESSION の会話バッファの BEG から末尾までを markdown として整える。
+  "SESSION の会話バッファの BEG から確定した会話の末尾までを markdown として整える。
 
-font-lock は使わない。このバッファは `special-mode' 派生で、挿入時に
-`font-lock-face' を直に載せているため、font-lock を有効にすると
-そちらに上書きされて競合する。ブロックが確定した時点で一度だけ塗る。
+**確定した会話に font-lock は使わない。** 挿入時に `font-lock-face' を
+直に載せているので、font-lock を走らせるとそちらに上書きされて競合する
+ (`my:claude--fontify-region' が font-lock を入力エリアだけに限っているのは
+このため)。ブロックが確定した時点で一度だけ塗る。
 
 やることは 3 つ。**この順でなければならない。**
 
@@ -1783,7 +1858,7 @@ delta が来ないスラッシュコマンドの `assistant')。**片方だけ�
       (with-current-buffer buf
         (let ((inhibit-read-only t)
               ;; 表の組み直しで長さが変わるのでマーカーで持つ。
-              (end (copy-marker (point-max) t)))
+              (end (copy-marker (my:claude--output-end) t)))
           (save-excursion
             ;; [1] ``` で囲まれたブロック
             (goto-char beg)
@@ -1827,23 +1902,25 @@ delta が来ないスラッシュコマンドの `assistant')。**片方だけ�
           (set-marker end nil))))))
 
 (defun my:claude--mark-text-start (session)
-  "いまの末尾に本文の開始位置を記録する。"
+  "いまの確定した会話の末尾に本文の開始位置を記録する。
+
+insertion-type は nil。以後の出力はこの位置に挿さるので、マーカーは
+挿入テキストの前 = 本文の先頭に留まる。"
   (let ((buf (my:claude-session-buffer session)))
     (when (buffer-live-p buf)
       (with-current-buffer buf
         (setf (my:claude-session-text-start session)
-              (copy-marker (point-max) nil))))))
+              (copy-marker (my:claude--output-end) nil))))))
 
 (defun my:claude--end-paragraph (session)
-  "会話バッファの末尾を「空行 1 つ」に整える。
+  "確定した会話の末尾を「空行 1 つ」に整える。
 delta で流し込んだ本文は末尾の改行がまちまちなので、ここで揃える。
 
-末尾の削り直しでも point は取り残される (削除でマーカーが手前に
-引かれ、そこへ挿入しても前に置かれたままになる) ので、
-`my:claude--at-end\' を通す。"
+削る先は `point-max\' ではなく `my:claude--output-end\'。区切りと
+書きかけの入力はその後ろにあるので、`point-max\' まで消してはいけない。"
   (my:claude--at-end session
     (skip-chars-backward " \t\n")
-    (delete-region (point) (point-max))
+    (delete-region (point) (my:claude--output-end))
     (insert "\n\n")))
 
 (defun my:claude--close-stream-block (session)
@@ -2339,13 +2416,12 @@ ARG (`C-u') を付けると、そのセッションを畳んで環境と作業�
 ;;; ウィンドウのレイアウト
 
 (defun my:claude--buffer-p (buf)
-  "BUF が claude の会話 / 入力バッファなら非 nil。
+  "BUF が claude の会話バッファなら非 nil。
 
 **名前では見ない。** バッファ名にはプロジェクト名が入る
  (`my:claude--buffer-name') ので、メジャーモードで判定する。"
   (and (bufferp buf)
-       (memq (buffer-local-value 'major-mode buf)
-             '(my:claude-mode my:claude-input-mode))
+       (eq (buffer-local-value 'major-mode buf) 'my:claude-mode)
        t))
 
 (defun my:claude--keep-buffer ()
@@ -2364,37 +2440,14 @@ ARG (`C-u') を付けると、そのセッションを畳んで環境と作業�
                 (buffer-list))
       (get-buffer-create "*scratch*")))
 
-(defun my:claude--input-buffer (conv label &optional dir session)
-  "会話バッファ CONV に紐づく入力バッファ。無ければ作って対にする。
-
-**名前ではなく対 (`my:claude--peer') で引く。** 名前で引くと、
-`*claude(src)*' が 2 つあるとき (別プロジェクトで basename が同じ)
-に取り違える。対が切れているときだけ LABEL / DIR から作る。"
-  (let* ((peer (buffer-local-value 'my:claude--peer conv))
-         (input (if (buffer-live-p peer) peer
-                  (my:claude--buffer-for "claude-input" label dir))))
-    (with-current-buffer input
-      (unless (derived-mode-p 'my:claude-input-mode) (my:claude-input-mode))
-      ;; SESSION が nil のときは消さない (まだ起動していないだけで、
-      ;; 立て直しの途中に古いものが入っていることがある)。
-      (when session (setq my:claude--session session))
-      (setq my:claude--peer conv)
-      ;; 添付ファイルの補完などがプロジェクトの中から始まるように。
-      (when dir (setq default-directory dir)))
-    (with-current-buffer conv (setq my:claude--peer input))
-    input))
-
 ;;;###autoload
 (defun my:claude-layout (&optional session)
-  "画面を上下 2 分割し、下半分に会話バッファと入力バッファを出す。
+  "画面を上下 2 分割し、下半分に会話バッファを出す。
 
   上半分  編集中のバッファ
-  下半分  上が会話バッファ (出力)、下が入力バッファ
-          それぞれ *claude(PROJ)* と *claude-input(PROJ)*
+  下半分  *claude(PROJ)*。カーソルは入力エリア (末尾) に置く
 
-下半分の高さはフレームの `my:claude-window-height-ratio' 倍、
-入力バッファは `my:claude-input-window-height' 行。最後にカーソルを
-入力バッファへ置く。
+下半分の高さはフレームの `my:claude-window-height-ratio' 倍。
 
 SESSION を省くと `my:claude--current-session' で決める。それでも
 決まらず、生きているセッションが複数あるときは選ばせる
@@ -2414,35 +2467,29 @@ SESSION を省くと `my:claude--current-session' で決める。それでも
                 (my:claude--guess-directory)))
          (label (if session (my:claude-session-label session)
                   (and dir (file-name-nondirectory (directory-file-name dir)))))
-         ;; **conv / input を作るより先に決める。** あとに回すと、まだ
-         ;; メジャーモードが立っていない新品のバッファを
-         ;; `my:claude--buffer-p' が claude 系と見なせず、上半分に
-         ;; 残すバッファとして選んでしまう。
+         ;; **conv を作るより先に決める。** あとに回すと、まだメジャーモードが
+         ;; 立っていない新品のバッファを `my:claude--buffer-p' が claude 系と
+         ;; 見なせず、上半分に残すバッファとして選んでしまう。
          (keep (my:claude--keep-buffer))
          (conv (if session (my:claude-session-buffer session)
                  (my:claude--buffer-for "claude" label dir)))
-         input
          (total (window-total-height (frame-root-window)))
-         (bottom (max 8 (round (* total my:claude-window-height-ratio))))
-         (ih (max 3 my:claude-input-window-height)))
+         (bottom (max 8 (round (* total my:claude-window-height-ratio)))))
     ;; セッションより先に `C-c a l' を押したときは、ここで作った会話
     ;; バッファにまだモードが立っていない。次に `my:claude--buffer-p' が
-    ;; 呼ばれたときのために立てておく (`my:claude-mode' は special-mode
-    ;; 派生で、空バッファに立てても読み取り専用になるだけ)。
+    ;; 呼ばれたときのために立てておく (区切りもここで入る)。
     (with-current-buffer conv
-      (unless (derived-mode-p 'my:claude-mode) (my:claude-mode)))
-    (setq input (my:claude--input-buffer conv label dir session))
-    (if (< total (+ bottom ih 4))
-        ;; フレームが低すぎて 3 分割できない。壊すより諦める。
-        (pop-to-buffer input)
+      (unless (derived-mode-p 'my:claude-mode) (my:claude-mode))
+      (when dir (setq default-directory dir)))
+    (if (< total (+ bottom 4))
+        ;; フレームが低すぎて 2 分割できない。壊すより諦める。
+        (pop-to-buffer conv)
       (delete-other-windows)
       (switch-to-buffer keep nil t)
       (let ((cw (split-window-below (- total bottom))))
         (set-window-buffer cw conv)
-        (let ((iw (with-selected-window cw (split-window-below (- bottom ih)))))
-          (set-window-buffer iw input)
-          (select-window iw)
-          (goto-char (point-max)))))))
+        (select-window cw)))
+    (my:claude-goto-input)))
 
 ;;;###autoload
 (defun my:claude-toggle-maximize ()
@@ -2472,20 +2519,24 @@ SESSION を省くと `my:claude--current-session' で決める。それでも
                   (append cmds nil)))))
 
 (defun my:claude--capf ()
-  "入力バッファで `/コマンド' を補完する。
+  "入力エリアで `/コマンド' を補完する。
 
 **行頭の `/' だけを対象にする。** 文中のスラッシュまで拾うと
 `src/foo' のようなパスを書くたびに候補が出て邪魔になる。
 2 つめの `/' が来たらパスだと見なして手を引く (`cape-file' に譲る)。
+
+確定した会話の側では何もしない。あちらは read-only なので補完しても
+挿入できないが、候補が出るだけで紛らわしい。
 
 【重要】補完領域には先頭の `/' を含め、候補も `/name' の形にすること。
 `/' の **後ろ** から始めると接頭辞の長さが 0 になり、`corfu-auto-prefix'
 (この設定では 1) に満たないという理由で corfu の自動補完に**捨てられる**。
 その結果、次の capf である `cape-file' が `/' を絶対パスとして拾い、
 C: 直下のディレクトリ一覧が出る。実際にそうなっていた。"
-  (let* ((bol (line-beginning-position))
+  (let* ((bol (max (line-beginning-position) (my:claude--input-start)))
          (text (buffer-substring-no-properties bol (point))))
     (when (and my:claude--commands
+               (my:claude--in-input-p)
                (string-match-p "\\`/[A-Za-z0-9_-]*\\'" text))
       (list bol (point)
             (mapcar (lambda (c) (concat "/" (car c))) my:claude--commands)
@@ -2786,13 +2837,13 @@ Anthropic API がこの 4 つしか受け付けない。")
 
 (cl-defstruct (my:claude-image (:constructor my:claude--make-image)
                                (:copier nil))
-  index          ; 入力バッファ内での通し番号 ([Image #N] の N)
+  index          ; 入力エリア内での通し番号 ([Image #N] の N)
   media-type     ; "image/png" など
   data           ; 生のバイト列 (unibyte 文字列)
   size)          ; (WIDTH . HEIGHT)。GUI でなければ nil
 
 (defvar-local my:claude--input-images nil
-  "この入力バッファに添付した画像 (`my:claude-image' のリスト)。
+  "入力エリアに添付した画像 (`my:claude-image' のリスト)。
 
 **送るかどうかを決めるのはここではなくバッファの中身**。送信時に
 `[Image #N]' が本文に残っているものだけを送る (`my:claude--input-attachments')。
@@ -2956,23 +3007,27 @@ API が弾く。"
     (my:claude--quit-and-forget session)
     (message "終了: %s" (my:claude--session-line session))))
 
-;;; 入力バッファ
+;;; 入力の履歴
 
 (defvar my:claude--input-history nil
   "送信したプロンプトの履歴。新しいものが先頭。")
 
 (defvar-local my:claude--input-index -1
-  "入力バッファで履歴をたどっている位置。-1 は「たどっていない」。")
+  "入力エリアで履歴をたどっている位置。-1 は「たどっていない」。")
 
 (defvar-local my:claude--input-draft nil
   "履歴をたどり始めたときに書きかけだった内容。")
 
-;;; 添付画像 (入力バッファ側の操作)
+;;; 添付画像 (入力エリア側の操作)
 
 (defun my:claude--input-clear-images ()
-  "添付をすべて捨て、プレビューの overlay も外す。"
+  "添付をすべて捨て、プレビューの overlay も外す。
+
+**外す範囲は入力エリアだけ。** 送信済みの画像は確定した会話の側に
+`insert-image' で出してあり (`my:claude--insert-image')、こちらの
+overlay とは別物だが、範囲を広げる理由が無い。"
   (setq my:claude--input-images nil)
-  (remove-overlays (point-min) (point-max) 'my:claude-image t))
+  (remove-overlays (my:claude--input-start) (point-max) 'my:claude-image t))
 
 (defun my:claude--input-prune-images ()
   "本文からプレースホルダが消えた添付を捨てる。
@@ -3011,8 +3066,8 @@ API が弾く。"
 
 (defun my:claude--attach-image (media-type data)
   "画像 DATA を添付して、point にプレースホルダを挿入する。"
-  (unless (derived-mode-p 'my:claude-input-mode)
-    (user-error "画像を添付できるのは claude の入力バッファだけ (C-c a i)"))
+  (unless (and (derived-mode-p 'my:claude-mode) (my:claude--in-input-p))
+    (user-error "画像を添付できるのは入力エリアだけ (i で移動する)"))
   (when (> (length data) my:claude-image-max-bytes)
     (user-error "画像が大きすぎる: %s (上限 %s)。範囲を絞って撮り直すこと"
                 (file-size-human-readable (length data))
@@ -3064,12 +3119,16 @@ API が弾く。"
        (buffer-string)))))
 
 (defun my:claude--input-attachments ()
-  "本文に残っているプレースホルダの **出現順** に添付画像を返す。
+  "入力エリアに残っているプレースホルダの **出現順** に添付画像を返す。
 
 添付リストの順ではないので、書きながら順番を入れ替えられる。
-同じ番号を 2 回書いても 1 枚しか送らない。"
+同じ番号を 2 回書いても 1 枚しか送らない。
+
+【重要】探すのは入力エリアだけ。確定した会話には送信済みの
+`[Image #1]' が記録として残っているので、`point-min' から探すと
+**過去の添付を今回のぶんとして数えてしまう**。"
   (save-excursion
-    (goto-char (point-min))
+    (goto-char (my:claude--input-start))
     (let (found)
       (while (re-search-forward my:claude--image-placeholder-regexp nil t)
         (let* ((n (string-to-number (match-string 1)))
@@ -3087,22 +3146,60 @@ API が弾く。"
   (string-trim (replace-regexp-in-string
                 (concat my:claude--image-placeholder-regexp " ?") "" text)))
 
+;;; 入力エリアの操作
+
+(defun my:claude--input-text ()
+  "入力エリアの中身。"
+  (buffer-substring-no-properties (my:claude--input-start) (point-max)))
+
+(defun my:claude--clear-input ()
+  "入力エリアを空にする。添付とプレビューも捨てる。"
+  ;; overlay を外すのは削除より先。
+  (my:claude--input-clear-images)
+  (let ((start (my:claude--input-start)))
+    (when (< start (point-max))
+      (delete-region start (point-max)))))
+
+;;;###autoload
+(defun my:claude-goto-input ()
+  "入力エリアの末尾へ移動する。
+
+確定した会話の側では `i' に割り当ててある (`my:claude-view-map')。
+そこは read-only なので、文字を打ちたければまずここへ来る。"
+  (interactive)
+  (goto-char (point-max)))
+
+(defun my:claude-discard-input ()
+  "入力エリアの書きかけを捨てる。
+
+`org-capture' / `git-commit' / `message-mode' と同じく、下書きの
+`C-c C-k' は「書きかけをやめる」。**応答の中断は `C-c a k'**
+ (`my:claude-interrupt') で、あちらはバッファではなくセッションへの操作。
+
+捨てたぶんは undo で戻せる (出力は undo に載せていないので、
+直前の応答まで巻き戻ることは無い)。"
+  (interactive)
+  (if (string-empty-p (string-trim (my:claude--input-text)))
+      (message "入力エリアは空です")
+    (my:claude--clear-input)
+    (setq my:claude--input-index -1
+          my:claude--input-draft nil)
+    (my:claude-goto-input)))
+
 ;;; 履歴
 
 (defun my:claude--input-replace (text)
   ;; 履歴のテキストに画像は付いてこない。overlay ごと捨てる。
-  (my:claude--input-clear-images)
-  (erase-buffer)
-  (insert (or text ""))
-  (goto-char (point-max)))
+  (my:claude--clear-input)
+  (goto-char (point-max))
+  (insert (or text "")))
 
 (defun my:claude-input-previous ()
   "1 つ前に送ったプロンプトを呼び出す。"
   (interactive)
   (unless my:claude--input-history (user-error "履歴が無い"))
   (when (< my:claude--input-index 0)
-    (setq my:claude--input-draft
-          (buffer-substring-no-properties (point-min) (point-max))))
+    (setq my:claude--input-draft (my:claude--input-text)))
   (setq my:claude--input-index
         (min (1- (length my:claude--input-history)) (1+ my:claude--input-index)))
   (my:claude--input-replace (nth my:claude--input-index my:claude--input-history)))
@@ -3117,98 +3214,48 @@ API が弾く。"
          my:claude--input-draft
        (nth my:claude--input-index my:claude--input-history)))))
 
+;;;###autoload
 (defun my:claude-input ()
-  "送信するテキストを書くバッファを開く。画面は `my:claude-layout' にする。
+  "会話バッファを出して入力エリアへ移動する。画面は `my:claude-layout' にする。
 
-会話バッファ (`*claude(PROJ)*') で `i' を押したときは、**そのバッファに
-紐づく入力バッファだけ**が出る (`my:claude--peer')。別のプロジェクトの
-入力バッファは出てこない。"
+会話バッファの中で `i' を押したときは移動するだけでよいが、他の
+バッファから `C-c a i' したときは画面も組む必要があるので同じ入口にした。"
   (interactive)
   ;; 会話バッファから呼ばれたときは、そのバッファのセッションが対象。
   ;; `my:claude--ensure-session' はバッファローカルを最優先に見る。
   (let ((session (my:claude--ensure-session)))
     (my:claude-layout session)))
 
-(defun my:claude--conversation-buffer ()
-  "いま使う会話バッファ。無ければ nil。
+(defun my:claude-send ()
+  "入力エリアの内容を送って空にする。
 
-入力バッファから呼ぶ。**対 (`my:claude--peer') を最優先で見る。**
-名前で引くと、`basename' が同じプロジェクトを 2 つ開いているときに
-取り違える。"
-  (or (and (buffer-live-p my:claude--peer) my:claude--peer)
-      (when-let* ((session (my:claude--session-usable-p my:claude--session)))
-        (my:claude-session-buffer session))
-      ;; 対もセッションも無いときだけ、モードで探す
-      ;; (名前では引けない。プロジェクト名が入るため)。
-      (seq-find (lambda (b)
-                  (eq (buffer-local-value 'major-mode b) 'my:claude-mode))
-                (buffer-list))))
-
-(defun my:claude-input-quit ()
-  "入力バッファを閉じ、空いた領域を会話バッファに渡す。
-
-`quit-window\' だと**ウィンドウはそのまま残り**、下半分が別のバッファで
-埋まるだけになる。ここではウィンドウごと畳むので、下半分は *claude* だけに
-なる。`C-c C-i\' (`my:claude-input\') を押せば `my:claude-layout\' が
-元の 3 分割に組み直す。"
+送信のエコー (`> …') は `my:claude-send-string' が確定した会話の側に
+書くので、ここでやることは「取り出して消す」だけ。区切りと入力エリアは
+そのまま末尾に残るので、続けて次を書ける。"
   (interactive)
-  (let ((buf (current-buffer))
-        (conv (my:claude--conversation-buffer)))
-    (if (one-window-p 'no-mini)
-        ;; 畳む先が無い。ウィンドウを消すと何も残らないので中身を差し替える。
-        (if conv (switch-to-buffer conv) (bury-buffer))
-      (delete-window)
-      (bury-buffer buf)
-      ;; 空いた領域を受け取ったのは会話バッファのはず。そこへ移る。
-      (when-let* ((cw (and conv (get-buffer-window conv))))
-        (select-window cw)))))
-
-(defun my:claude-input-send ()
-  "入力バッファの内容を送って空にし、入力ウィンドウを畳む。
-
-送ったあとに書くことはもう無いので、`C-c C-k\' (`my:claude-input-quit\')
-と同じ形にして下半分を *claude* だけにする。応答は読む一方なので、
-入力用の数行を残しておく理由が無い。
-
-書き足すときは会話バッファで `i\' (`my:claude-input\') を押せば
-`my:claude-layout\' が元の 3 分割に組み直す。"
-  (interactive)
-  ;; 本文に残っているプレースホルダのぶんだけを送る。消えているものに
+  ;; 入力エリアに残っているプレースホルダのぶんだけを送る。消えているものに
   ;; ついては**何も言わない**。消すのは取り消しの意思表示で、ユーザーは
   ;; 承知の上でやっている。かつては「N 枚は送っていない」と知らせて
   ;; いたが、貼り直したときにも出てしまい (消す→貼るの 2 手が要るので
   ;; 必ず出る)、送れているのに失敗したように見えた。
-  (let* ((text (buffer-substring-no-properties (point-min) (point-max)))
+  (let* ((text (my:claude--input-text))
          (images (my:claude--input-attachments))
          (session my:claude--session))
+    (when (and (string-empty-p (string-trim text)) (null images))
+      (user-error "入力エリアが空 (C-c a k で中断、C-c a q で終了)"))
+    ;; **先に消してから送る。** `my:claude-send-string' はエコーを
+    ;; `my:claude--at-end' 経由で書き、そこで undo 履歴を捨てるので、
+    ;; 順序を逆にすると「送信で消えたぶん」を undo で戻せなくなる。
+    (my:claude--clear-input)
     (my:claude-send-string text session images)
     (let ((history-text (my:claude--strip-placeholders text)))
       (unless (string-empty-p history-text)
         (setq my:claude--input-history
               (cons history-text
                     (delete history-text my:claude--input-history)))))
-    ;; overlay を外すのは `erase-buffer' より先。
-    (my:claude--input-clear-images)
-    (erase-buffer)
     (setq my:claude--input-index -1
           my:claude--input-draft nil)
-    (when-let* ((buf (and session (my:claude-session-buffer session))))
-      (display-buffer buf)
-      ;; 送信のたびに会話バッファを末尾へ戻し、**追従を張り直す**。
-      ;; 読み返している間に届いたぶんで point が末尾から外れていると、
-      ;; `my:claude--at-end\' の判定が偽になって以後の応答が流れても
-      ;; 追いかけない。自分で送った直後だけは必ず末尾に付ける。
-      ;; ウィンドウごとに `window-point\' を持つので両方動かすこと。
-      ;; 【重要】`point-max\' は会話バッファの中で評価する。外に出すと
-      ;; 直前に `erase-buffer\' した入力バッファの 1 を渡すことになる。
-      (with-current-buffer buf
-        (goto-char (point-max))
-        (dolist (w (get-buffer-window-list buf nil t))
-          (set-window-point w (point-max)))))
-    ;; 畳むのはいちばん最後。`my:claude-input-quit' が消すのは入力
-    ;; ウィンドウなので、上の `display-buffer' で会話バッファを出して
-    ;; からでないと、空いた領域を受け取る窓が無い。
-    (my:claude-input-quit)))
+    (my:claude-goto-input)))
 
 (defun my:claude-toggle-fold ()
   "折りたたんだツール出力の全体を別バッファで見る。"
@@ -3230,154 +3277,146 @@ API が弾く。"
 
 (defvar my:claude-mode-map
   (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "i") #'my:claude-input)
-    (define-key map (kbd "C-c C-i") #'my:claude-input)
-    (define-key map (kbd "TAB") #'my:claude-toggle-fold)
-    (define-key map (kbd "C-c C-k") #'my:claude-interrupt)
-    (define-key map (kbd "C-c C-z") #'my:claude-toggle-maximize)
-    (define-key map (kbd "z") #'my:claude-toggle-maximize)
-    (define-key map (kbd "q") #'quit-window)
-    map)
-  "`my:claude-mode' のキーマップ。")
-
-(define-derived-mode my:claude-mode special-mode "Claude"
-  "claude との会話を表示するモード。
-
-i / C-c C-i で入力バッファを開く (`C-c a i' と同じ)。送信すると入力
-ウィンドウは畳まれてこのバッファだけになるので、次を書くときはここから
-`i' で戻る。
-TAB で折りたたんだツール出力の全体を別バッファに出す。
-z / C-c C-z でこのウィンドウを最大化 (もう一度で元のレイアウト)。
-
-**このバッファを kill するとセッションも終わる** (`C-c a q' 相当)。
-会話が消えたあとにプロセスだけ残しても送り先が無く、次の `C-c a a' が
-それを掴んで失敗するため。紐づく入力バッファも一緒に kill するか聞く。
-
-セッションはプロジェクトごとに持てるので、別プロジェクトで
-`C-c a a' すれば `*claude(別のプロジェクト)*' が並ぶ。ここを kill
-する必要は無い。"
-  (setq-local truncate-lines nil)
-  (add-hook 'kill-buffer-hook #'my:claude--kill-buffer-hook nil t))
-
-(defun my:claude--kill-buffer-hook ()
-  "会話バッファが kill されたらセッションを畳み、対の入力バッファも閉じる。
-
-`my:claude-quit-session' は EOF を送るだけなので、プロセスが実際に
-死ぬのは少しあと。一覧からはここで外しておく
- (`my:claude--live-sessions' も同じ判断をするが、こちらが先に効く)。
-
-入力バッファは **yes/no を聞いてから** kill する。書きかけが残って
-いることがあるので黙って捨てない。
-
-**対は答えに関わらず先に切る。** kill するときは向こうの
-`kill-buffer-hook' がこちらを触りに戻ってこないように、残すときは
-死んだバッファへの参照を持ち越さないため (`i' で開き直したときに
-新しい会話バッファと対にし直せる)。"
-  (let ((input my:claude--peer))
-    (when-let* ((session my:claude--session))
-      (my:claude-quit-session session)
-      (my:claude--forget-session session))
-    (setq my:claude--peer nil)
-    (when (buffer-live-p input)
-      (with-current-buffer input (setq my:claude--peer nil))
-      (when (yes-or-no-p (format "%s も kill する? " (buffer-name input)))
-        (kill-buffer input)))))
-
-(defun my:claude--input-kill-buffer-hook ()
-  "入力バッファが kill されたら、対の会話バッファから参照を外す。
-
-**会話バッファは消さない。** 入力バッファを閉じるのは「書きかけを
-やめる」だけの操作で、セッションを終える意図は無い
- (`C-c C-k' が畳むのと同じ)。次に `i' を押せば作り直される。"
-  (when (buffer-live-p my:claude--peer)
-    (with-current-buffer my:claude--peer (setq my:claude--peer nil))))
-
-(defvar my:claude-input-mode-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "C-c C-c") #'my:claude-input-send)
-    (define-key map (kbd "C-c C-k") #'my:claude-input-quit)
+    (define-key map (kbd "C-c C-c") #'my:claude-send)
+    (define-key map (kbd "C-c C-k") #'my:claude-discard-input)
+    (define-key map (kbd "C-c C-i") #'my:claude-goto-input)
     (define-key map (kbd "C-c C-z") #'my:claude-toggle-maximize)
     (define-key map (kbd "M-p") #'my:claude-input-previous)
     (define-key map (kbd "M-n") #'my:claude-input-next)
     (define-key map (kbd "M-v") #'my:claude-input-yank-image)
     (define-key map (kbd "C-c C-v") #'my:claude-input-attach-file)
     map)
-  "`my:claude-input-mode' のキーマップ。
+  "`my:claude-mode' のキーマップ。バッファ全体に効く。
 
 `markdown-mode-map' が親になるが、ここに書いたものが優先される。
 とくに `C-c C-c' は markdown 側では prefix (`markdown-mode-command-map')
 なので、この束縛が無いと送信できなくなる。
 
-`M-v' (`scroll-down-command') はここでは画像の貼り付けに潰す。端末版の
-claude が同じキーでクリップボードの画像を送るのに合わせたもので、
-`my-text.el' が org バッファで `my:org-yank-image' に潰しているのと
-同じ流儀。数行しかないバッファなので画面送りは要らず、要るときは
-`C-z' (`my-keybind.el') が使える。")
+`M-v' (`scroll-down-command') は画像の貼り付けに潰す。端末版の claude が
+同じキーでクリップボードの画像を送るのに合わせたもので、`my-text.el' が
+org バッファで `my:org-yank-image' に潰しているのと同じ流儀。画面送りは
+`C-z' (`my-keybind.el') が使える。
 
-(define-derived-mode my:claude-input-mode markdown-mode "Claude-Input"
-  "claude に送るテキストを書くモード。
+1 文字キー (i / TAB / z / q) は入力の邪魔になるのでここには置かない。
+確定した会話の側だけで効かせる (`my:claude-view-map')。")
 
-markdown として書くので `markdown-mode' から派生させる。会話バッファ
- (`my:claude-mode') と違って **font-lock をそのまま使える** ので、
-C-1 のようにテキストプロパティを貼る仕掛けは要らない。コードブロックの
-言語判別は `markdown-fontify-code-blocks-natively' に任せる。
+(defvar my:claude-view-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "i") #'my:claude-goto-input)
+    (define-key map (kbd "TAB") #'my:claude-toggle-fold)
+    (define-key map (kbd "z") #'my:claude-toggle-maximize)
+    (define-key map (kbd "q") #'quit-window)
+    map)
+  "確定した会話に `keymap' テキストプロパティで載せるキーマップ。
 
-`M-v' (`my:claude-input-yank-image') でクリップボードの画像を添付する
- (端末版 claude と同じ操作)。ファイルからは `C-c C-v'。入るのは
-`[Image #1]' というプレースホルダで、**送信時に本文へ残っているものだけ
-が送られる**。消せば取り消せる。
+`my:claude--protect' が挿入のたびに載せる。**ここに無いキーは通常の
+探索に落ちる**ので、`C-c C-c' (送信) はどこからでも効く。文字キーは
+`self-insert-command' に落ちて `text-read-only' になる — それでよい。
+打ちたければ `i' で入力エリアへ移る。
+
+`TAB' の意味が場所で変わる (ここでは畳んだ出力を開く、入力エリアでは
+`markdown-cycle')。1 つのバッファで両立させるためにテキストプロパティを
+使っている。")
+
+(defun my:claude--fontify-region (beg end loudly)
+  "BEG..END のうち**入力エリアだけ**を markdown として着色する。
+
+確定した会話には挿入時に `font-lock-face' を直に載せてある
+ (`my:claude--fontify-markdown')。font-lock を走らせるとそちらが
+上書きされるので触らせない。
+
+【重要】`beg' を入力エリアの先頭まで切り上げるだけでは足りない。
+`font-lock-extend-region-functions' がリージョンを押し戻すため、
+確定した会話の `# 見出し' が `markdown-header-face-1' に塗り替えられる
+ (実測)。**`narrow-to-region' して呼ぶこと。** `font-lock-dont-widen' も
+モード側で立ててある。"
+  (let ((start (my:claude--input-start)))
+    (when (and my:claude--fontify-orig (> end start))
+      (save-restriction
+        (narrow-to-region start (point-max))
+        (funcall my:claude--fontify-orig (max beg start) end loudly)))))
+
+(define-derived-mode my:claude-mode markdown-mode "Claude"
+  "claude との会話を読み、次の入力を書くモード。
+
+バッファは区切り (`my:claude-prompt-string') で 2 つに分かれる。
+
+  区切りより前  確定した会話。read-only で、1 文字キーが効く
+                i    入力エリアへ移動
+                TAB  折りたたんだツール出力の全体を別バッファに出す
+                z    このウィンドウを最大化 (もう一度で元のレイアウト)
+                q    ウィンドウを閉じる
+  区切りより後  入力エリア。markdown として書ける
+                C-c C-c  送信      C-c C-k  書きかけを捨てる
+                M-p / M-n 履歴     M-v      クリップボードの画像を添付
+
+応答は区切りの**前**に挿さるので、読みながら次を書ける。
+
+**このバッファを kill するとセッションも終わる** (`C-c a q' 相当)。
+会話が消えたあとにプロセスだけ残しても送り先が無く、次の `C-c a a' が
+それを掴んで失敗するため。書きかけがあるときは確認する。
+
+セッションはプロジェクトごとに持てるので、別プロジェクトで
+`C-c a a' すれば `*claude(別のプロジェクト)*' が並ぶ。ここを kill
+する必要は無い。
 
 【重要】`markdown-mode-hook' は走らせない。`my-text.el' の
-`my:setup-markdown-mode' は「.md ファイルを編集する」前提の設定
- (`electric-indent-local-mode' を切るなど) で、送信用の一時バッファに
-持ち込む理由が無い。将来 `my-text.el' を触ったときにこちらの挙動が
-黙って変わるのも避けたい。`delay-mode-hooks' で溜められたフックは
-`run-mode-hooks' が `run-hooks' で回すので、**バッファローカルに nil に
-すれば走らない** (ローカル値に t が無ければグローバル値も見ない)。
-
-【重要】`completion-at-point-functions' の `my:claude--capf' を落とさない
-こと。落とすと行頭の `/' が `cape-file' に食われて C: 直下の
-ディレクトリ一覧が出る。"
+`my:setup-markdown-mode' は「.md ファイルを編集する」前提の設定で、
+会話バッファに持ち込む理由が無い。`define-derived-mode' は親を
+`delay-mode-hooks' で包み、最後に `run-mode-hooks' が `run-hooks' で
+回すので、**バッファローカルに nil にすれば親のフックだけ外せる**。"
   (setq-local markdown-mode-hook nil)
   (setq-local markdown-fontify-code-blocks-natively t)
-  (add-hook 'kill-buffer-hook #'my:claude--input-kill-buffer-hook nil t)
-  ;; 案内は `my:claude--header-segment' を通す。いまの文言に `%' は無いが、
-  ;; 素の文字列を `header-line-format' に渡すと `%' と直後の 1 文字が
-  ;; まとめて消えるので、文言を書き換えたときに黙って壊れないようにしておく。
-  (setq-local header-line-format
-              (my:claude--header-segment
-               ;; `C-c a k' だけプレフィックスが違うのは、中断がこのバッファ
-               ;; ではなく**セッション**への操作だから。C-c C-* はこの
-               ;; バッファの操作 (送信・閉じる・最大化)、C-c a * はセッション
-               ;; の操作 (中断・終了・環境切り替え) という区別が付いている。
-               ;;
-               ;; `C-c C-k' を中断にはしない。org-capture / git-commit /
-               ;; message-mode と同じく、下書きバッファの C-c C-k は「書き
-               ;; かけをやめる」が慣習で、変えると入力バッファを畳む手段が
-               ;; 無くなる。会話バッファ側の C-c C-k が中断なのは、あちらが
-               ;; compilation の kill-compilation と同じ性格だから。
-               "C-c C-c 送信 / C-c C-k 閉じる / C-c a k 中断 / M-v 画像 / 行頭 / は TAB 補完 / M-p 履歴"
-               'my:claude-input-header-face))
+  (setq-local truncate-lines nil)
+  ;; font-lock は入力エリアだけに効かせる。
+  (setq-local my:claude--fontify-orig font-lock-fontify-region-function)
+  (setq-local font-lock-fontify-region-function #'my:claude--fontify-region)
+  (setq-local font-lock-dont-widen t)
   ;; cape-file が深さ 90 にいる。念のため明示的に先頭へ置く。
-  (add-hook 'completion-at-point-functions #'my:claude--capf -100 t))
+  (add-hook 'completion-at-point-functions #'my:claude--capf -100 t)
+  (add-hook 'kill-buffer-query-functions #'my:claude--kill-query nil t)
+  (add-hook 'kill-buffer-hook #'my:claude--kill-buffer-hook nil t)
+  (my:claude--setup-input-area)
+  (goto-char (point-max)))
 
-(defun my:claude-input--disable-line-numbers ()
-  "入力バッファでは行番号を出さない。
+(defun my:claude--kill-query ()
+  "書きかけの入力があれば、捨ててよいか聞く。
 
-数行しか書かないバッファなので、桁を食うだけで得が無い。
+`kill-buffer-hook' では kill を止められないので
+`kill-buffer-query-functions' に載せる。会話バッファを kill すると
+セッションごと終わるので、**書きかけの退避先はもう無い**。"
+  (let ((text (string-trim (my:claude--input-text))))
+    (or (string-empty-p text)
+        (yes-or-no-p
+         (format "書きかけの入力 (%d 文字) がある。捨ててセッションを終える? "
+                 (length text))))))
+
+(defun my:claude--kill-buffer-hook ()
+  "会話バッファが kill されたらセッションを畳む。
+
+`my:claude-quit-session' は EOF を送るだけなので、プロセスが実際に
+死ぬのは少しあと。一覧からはここで外しておく
+ (`my:claude--live-sessions' も同じ判断をするが、こちらが先に効く)。"
+  (when-let* ((session my:claude--session))
+    (my:claude-quit-session session)
+    (my:claude--forget-session session)))
+
+(defun my:claude--disable-line-numbers ()
+  "会話バッファでは行番号を出さない。
+
+会話を読むのに行番号は要らず、桁を食うだけ。
 
 【重要】モード本体ではなくフックで切ること。`markdown-mode' は
-`text-mode' 派生なので `my-editor.el' が
-`text-mode-hook' に載せた `display-line-numbers-mode' が走る。
-`delay-mode-hooks' で溜められた親のフックは `run-mode-hooks' が
-このモード自身のフックより **先に** 回すので、モード本体で切っても
-そのあと有効にされてしまう。
+`text-mode' 派生なので `my-editor.el' が `text-mode-hook' に載せた
+`display-line-numbers-mode' が走る。`delay-mode-hooks' で溜められた
+親のフックは `run-mode-hooks' がこのモード自身のフックより **先に**
+回すので、モード本体で切ってもそのあと有効にされてしまう。
 
 `markdown-mode-hook' のようにバッファローカルに nil にする手も
 あるが、`text-mode-hook' は他の用途にも使う場所なので潰さない。"
   (display-line-numbers-mode -1))
 
-(add-hook 'my:claude-input-mode-hook #'my:claude-input--disable-line-numbers)
+(add-hook 'my:claude-mode-hook #'my:claude--disable-line-numbers)
 
 ;;; --------------------------------------------------
 ;;; グローバルキーバインド
