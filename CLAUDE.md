@@ -1043,11 +1043,40 @@ batch 実測（同じプローブを修正前後で流し、区切りの先頭�
 （`my:claude--setup-input-area`）。これが無いと入力エリアに 1 文字も
 打てない。実測での落とし穴が 2 つ:
 
-- **`rear-nonsticky` に `keymap` を入れ忘れると、打った文字がプロパティを
-  継承する。** 入力エリアなのに `i` が `my:claude-goto-input` になり、
-  文字が打てなくなる
+- **挙げ忘れたプロパティは打った文字にそのまま継承される。**
+  `self-insert-command` は `insert-and-inherit` で挿すため。**列挙する形に
+  していると必ず取りこぼす**ので、`rear-nonsticky` は `t`（このテキストの
+  全プロパティを継承させない）にしてある。実際に 2 回踏んだ:
+
+  | 挙げ忘れ | 症状 |
+  |---|---|
+  | `keymap` | 入力エリアなのに `i` が `my:claude-goto-input` になり、文字が打てない |
+  | `font-lock-face` | **入力した文字が区切りの face を引きずる**（2026-09-10） |
+
+  後者は `my:claude-prompt-face` に背景を敷いて初めて見えた。それまでは
+  前景だけ（`:inherit shadow`）だったので、継承されていても気づけなかった。
+  A/B 実測（同じテキストで `rear-nonsticky` だけ変えて 1 文字打つ）:
+
+  | `rear-nonsticky` | 打った文字の `font-lock-face` |
+  |---|---|
+  | `(read-only keymap)` | **`my:claude-prompt-face`** |
+  | **`t`** | **nil** |
+
 - **プロパティを付ける操作自体が read-only に阻まれる。**
   `inhibit-read-only` の束縛が要る
+
+**既に打ってある文字は直らない。** プロパティは挿入時に決まるので、
+`rear-nonsticky` を直しても遡及しない。検証するときは打ち直すこと。
+
+#### 区切りは帯にする（`:extend t`）
+
+`my:claude-prompt-face` は背景（`dark slate blue`）と前景
+（`light steel blue`）を持ち、**`:extend t`** で行頭からウィンドウ右端まで
+帯になる。Emacs 27 以降、`:extend` が無いと**背景が行末の文字までで切れる**。
+区切りの文字列は末尾の改行まで `font-lock-face` が載っているので、
+`:extend` を立てるだけで帯になる。
+
+背景を敷く以上、前景も指定しないといけない（`shadow` の灰色では読めない）。
 
 #### font-lock は入力エリアだけに効かせる
 

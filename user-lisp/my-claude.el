@@ -396,11 +396,16 @@ Anthropic API の上限は **base64 にしたあとで 5 MB** なので、生の
 他の列と同じ。")
 
 (defface my:claude-prompt-face
-  '((t :inherit shadow))
+  '((t :background "dark slate blue" :foreground "light steel blue" :extend t))
   "確定した会話と入力エリアを分ける区切り (`my:claude-prompt-string')。
 
-案内文なので目立たせない。`shadow' は前景しか持たないので、背景は
-テーマのまま残る。")
+**`:extend t' が要る。** Emacs 27 以降、これが無いと背景が行末の文字までで
+切れ、ウィンドウの右端まで伸びない。区切りの文字列は末尾の改行まで
+`font-lock-face' が載っている (`my:claude--setup-input-area') ので、
+`:extend' を立てるだけで行頭から右端までの帯になる。
+
+前景も指定する。以前は `:inherit shadow' で前景だけを持たせ背景をテーマに
+任せていたが、背景を敷くと `shadow' の灰色では読めない。")
 
 (defface my:claude-header-size-face
   '((t :height 0.9))
@@ -1122,10 +1127,19 @@ insertion-type は t だが、挿入の間だけ nil に倒すのでマーカー
                             'font-lock-face 'my:claude-prompt-face))
         (let ((end (point)))
           (my:claude--protect beg end)
-          ;; 【重要】末尾の 1 文字だけ、後ろへの挿入と継承を許す。
-          ;; `keymap' を落とすと、打った文字がプロパティを継承して
-          ;; **入力エリアでも `i' が閲覧用のコマンドになる** (実測)。
-          (put-text-property (1- end) end 'rear-nonsticky '(read-only keymap))
+          ;; 【重要】末尾の 1 文字だけ、後ろへの挿入を許し、何も継承させない。
+          ;;
+          ;; `rear-nonsticky' に挙げ忘れたプロパティは、`insert-and-inherit'
+          ;; (= `self-insert-command') で打った文字に**そのまま受け継がれる**。
+          ;; 実際に 2 回踏んだ:
+          ;;   keymap         入力エリアでも `i' が閲覧用のコマンドになる
+          ;;   font-lock-face 入力した文字が区切りの face を引きずる
+          ;;                  (`my:claude-prompt-face' に背景を敷いて発覚。
+          ;;                   それまでは前景だけだったので目立たなかった)
+          ;;
+          ;; 個別に列挙すると同じ取りこぼしを繰り返すので `t' にする
+          ;; (「このテキストの全プロパティを継承させない」の意味)。
+          (put-text-property (1- end) end 'rear-nonsticky t)
           (setq my:claude--output-marker (copy-marker beg t)
                 my:claude--input-marker (copy-marker end nil)))))))
 
