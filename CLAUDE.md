@@ -918,11 +918,16 @@ Windows の Emacs には PTY が無いので claude の対話 TUI は動かな�
 | 区切りの数 | 1（常に末尾） |
 | 確定領域を `delete-char` | `text-read-only` |
 
+区切りの案内文（`my:claude-prompt-string`）には **`C-c a k`（中断）も
+並べてある**。あれはセッションへの操作なのでグローバルに割り当てて
+あるが、考え中・応答中にいちばん押したくなるキーがそこに見えていないと
+探せない。ヘッダ行はセッションの状態表示で埋まっている。
+
 #### マーカーは 2 つ。insertion-type が肝
 
 | | 指す位置 | insertion-type | |
 |---|---|---|---|
-| `my:claude--output-marker` | 区切りの先頭 | **t** | 出力を書くとその後ろへ動く＝常に区切りの先頭 |
+| `my:claude--output-marker` | 確定した会話の末尾（区切りの手前） | **t** | 出力を書くとその後ろへ動く |
 | `my:claude--input-marker` | 区切りの直後 | **nil** | 入力エリアの先頭に打っても動かない |
 
 **区切りを挟むのはこのためでもある。** 区切りが無いと、insertion-type t の
@@ -935,6 +940,39 @@ Windows の Emacs には PTY が無いので claude の対話 TUI は動かな�
 （`my:claude--fold` / `--fontify-markdown` / `--mark-text-start` /
 `--end-paragraph`）。とくに `--end-paragraph` は
 `(delete-region (point) (point-max))` で**書きかけを丸ごと消す**ところだった。
+
+#### 【重要】区切りは詰め物の改行で行頭に留める（2026-09-09）
+
+出力は区切りの手前に挿さるので、**delta の途中では末尾が改行で終わって
+いない**。そのままだと区切りが応答の途中から始まり、1 文字届くたびに
+横へ流れる。案内文は常に同じ場所にいてほしい。
+
+`my:claude--pad-before-prompt` が `my:claude--at-end` の最後で調整する。
+
+| 出力の末尾 | 詰め物 |
+|---|---|
+| 改行で終わっていない | **入れる**（区切りは次の行の行頭へ） |
+| 改行で終わっている | **捨てる**（空行が 2 つ並ばないように） |
+
+**詰め物はマーカーの後ろに置く。** 挿入の間だけ
+`my:claude--output-marker` の insertion-type を nil に倒すので、
+マーカーは詰め物の前に留まる。次の delta はこの改行より前 = 同じ行の
+続きに挿さるので、**逐次表示の行が詰め物で分断されない**。
+
+**区切りの側に改行を足して済ませてはいけない**（`my:claude-prompt-string`
+を `"\n──…"` にする手）。応答が改行で終わったときに空行が 2 つ並ぶ。
+
+batch 実測（同じプローブを修正前後で流し、区切りの先頭で `bolp`）:
+
+| | 修正前 | 修正後 |
+|---|---|---|
+| 開いた直後 / 送信直後 | t | t |
+| **delta の途中**（`応答の途` → `中です`） | **nil** | **t**（詰め物 1） |
+| delta が改行で終わったあと | t | t（詰め物 0） |
+| `--end-paragraph` のあと | t | t（詰め物 0） |
+
+詰め物も確定領域（`read-only` + `my:claude-view-map`）。書きかけの入力は
+どの状態でも壊れない。
 
 #### 保護は 3 つのテキストプロパティ
 
@@ -1478,6 +1516,29 @@ Emacs 側で覚える従来動作に落ちる。
   戻る）。ただし `--permission-mode` が `dontAsk` / `bypassPermissions` のときや
   `permissions.allow` に `AskUserQuestion` があるときは `can_use_tool` 自体が
   飛んで来ないので、そもそもこの経路は効かない
+
+#### 答えは赤で出さない（`my:claude-answer-face`、2026-09-09）
+
+deny で返す以上 `is_error` は必ず立つので、素直に扱うと
+**自分で選んだ答えが `my:claude-error-face`（赤）で返ってくる**。
+エラーではないのに失敗したように見えるので、緑にしてある。
+
+色は **IME ON のときのカーソルと同じ `green`**（`my-japanese.el` の
+`input-method-activate-hook`）。当初は `yellow green` にしていたが、
+黄色に寄って見えたので純緑にした（2026-09-09）。明るい背景では純緑が
+読めないので、そちらは `dark olive green` のままにしてある。
+
+| | face |
+|---|---|
+| 聞いた直後の `→ 選んだ答え` | `my:claude-answer-face` |
+| claude から返る `is_error` の `tool_result` | `my:claude-answer-face` |
+| 他のツールの `is_error` | `my:claude-error-face`（赤のまま） |
+| `my:claude-answer-questions` が nil のときの deny | `my:claude-error-face`（本物の拒否） |
+
+判定は `my:claude--handle-user` で `tool-names` に覚えたツール名が
+`AskUserQuestion` かどうかで行う。**畳む閾値も error と同じ扱いにする**
+（`my:claude--fold` の `verbatim`）。既定の `0` のままだと、答えが
+灰色の 1 行に畳まれて消える。
 
 ### 会話バッファの markdown 装飾
 

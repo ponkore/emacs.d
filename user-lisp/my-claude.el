@@ -27,8 +27,9 @@
 ;;   区切りより後  入力エリア。markdown として編集できる。C-c C-c で送る
 ;;
 ;; 応答は区切りの**前**に挿さる (`my:claude--at-end') ので、読みながら次を
-;; 書ける。会話バッファを kill するとセッションが終わる。書きかけがあれば
-;; 確認する (`my:claude--kill-query')。
+;; 書ける。区切りは常に行頭にいる (`my:claude--pad-before-prompt')。会話
+;; バッファを kill するとセッションが終わる。書きかけがあれば確認する
+;; (`my:claude--kill-query')。
 ;;
 ;; アカウント (Pro / Enterprise / Max) の切り替えは CLAUDE_CONFIG_DIR を
 ;; プロセス起動時に渡すことでしか行えないので、C-c a a で環境を選び、
@@ -225,11 +226,19 @@ nil にするとブロックが確定してから一度に出る (段階 3 ま�
   :type 'number)
 
 (defcustom my:claude-prompt-string
-  "── 入力 ─ C-c C-c 送信 / C-c C-k 破棄 / M-p 履歴 / M-v 画像\n"
+  "── 入力 ─ C-c C-c 送信 / C-c a k 中断 / C-c C-k 破棄 / M-p 履歴 / M-v 画像\n"
   "確定した会話と入力エリアを分ける区切り。
 
 **必ず改行で終えること。** 入力エリアはこの直後から始まるので、
 改行が無いと区切りの行の続きに書くことになる。
+
+**行頭から始まることは `my:claude--pad-before-prompt' が保証する。**
+この文字列の側に改行を足してはいけない (応答が改行で終わったときに
+空行が 2 つ並ぶ)。
+
+`C-c a k' (`my:claude-interrupt') はセッションへの操作なのでグローバルに
+割り当ててあるが、**考え中・応答中に押すキーがここに見えていないと
+探せない**ので、他の 4 つと並べて出す。
 
 この文字列自体も read-only になる。ここに案内を書いてあるのは、
 ヘッダ行がセッションの状態表示で埋まっているため。"
@@ -282,6 +291,21 @@ Anthropic API の上限は **base64 にしたあとで 5 MB** なので、生の
 (defface my:claude-error-face
   '((t :inherit error))
   "エラーと拒否。")
+
+(defface my:claude-answer-face
+  '((((background dark))  :foreground "green" :weight bold)
+    (((background light)) :foreground "dark olive green" :weight bold))
+  "AskUserQuestion に答えた内容 (`my:claude--answer-questions')。
+
+答えは **deny の `message'** に載せるしかないので、claude 側からは
+`is_error' の tool_result として返ってくる。そのまま
+`my:claude-error-face' で出すと、自分で選んだ答えが赤く表示されて
+**失敗したように見える**。エラーではないので緑にする。
+
+緑は IME ON のときのカーソル色 (`my-japanese.el' の
+`input-method-activate-hook') と同じ \"green\"。かつては
+\"yellow green\" にしていたが黄色に寄って見えた。明るい背景では
+純緑が読めないので、そちらは \"dark olive green\" のままにしてある。")
 
 (defface my:claude-notice-face
   '((t :inherit warning))
@@ -429,10 +453,15 @@ face をリストにすると先に書いたものが勝つので、色は列ご
   "そのバッファが属するセッション。")
 
 (defvar-local my:claude--output-marker nil
-  "確定した会話の末尾 (= 区切りの先頭)。応答はここに挿さる。
+  "確定した会話の末尾。応答はここに挿さる。
 
 **insertion-type は t。** 挿入したテキストの後ろへ動くので、出力を
-何度書いてもこのマーカーは区切りの先頭を指し続ける。
+何度書いてもこのマーカーは確定した会話の末尾を指し続ける。
+
+区切りとの間には、出力が改行で終わっていないときだけ詰め物の改行が
+1 つ入る (`my:claude--pad-before-prompt')。つまりこのマーカーは
+**区切りの先頭とは限らない**。区切りの先頭が要る処理は無いので、
+`my:claude--output-end' はこのマーカーの位置をそのまま返す。
 
 ユーザーがこの位置に文字を入れるとマーカーが動いてしまうが、区切りは
 read-only なのでそれは起こらない。**区切りを挟むのはこのため**でもある
@@ -1002,7 +1031,7 @@ base64 だけを対象にするので、本文に出てくる短い文字列は�
 ;;; 確定した会話と入力エリアの境界
 
 (defun my:claude--output-end ()
-  "カレントバッファの確定した会話の末尾 (= 区切りの先頭)。
+  "カレントバッファの確定した会話の末尾 (= 次の出力が挿さる位置)。
 
 区切りをまだ置いていないバッファでは `point-max'。**会話バッファに
 書き足す処理は、`point-max' ではなくこちらを見ること。**
@@ -1033,14 +1062,51 @@ base64 だけを対象にするので、本文に出てくる短い文字列は�
   keymap        ここでだけ 1 文字キー (i / TAB / z / q) を効かせる
 
 **`rear-nonsticky' は区切りの末尾にだけ付ける**
- (`my:claude--setup-input-area')。確定領域の末尾には必ず区切りが続くので、
-ここで付ける必要は無い。"
+ (`my:claude--setup-input-area')。確定領域の末尾には必ず詰め物か区切りが
+続く (`my:claude--pad-before-prompt') ので、ここで付ける必要は無い。"
   (when (< beg end)
     (let ((inhibit-read-only t))
       (add-text-properties beg end
                            `( read-only t
                               keymap ,my:claude-view-map
                               front-sticky (read-only))))))
+
+(defun my:claude--pad-before-prompt ()
+  "区切りが必ず行頭から始まるように、その手前の改行を調整する。
+
+出力は区切りの手前 (`my:claude--output-marker') に挿さるので、delta の
+途中では末尾が改行で終わっていない。そのままだと**区切りが応答の途中から
+始まり、1 文字届くたびに横へ流れる**。案内文は常に同じ場所にいてほしいので、
+足りないときは詰め物の改行を 1 つ入れ、要らなくなったら捨てる。
+
+  出力が改行で終わっていない  詰め物を入れる (区切りは次の行の行頭へ)
+  出力が改行で終わっている    詰め物は捨てる (空行が 2 つ並ばないように)
+
+**詰め物はマーカーの後ろに置く。** `my:claude--output-marker' の
+insertion-type は t だが、挿入の間だけ nil に倒すのでマーカーは詰め物の
+前に留まる。次の出力はこの改行より前 = 同じ行の続きに挿さるので、
+逐次表示の行が詰め物で分断されることはない。
+
+詰め物も確定領域なので `my:claude--protect' を通す。undo には載せない
+ (出力と同じ扱い)。"
+  (let ((m my:claude--output-marker))
+    (when (and (markerp m) (marker-position m))
+      (let* ((inhibit-read-only t)
+             (buffer-undo-list t)
+             (pos (marker-position m))
+             ;; 区切りは "──" で始まるので、ここが改行なら詰め物。
+             (padded (eq (char-after pos) ?\n))
+             (bol (or (= pos (point-min)) (eq (char-before pos) ?\n))))
+        (cond
+         ((and bol padded) (delete-region pos (1+ pos)))
+         ((and (not bol) (not padded))
+          (save-excursion
+            (goto-char pos)
+            (set-marker-insertion-type m nil)
+            (unwind-protect
+                (insert "\n")
+              (set-marker-insertion-type m t))
+            (my:claude--protect pos (1+ pos)))))))))
 
 (defun my:claude--setup-input-area ()
   "バッファの末尾に区切りを置き、その後ろを入力エリアにする。
@@ -1097,7 +1163,10 @@ undo は入力エリアのためだけにある。**出力は `buffer-undo-list'
                (save-excursion
                  (goto-char ,beg)
                  ,@body)
-               (my:claude--protect (marker-position ,beg) (my:claude--output-end)))
+               (my:claude--protect (marker-position ,beg) (my:claude--output-end))
+               ;; 区切りを行頭に留める。詰め物はマーカーの後ろに置くので
+               ;; `my:claude--output-end' は動かない。
+               (my:claude--pad-before-prompt))
              (unless (= ,before (my:claude--output-end))
                (setq buffer-undo-list nil))
              (set-marker ,beg nil)))))))
@@ -1129,7 +1198,10 @@ LABEL は `Read(foo.el)\' のような呼び出しの要約 (`my:claude--tool-su
 別バッファに開く。"
   (let* ((lines (split-string (string-trim-right text) "\n"))
          (n (length lines))
-         (keep (if (eq face 'my:claude-error-face)
+         ;; エラーと、AskUserQuestion の答え (`my:claude-answer-face') は
+         ;; 畳まない。前者はいちばん見たいもので、後者は自分の選択そのもの。
+         (verbatim (memq face '(my:claude-error-face my:claude-answer-face)))
+         (keep (if verbatim
                    my:claude-error-result-max-lines
                  my:claude-tool-result-max-lines)))
     (if (<= n keep)
@@ -1137,8 +1209,7 @@ LABEL は `Read(foo.el)\' のような呼び出しの要約 (`my:claude--tool-su
       (my:claude--insert
        session
        (format "  ● %s … %d 行\n" (or label "出力") n)
-       (if (eq face 'my:claude-error-face) 'my:claude-error-face
-         'my:claude-meta-face))
+       (if verbatim face 'my:claude-meta-face))
       ;; 全文はテキストプロパティに持たせておく。載せる範囲はいま書いた
       ;; 1 行だけ。確定した会話の末尾は挿入した改行の**次**の行頭にあるので、
       ;; そこから 1 行戻ったところが要約行の先頭になる。
@@ -2062,7 +2133,13 @@ point が末尾から外れて自動スクロールが止まっていた**。"
               (my:claude--insert session (format "  ● %s … 出力なし\n" label)
                                  'my:claude-meta-face)
             (my:claude--fold session text
-                             (cond (err 'my:claude-error-face)
+                             ;; AskUserQuestion の答えは deny で返すしかない
+                             ;; ので必ず `is_error' で戻ってくる。エラーでは
+                             ;; ないので赤くしない (`my:claude-answer-face')。
+                             (cond ((and err my:claude-answer-questions
+                                         (equal name "AskUserQuestion"))
+                                    'my:claude-answer-face)
+                                   (err 'my:claude-error-face)
                                    (sub 'my:claude-subagent-face)
                                    (t 'my:claude-tool-result-face))
                              label)))))))
@@ -2250,7 +2327,7 @@ JSON の配列はベクタで来るのでリストに直す。"
           (my:claude--show-question session q)
           (let ((a (my:claude--read-answer q)))
             (push (cons (or (alist-get 'question q) "") a) answers)
-            (my:claude--insert session (format "  → %s\n" a) 'my:claude-user-face)))
+            (my:claude--insert session (format "  → %s\n" a) 'my:claude-answer-face)))
         (my:claude--respond-deny
          session rid
          (concat "Your questions have been answered: "
