@@ -3100,8 +3100,20 @@ API が弾く。"
 
 ;;; 入力の履歴
 
-(defvar my:claude--input-history nil
-  "送信したプロンプトの履歴。新しいものが先頭。")
+(defvar-local my:claude--input-history nil
+  "送信したプロンプトの履歴。新しいものが先頭。
+
+**会話バッファごとに持つ。** グローバルな `defvar' にしていたため、
+`*claude(a)*' で `M-p' すると `*claude(b)*' に打った入力まで混ざっていた。
+セッションはプロジェクトごとなので、履歴もプロジェクトごとが正しい。
+
+立て直し (`C-c a m' / `C-c a e' / `C-c a r') では**会話バッファを使い回し、
+`my:claude-mode' も立て直さない** (`my:claude--start' の `unless' を参照)
+ので履歴は残る。それでも `permanent-local' を立てておく。ここが
+`kill-all-local-variables' を通ると、モデルを変えただけで履歴が消える
+という分かりにくい壊れ方をするため (`my-htnblog.el' で踏んだのと同じ罠)。")
+
+(put 'my:claude--input-history 'permanent-local t)
 
 (defvar-local my:claude--input-index -1
   "入力エリアで履歴をたどっている位置。-1 は「たどっていない」。")

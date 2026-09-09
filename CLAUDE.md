@@ -1103,6 +1103,33 @@ GUI 実測:
 書いたときは履歴ごと捨てる（`my:claude--at-end`）。応答が届くと書きかけの
 undo は効かなくなるが、壊れた位置を undo するよりはよい。
 
+#### 入力履歴（`M-p`）は会話バッファごと（2026-09-10）
+
+`my:claude--input-history` は **`defvar-local`**。グローバルな `defvar` に
+していたため、`*claude(a)*` で `M-p` すると `*claude(b)*` に打った入力まで
+混ざっていた。セッションはプロジェクトごとなので履歴もそうあるべき。
+
+たどる位置（`my:claude--input-index`）と書きかけ（`my:claude--input-draft`）は
+元から `defvar-local` だった。**位置だけがバッファごとで中身が共有**という
+ちぐはぐな状態だった。
+
+立て直し（`C-c a m` / `C-c a e` / `C-c a r`）は**会話バッファを使い回し、
+`my:claude-mode` を立て直さない**（`my:claude--start` の `unless`）ので
+履歴は残る。それでも `permanent-local` を立ててある。ここが
+`kill-all-local-variables` を通ると「モデルを変えただけで履歴が消える」
+という分かりにくい壊れ方をするため（`my-htnblog.el` で踏んだのと同じ罠）。
+
+会話バッファを kill するとセッションごと終わるので、履歴も消える。
+
+##### 【重要】`kill-buffer-query-functions` はローカル値が残る
+
+検証でモックの会話バッファを 7 個残した。`my:claude-mode` は
+`my:claude--kill-query` を**バッファローカルに**積むので、
+`(let ((kill-buffer-query-functions nil)) (kill-buffer b))` では消えず、
+入力エリアに文字があると `yes-or-no-p` が出る。batch / `ec.sh` では
+`inhibit-interaction` で落ちて **kill されないままバッファが残る**。
+片付けるときは `setq-local` で外すこと。
+
 #### 追従（自動スクロール）の仕掛けが要らなくなった
 
 挿入位置が `point` より**前**になったので、`point` も `window-point` も
