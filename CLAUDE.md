@@ -2606,6 +2606,43 @@ v2 世代の API（`modus-themes-load-themes` / `modus-themes-load-vivendi` /
 
 ## 補完 (corfu)
 
+### `C-x C-r` は recentf とブックマークの両方から選ぶ（2026-09-09）
+
+`consult-recent-file` の代わりに `my:consult-recent-file-or-bookmark`
+（`my-completion.el`）を割り当ててある。`consult--multi` で 2 つのソースを
+束ねているので、`consult-narrow-key`（`<`）に続けて `f` でファイル、
+`m` でブックマークだけに絞れる。バッファも混ぜたいなら `C-x b`
+（`consult-buffer`）にどちらも既に入っている。
+
+#### 【重要】`consult-source-recent-file` は開いているファイルを落とす
+
+組み込みのソースは `:items` の中で `consult--buffer-file-hash` を引き、
+**既にバッファで開いているファイルを一覧から除外する**
+（`consult.el:5076`）。`consult-buffer` ではそれらが Buffer ソースの側に
+出るので正しいが、**ファイルを開く入口でこれをやると、開いているものだけ
+選べなくなる**。
+
+そのため recentf 側は組み込みを使わず、`recentf-list` をそのまま出す
+`my:consult--source-recent-file` を定義してある（`consult-recent-file` と
+同じ中身）。ブックマーク側は除外ロジックが無いので
+`consult-source-bookmark` をそのまま使う。
+
+実測（同じ瞬間に両方の `:items` を呼んで数えた）:
+
+| | 件数 |
+|---|---|
+| `recentf-list` をそのまま | **195** |
+| `consult-source-recent-file`（組み込み） | **194** |
+| そのとき開いていたファイル | 1 |
+
+**差が「いま開いている数」なので、開いていなければ気づけない。**
+
+`:state` は `consult--file-state` / `consult--bookmark-state`
+（`consult--define-state` が作る）で、プレビューと確定時の
+`consult--*-action` を兼ねる。`:action` は要らない。
+**`consult--multi` は autoload されていない**ので、コマンドの側で
+`(require 'consult)` すること。
+
 ### text-mode の ispell 補完は切ってある（2026-09-07）
 
 `text-mode` は `text-mode-ispell-word-completion`（既定 `completion-at-point`、

@@ -96,7 +96,7 @@
   :straight t
   :bind
   (("C-s" . my:consult-line)
-   ("C-x C-r" . consult-recent-file)
+   ("C-x C-r" . my:consult-recent-file-or-bookmark)
    ("C-x l" . consult-goto-line)
    ("C-x b" . consult-buffer))
   :custom
@@ -112,7 +112,52 @@
     (interactive "P")
     (if at-point
         (consult-line (thing-at-point 'symbol))
-      (consult-line))))
+      (consult-line)))
+
+  (defvar my:consult--recent-file-or-bookmark-history nil
+    "`my:consult-recent-file-or-bookmark' のミニバッファ履歴。")
+
+  (defvar my:consult--source-recent-file
+    (list :name     "Recent File"
+          :narrow   ?f
+          :category 'file
+          :face     'consult-file
+          :history  'file-name-history
+          :state    #'consult--file-state
+          :enabled  (lambda () recentf-mode)
+          :items    (lambda ()
+                      (mapcar #'consult--fast-abbreviate-file-name
+                              (bound-and-true-p recentf-list))))
+    "`my:consult-recent-file-or-bookmark' 用の recentf ソース。
+
+**`consult-source-bookmark' と違って組み込みのものを使わない。**
+`consult-source-recent-file' は `consult--buffer-file-hash' で
+**既に開いているファイルを一覧から除外する**。`consult-buffer' では
+それらが Buffer ソースの側に出るので正しいが、こちらは recentf が
+すべてなので、除外すると開いているファイルが選べなくなる。
+`consult-recent-file' と同じく `recentf-list' をそのまま出す。
+
+`:state' は `consult--file-state' (`consult--define-state' が作る)。
+プレビューと、確定時の `consult--file-action' を兼ねる。開いてある
+ファイルを選んだときはそのバッファがそのまま使われる。")
+
+  (defun my:consult-recent-file-or-bookmark ()
+    "最近開いたファイルとブックマークから選ぶ。
+
+`consult-recent-file' の代わり。`consult--multi' で 2 つのソースを
+束ねてあるので、`consult-narrow-key' (`<') に続けて `f' でファイル、
+`m' でブックマークだけに絞れる。
+
+`consult-buffer' でも同じ 2 つは選べるが、あちらはバッファが混ざる。
+ファイルを開く入口としてはこちらを使う。"
+    (interactive)
+    ;; `consult--multi' は autoload されていないので明示的に読む。
+    (require 'consult)
+    (consult--multi '(my:consult--source-recent-file consult-source-bookmark)
+                    :prompt "Recent file / bookmark: "
+                    :require-match t
+                    :sort nil
+                    :history 'my:consult--recent-file-or-bookmark-history)))
 
 ;;; [3] embark
 
