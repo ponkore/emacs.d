@@ -262,9 +262,14 @@
   ;; cape-file / cape-dabbrev は autoload なのでフックに積むだけならロードは
   ;; 要らない。:defer t + :init で同じにする。
   :defer t
-  :custom
-  (cape-dabbrev-min-length 2)
   :init
+  ;; cape-dabbrev-min-length は削除した。**いまの cape にこの変数は無い**
+  ;; (cape.el を min-length で grep して 0 件)。customize-set-variable は
+  ;; defcustom でない名前にも set-default するので、警告も出ないまま同名の
+  ;; 変数が 1 つ増えるだけだった (custom-type が nil で確認)。CLAUDE.md の
+  ;; mark-holidays-in-calendar と同じ罠。
+  ;; 実効の最小接頭辞は corfu-auto-prefix (1) だけで決まる。
+
   ;; メジャーモード固有の capf が先に来るよう、深さを指定して末尾側に置く。
   (add-hook 'completion-at-point-functions #'cape-file 90)
   (add-hook 'completion-at-point-functions #'cape-dabbrev 91))

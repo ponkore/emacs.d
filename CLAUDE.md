@@ -3474,7 +3474,12 @@ upstream は 2020-12-29 で止まっている（2026-09 に fetch して確認�
    Emacs 23 で `calendar-mark-holidays-flag` に改名され、obsolete alias も
    残っていない。`customize-set-variable` は defcustom でない変数にも
    `set-default` するので、**警告も出ないまま同名の変数が 1 つ増えるだけ**で、
-   本物のフラグは nil のままだった
+   本物のフラグは nil のままだった。
+
+   **見分け方は `(get 'VAR 'custom-type)` が nil かどうか。** `boundp` は
+   自分で作ってしまった変数にも t を返すので判定に使えない。同じことが
+   2026-09-09 に `cape-dabbrev-min-length` でも起きていた（cape から変数
+   自体が無くなっていた。`my-completion.el` の `:custom` から削除済み）
 2. **`calendar-holidays` に `japanese-holidays` を設定する行が要る。**
    パッケージを入れただけでは `japanese-holidays` という変数が定義されるだけで、
    どこにも接続されない
