@@ -423,6 +423,61 @@ GUI 実測（`lisp-interaction-mode-hook` → depth -100）:
 フック自体はどちらも走っているので、**「変数が設定されていること」を
 確かめても検証にならない**。バックエンドが生きているかを見ること。
 
+#### 【重要】`init.el` では byte-compile バックエンドを外してある（2026-09-09）
+
+`init.el` は `user-init-file` なので `trusted-content` の**組み込みの例外**で、
+上の 3 箇所を登録する前から `elisp-flymake-byte-compile` が動いていた。
+ところが**このバックエンドは 147 行目より先へ進めない**。
+
+```
+147: Cannot open load file: No such file or directory, my-core
+```
+
+子プロセスは `emacs -Q` 相当なので `load-path` に `user-lisp/` が無く、
+**バイトコンパイラが評価する `(require 'my-core)` が落ちる**。その 4 行上の
+`(prepare-user-lisp t)` はただの関数呼び出しなのでコンパイラは実行せず、
+`load-path` は伸びない。require の失敗はハードエラーなのでそこで中断する。
+
+**つまり偽診断が 1 件出るだけで、本物の誤りは 1 件も検出できていなかった。**
+2026-08-30 の `c60a17f`（flycheck → flymake 移行）から 10 日ほどこの状態。
+
+`my-lsp.el` の `my:flymake-disable-byte-compile-in-init` が `init.el` でだけ
+`remove-hook` する。**`my:trust-scratch-content` と同じく `prog-mode-hook` に
+depth `-100`**（`flymake-mode` は有効化した時点でチェックを走らせるので
+`emacs-lisp-mode-hook` では間に合わない）。`elisp-flymake-checkdoc` は残る。
+
+##### `elisp-flymake-byte-compile-load-path` に足す手は採らない
+
+`user-lisp/` を足せば require は通る。**が、子プロセスが 25 モジュールを
+全部ロードするようになる。** 子プロセスを実装どおり再現して実測:
+
+| | `("./")` | `user-lisp/` を追加 |
+|---|---|---|
+| `my-core` のエラー | 出る | 消える |
+| 残る診断 | 上記 1 件 | `straight-use-package' is not known to be defined`（別の偽診断） |
+| 所要時間 | **0.51 秒** | **1.10 秒** |
+| **`recentf` / `history`** | **変化なし** | **毎回書き戻す**（mtime で確認） |
+
+`flymake-no-changes-timeout` は 1.0 秒なので、`init.el` を編集するたびに
+これが走る。偽診断が別の偽診断に入れ替わるだけで、副作用だけが増える。
+
+再現は次の 1 行で足りる（`elisp-flymake-byte-compile` が組み立てる引数列と同じ）。
+
+```sh
+emacs -Q --batch -L ./ -f elisp-flymake--batch-compile-for-flymake FILE
+```
+
+##### 【重要】バックエンドを外しても報告済みの診断は消えない
+
+flymake は診断をバックエンドごとに持つので、**そのバックエンドが再報告
+しない限り古いものが残る**。検証中、`flymake-diagnostic-functions` が
+`(elisp-flymake-checkdoc t)` になっているのに 147 行目の診断がまだ出ていて
+一度誤診した。`flymake-mode` を入れ直すと消える。
+
+実セッションではフックがモード設定時（`flymake-mode` が有効になる前）に
+走るのでバックエンドは登録されず、この残留は起きない。**「外れているか」は
+バックエンドの一覧で、「消えたか」は診断で、別々に見ること。**
+
 #### 偽警告は避けられない
 
 `elisp-flymake-byte-compile` は `emacs -Q` 相当の子プロセスでコンパイルする。

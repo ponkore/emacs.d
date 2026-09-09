@@ -143,6 +143,41 @@
 \(simple.el) が同じことをしている。"
     (when (derived-mode-p 'lisp-interaction-mode)
       (setq-local trusted-content :all)))
+
+  (defun my:flymake-disable-byte-compile-in-init ()
+    "`init.el' では `elisp-flymake-byte-compile' を使わない。
+
+**このバックエンドは init.el では 147 行目より先へ進めない。**
+子プロセスは `emacs -Q' 相当なので `load-path' に `user-lisp/' が
+無く、バイトコンパイラが評価する `(require \\='my-core)' が
+`Cannot open load file' で落ちる。その 4 行上の
+`(prepare-user-lisp t)' はただの関数呼び出しなのでコンパイラは
+実行せず、`load-path' は伸びない。require の失敗はハードエラーな
+ので、そこでコンパイルごと中断する。
+
+つまり **1 件の偽診断が出るだけで、本物の誤りは 1 件も検出できない**。
+`elisp-flymake-byte-compile-load-path' に `user-lisp/' を足せば
+require は通るが、今度は子プロセスが 25 モジュールを全部ロードして
+**`recentf' と `history' を毎回書き戻す** (mtime で実測)。所要時間も
+0.51 秒から 1.10 秒になる。得られるのは別の偽診断
+\(`straight-use-package' が未定義) だけなので、そちらは採らない。
+
+`elisp-flymake-checkdoc' は残すので、init.el でも docstring の
+検査は効く。
+
+`my:trust-scratch-content' と同じく `prog-mode-hook' に depth -100 で
+載せること。`flymake-mode' は有効化した時点でチェックを 1 回走らせる
+ので、`emacs-lisp-mode-hook' では間に合わない。"
+    (when (and buffer-file-name
+               user-init-file
+               (let ((a (file-truename buffer-file-name))
+                     (b (file-truename user-init-file)))
+                 ;; この設定では file-equal-p が使えない (w32-get-true-file-attributes
+                 ;; が nil で inode が常に 0。CLAUDE.md 参照)。文字列で比べる。
+                 (if (ignore-errors (file-name-case-insensitive-p a))
+                     (string-equal-ignore-case a b)
+                   (string-equal a b))))
+      (remove-hook 'flymake-diagnostic-functions #'elisp-flymake-byte-compile t)))
   :custom
   ;; elisp-flymake-byte-compile はバッファをバイトコンパイルする
   ;; (= マクロ展開でそのバッファのコードが走りうる) ため、trusted-content-p が
@@ -183,6 +218,7 @@
   ;; elisp-flymake-byte-compile が disabled になっていた。
   ;; depth -100 で flymake-mode より先に走らせる。
   (add-hook 'prog-mode-hook #'my:trust-scratch-content -100)
+  (add-hook 'prog-mode-hook #'my:flymake-disable-byte-compile-in-init -100)
 
   (defhydra hydra-flymake nil
     "
