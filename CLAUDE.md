@@ -2875,6 +2875,48 @@ FILE を渡した場合は `save-buffer` しない（呼び出し側がそのバ
 変更があれば保存するか聞く。**外部エディタはディスク上の中身を読むので、
 聞かないと古い内容が表示されるのに dired からは気づけない。**
 
+## 【重要】dired で名前を短くリネームできない（2026-09-09 に対処）
+
+`R`（`dired-do-rename`）で `2026-09-04-進捗報告.org` を
+`2026-09-進捗報告.org` に縮めようとしても、**元の名前に戻される**。
+
+`vertico-preselect` の既定は `directory` で、ファイル名の部分を打っている間は
+先頭の候補が選択状態になる。`RET`（`vertico-directory-enter` →
+`vertico-exit`）は**確定の前にその候補を挿入する**。縮めた入力は元の名前の
+接頭辞なので候補は元の名前 1 件だけが残り、それが挿入されて「同じ名前への
+リネーム」になる。
+
+**エラーにならないので気づきにくい。** 同名のリネームは黙って通り、
+dired が更新されてファイル名だけが変わらない（実測）。ディレクトリを
+またぐときなど、経路によっては `file-already-exists` になる。
+
+`M-RET`（`vertico-exit-input`）と `C-u RET` は元から通る。毎回押さずに
+済むよう、`my-dired.el` が `dired-do-create-files` の読み取り中だけ `RET` を
+差し替える（`my:dired-vertico-enter-or-input`）。**候補がディレクトリなら
+従来どおり潜り、それ以外は入力をそのまま確定する。**
+
+`vertico-preselect` を `prompt` にするだけでは駄目。GUI 実測
+（`R` に続けてキーを送り、実際にできたファイルを見る）:
+
+| 入力 / キー | 修正前 | `vertico-preselect` = prompt | 差し替え（現状） |
+|---|---|---|---|
+| `2026-09-進捗報告.org` / `RET` | **変わらない** | 縮まる | **縮まる** |
+| `s` / `RET RET` | `sub/` へ移動 | **`s` という名前になる** | **`sub/` へ移動** |
+| `su` / `TAB RET` | `sub/` へ移動 | — | `sub/` へ移動 |
+
+- 差し込みは `dired-do-create-files` の 1 箇所でよい
+  （`R` / `C` / `S` / `H` の 4 つとも通る）
+- **`minibuffer-with-setup-hook` には `:append` で足すこと。** vertico は
+  `minibuffer-setup-hook` で `vertico-map` を composed keymap の先頭に置くので、
+  先に走らせるとこちらが後ろに回って `RET` を奪えない
+- `vertico-preselect` は `prompt` にすると `TAB`（`vertico-insert`）も効かなく
+  なる（`vertico--index` が -1 のとき何もしない）。差し替えなら候補は
+  選択されたままなので `TAB` で採れる
+- 検証は `execute-kbd-macro` で `R RET` を送る。ミニバッファの読み取りが要るので
+  `ec.sh -n`（`inhibit-interaction` を外す）が要る。テスト用ディレクトリは
+  **毎回ユニークな名前で作ること**。dired バッファを kill した直後は
+  w32notify の watch が握っていて `Permission denied` で消せないことがある
+
 ## dired の自動更新（2026-09-04）
 
 外部でファイルが増減したら dired の一覧も追随する。`dired-mode-hook` から

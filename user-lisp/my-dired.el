@@ -224,6 +224,56 @@ markdown-mode の C-c C-c o (`markdown-open') と同じ経路 —
           (with-current-buffer buffer (save-buffer))))
       (my:markdown-open-external file)))
 
+  ;; --- リネーム / コピー先の入力で RET が候補に化けないようにする ---
+  ;;
+  ;; `vertico-preselect' は既定 `directory' で、ファイル名の部分を打っている
+  ;; 間は先頭の候補が選択状態になる。RET (`vertico-directory-enter' →
+  ;; `vertico-exit') は確定の前にその候補を挿入するので、**名前を短くすると
+  ;; 元の名前に戻される**。
+  ;;
+  ;;   2026-09-04-進捗報告.org を 2026-09-進捗報告.org に縮めたい
+  ;;     → 入力が元の名前 1 件だけを候補に残す
+  ;;     → RET でそれが挿入され「同じ名前へのリネーム」になる (何も起きない)
+  ;;
+  ;; `vertico-preselect' を prompt にすれば直るが、今度は RET でディレクトリを
+  ;; 掘れなくなる (実測: "s" と打って RET すると sub/ に入らず "s" という名前で
+  ;; 確定する)。候補がディレクトリのときだけ従来どおり潜り、それ以外は入力を
+  ;; そのまま確定する RET を `dired-do-create-files' の間だけ被せる。
+  ;; M-RET (`vertico-exit-input') を毎回押すのと同じことを RET で行う。
+
+  (defun my:dired-vertico-enter-or-input ()
+    "候補がディレクトリならそこへ入り、それ以外は入力をそのまま確定する。"
+    (interactive)
+    (cond
+     ;; vertico が動いていないミニバッファ (念のため)。ここを通る
+     ;; `read-file-name' は require-match が nil なので素の確定で足りる。
+     ((not (bound-and-true-p vertico--index))
+      (exit-minibuffer))
+     ((and (>= vertico--index 0)
+           (string-suffix-p "/" (vertico--candidate)))
+      (vertico-directory-enter))
+     (t
+      (vertico-exit-input))))
+
+  (defvar my:dired-create-files-map
+    (let ((map (make-sparse-keymap)))
+      (define-key map (kbd "RET") #'my:dired-vertico-enter-or-input)
+      map)
+    "`dired-do-create-files' の読み取り中だけ被せるキーマップ。")
+
+  (defun my:dired-create-files-keymap (orig &rest args)
+    "ORIG を呼ぶ間だけ `my:dired-create-files-map' を被せる。
+
+【重要】`minibuffer-with-setup-hook' には必ず :append で足すこと。
+vertico は `minibuffer-setup-hook' で `vertico-map' を composed keymap の
+先頭に置くので、先に走らせるとこちらが後ろに回り RET を奪えない。"
+    (minibuffer-with-setup-hook
+        (:append
+         (lambda ()
+           (use-local-map (make-composed-keymap my:dired-create-files-map
+                                                (current-local-map)))))
+      (apply orig args)))
+
   (defun my:dired-auto-revert-setup ()
     "この dired バッファを外部の変更に追随させる。
 
@@ -287,6 +337,9 @@ markdown-mode の C-c C-c o (`markdown-open') と同じ経路 —
   ;;
   (ls-lisp-dirs-first t)
   :config
+  ;; R (rename) / C (copy) / S (symlink) / H (hardlink) は 4 つとも
+  ;; dired-do-create-files を通るので、差し込みはここ 1 箇所で足りる。
+  (advice-add 'dired-do-create-files :around #'my:dired-create-files-keymap)
   ;; my:dired-revert-buffer (g に割り当てていた revert-buffer + dired-k) は
   ;; 削除した。dired 既定の g (revert-buffer) で dired-after-readin-hook が
   ;; 走り dired-k-no-revert が呼ばれるので、明示的な呼び出しは二重起動になる。
