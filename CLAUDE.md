@@ -1651,6 +1651,48 @@ deny で返す以上 `is_error` は必ず立つので、素直に扱うと
 （`my:claude--fold` の `verbatim`）。既定の `0` のままだと、答えが
 灰色の 1 行に畳まれて消える。
 
+### 入力待ちは音で知らせる（`my:claude-notify-sound`、2026-09-10）
+
+許可プロンプトと AskUserQuestion は claude 側の都合で突然ミニバッファを
+開くので、別の窓を見ていると気づけない。鳴らすのはこの 2 つだけ
+（`my:claude--notify-input-wait`）。`C-c a e` のような自分で始めた選択は
+待っていると分かっているので鳴らさない。許可プロンプトでは `v`（入力を
+全部見る）で聞き直すぶんも鳴らさない（ループの外で 1 回だけ呼ぶ）。
+
+**`C-g` の音とは別のものを選ぶこと。** Windows の既定のビープは
+レジストリの
+`HKCU\AppEvents\Schemes\Apps\.Default\.Default\.Current` にあり、この
+マシンでは `Windows Background.wav`。既定値はそれを避けて
+`chimes.wav`（1.23 秒）にしてある。
+
+#### 【重要】同期再生してはいけない
+
+| 鳴らし方 | Emacs が止まる時間 | |
+|---|---|---|
+| `play-sound-file` | **1.43 秒** | Windows は PlaySound を SND_SYNC で呼ぶ |
+| `make-thread` + `play-sound-file` | **1.40 秒** | spawn は 0.1 ms だが逃げられない |
+| **powershell の SoundPlayer に投げる** | **7.9 ms** | 鳴り始めるのは約 0.6 秒後 |
+
+同期で鳴らすと**音が鳴り終わってからプロンプトが出る**。順序が逆で、
+気づかせるという目的を果たさない。
+
+**`make-thread` でも逃げられない。** 再生はグローバルロックを握ったまま
+走るので、メインスレッドが入力を待った瞬間にそこで止まる（実測: スレッドを
+起こした直後の `sleep-for 0.3` が **1.40 秒**かかった）。押したキーは
+失われないが、1.3 秒のあいだ反応が返らない。
+
+そのため `my:claude--play-sound` が子プロセスに投げる（macOS は `afplay`、
+Linux は `paplay` / `aplay`）。どれも見つからない環境でだけ
+`play-sound-file` に落ちる。powershell の起動 0.6 秒は待つのが向こうなので
+こちらは止まらない。
+
+音が読めない / 鳴らせないときは `message` で知らせるだけにする。
+**プロンプトは必ず出す**（聞きそびれるのと、応答が止まるのとでは重さが違う）。
+
+wav の長さも実測してある。`chimes.wav` 1.23 秒、
+`Windows Notify System Generic.wav` 1.29 秒、
+`Windows Information Bar.wav` 0.13 秒、`ding.wav` 0.40 秒。
+
 ### 会話バッファの markdown 装飾
 
 `my:claude--fontify-markdown` が 3 つを順に行う。**この順でなければ

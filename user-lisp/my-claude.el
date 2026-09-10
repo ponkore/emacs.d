@@ -268,6 +268,30 @@ Anthropic API の上限は **base64 にしたあとで 5 MB** なので、生の
 プレースホルダは送信後に消えるので、ここに残さないと後から分からない。"
   :type 'integer)
 
+(defcustom my:claude-notify-sound
+  (cond ((eq system-type 'windows-nt) "C:/Windows/Media/chimes.wav")
+        ((eq system-type 'darwin) "/System/Library/Sounds/Glass.aiff")
+        (t nil))
+  "ミニバッファで入力待ちになったときに鳴らす音。nil なら鳴らさない。
+
+鳴らすのは **claude 側の都合で待たされる 2 つ** だけ (許可プロンプトと
+AskUserQuestion)。どちらもこちらが操作していないときに突然出るので、
+別の窓を見ていると気づけない。自分で `C-c a e' を押したときの選択などは
+待っていると分かっているので鳴らさない。
+
+【重要】`C-g' の音とは別のものを選ぶこと。Windows の既定のビープは
+レジストリの
+
+  HKCU\\AppEvents\\Schemes\\Apps\\.Default\\.Default\\.Current
+
+で、このマシンでは `Windows Background.wav'。既定値はそれを避けてある。
+
+再生は子プロセスに投げる (`my:claude--play-sound')。**同期再生しては
+いけない**ので、ここを変えるときも `play-sound-file' が直接呼ばれる
+経路 (再生プログラムが見つからない環境) だけになることを承知しておく。
+Windows の `play-sound-file' は WAV しか鳴らせない。"
+  :type '(choice (const :tag "鳴らさない" nil) file))
+
 ;;; --------------------------------------------------
 ;;; face
 ;;; --------------------------------------------------
@@ -2188,6 +2212,68 @@ point が末尾から外れて自動スクロールが止まっていた**。"
   (force-mode-line-update t))
 
 ;;; --------------------------------------------------
+;;; 入力待ちの通知
+;;; --------------------------------------------------
+
+(defun my:claude--play-sound (file)
+  "FILE を **Emacs をブロックせずに** 鳴らす。
+
+【重要】`play-sound-file' を直接呼んではいけない。Windows では
+PlaySound を SND_SYNC で呼ぶので、**鳴り終わるまで Emacs が固まる**
+ (実測 1.43 秒)。プロンプトを出す前にそれをやると、音が鳴り終わって
+からプロンプトが出ることになる。
+
+`make-thread' でも逃げられない。spawn 自体は 0.1 ms で返るが、
+再生はグローバルロックを握ったまま走るので、メインスレッドが入力を
+待った瞬間にそこで止まる (実測: スレッドを起こした直後の
+`sleep-for' 0.3 が 1.40 秒かかった)。押したキーは失われないが、
+1.3 秒のあいだ反応が返らない。
+
+そのため子プロセスに投げる。Windows は powershell の SoundPlayer で
+起動に約 0.6 秒かかるが、待つのは向こうなのでこちらは止まらない。
+再生プログラムが 1 つも無い環境でだけ同期再生に落ちる。"
+  (let ((proc
+         (cond
+          ((eq system-type 'windows-nt)
+           ;; -Command の引数は `default-process-coding-system' の cdr
+           ;; (Windows では cp932) で encode されるので、cp932 にある
+           ;; 綴りならそのまま渡る。パスの区切りは \\ に直し、単引用符は
+           ;; PowerShell の流儀で 2 つ重ねて escape する。
+           (start-process
+            "claude-sound" nil "powershell.exe"
+            "-NoProfile" "-NonInteractive" "-Command"
+            (format "(New-Object Media.SoundPlayer '%s').PlaySync()"
+                    (replace-regexp-in-string
+                     "'" "''" (subst-char-in-string ?/ ?\\ file)))))
+          ((executable-find "afplay")
+           (start-process "claude-sound" nil "afplay" file))
+          ((executable-find "paplay")
+           (start-process "claude-sound" nil "paplay" file))
+          ((executable-find "aplay")
+           (start-process "claude-sound" nil "aplay" "-q" file))
+          (t (play-sound-file file) nil))))
+    (when (processp proc)
+      ;; 鳴らしている途中で Emacs を終われても困らない。
+      (set-process-query-on-exit-flag proc nil))
+    proc))
+
+(defun my:claude--notify-input-wait ()
+  "これからミニバッファで入力を待つことを音で知らせる。
+
+呼ぶのは許可プロンプト (`my:claude--ask-permission') と
+AskUserQuestion (`my:claude--read-answer') の直前だけ。
+鳴らせなかったこと自体で処理を止めない (聞きそびれるだけで、
+プロンプトは出る)。"
+  (when my:claude-notify-sound
+    (let ((file (expand-file-name my:claude-notify-sound)))
+      (if (not (file-readable-p file))
+          (message "claude: 通知音が読めない: %s" file)
+        (condition-case err
+            (my:claude--play-sound file)
+          (error (message "claude: 通知音を鳴らせない: %s"
+                          (error-message-string err))))))))
+
+;;; --------------------------------------------------
 ;;; 許可プロンプト
 ;;; --------------------------------------------------
 
@@ -2321,6 +2407,7 @@ JSON の配列はベクタで来るのでリストに直す。"
          ;; ミニバッファが既に開いていることがある。
          (enable-recursive-minibuffers t)
          (ans ""))
+    (my:claude--notify-input-wait)
     (while (string-empty-p ans)
       (setq ans
             (string-trim
@@ -2385,6 +2472,9 @@ JSON の配列はベクタで来るのでリストに直す。"
                          'my:claude-meta-face)
       (my:claude--respond-allow session rid input))
      (t
+      ;; 鳴らすのはループの外で 1 回。`v' (入力を全部見る) で聞き直す
+      ;; ときは既にこちらを見ているので、鳴らす意味が無い。
+      (my:claude--notify-input-wait)
       (let (done)
         (while (not done)
           (pcase (car (read-multiple-choice
