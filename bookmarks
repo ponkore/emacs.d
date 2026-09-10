@@ -2,12 +2,18 @@
 ;;; This format is meant to be slightly human-readable;
 ;;; nevertheless, you probably don't want to edit it.
 ;;; -*- End Of Bookmark File Format Version Stamp -*-
-(("Downloads"
-  (filename . "~/Downloads/")
-  (front-context-string . "activereportsnet")
-  (rear-context-string . "  0 08-24 16:58 ")
-  (position . 181)
-  (last-modified 27296 61335 866527 700000))
+(("RINSETSU"
+  (filename . "~/Projects/nel/RINSETSU/")
+  (front-context-string)
+  (rear-context-string . "ス_template.xlsx\n")
+  (position . 965)
+  (last-modified 27297 28276 161462 0))
+("Downloads"
+ (filename . "~/Downloads/")
+ (front-context-string . "activereportsnet")
+ (rear-context-string . "  0 08-24 16:58 ")
+ (position . 181)
+ (last-modified 27296 61335 866527 700000))
 ("Projects"
  (filename . "~/Projects/")
  (front-context-string . "AndroidStudio\n  ")
