@@ -40,6 +40,13 @@ Windows（主）、macOS、Linux 向けの個人 Emacs 設定リポジトリ。E
   - `docs/hydra/` — hydra の棚卸しメモ
   - `docs/claude/` — Claude Code を Emacs から使う（`my-claude.el`）
 - `docs/_archived/` — 役目を終えた移行スクリプトと旧設定（履歴として保存）
+- `etc/` — 設定から使う添え物。文字を目で選んでコピーするための一覧と、
+  その生成スクリプト（`M-x` で作り直せる）
+  - `emoji-sample.org` / `make-emoji-sample.el` — Unicode の emoji-test.txt から。
+    肌の色付きは落としてある
+  - `nerd-font-sample.org` / `make-nerd-font-sample.el` — starship で使っている
+    記号（設定と `starship print-config` の両方）と、Nerd Fonts のコードチャート。
+    **グリフの有無を実フォントに聞くので GUI で作ること**
 - `tmp/` — 作業用の捨て場。`.gitkeep` 以外は git 管理外
 - `docs/_archived/archive-init.org` — Org 方式だった頃の設定（履歴として保存）
 - `docs/_archived/extract.el`, `docs/_archived/verify.el`,
@@ -1015,7 +1022,9 @@ Windows の Emacs には PTY が無いので claude の対話 TUI は動かな�
 続きに挿さるので、**逐次表示の行が詰め物で分断されない**。
 
 **区切りの側に改行を足して済ませてはいけない**（`my:claude-prompt-string`
-を `"\n──…"` にする手）。応答が改行で終わったときに空行が 2 つ並ぶ。
+を `"\n 🤖 …"` にする手）。応答が改行で終わったときに空行が 2 つ並ぶ。
+なお**末尾**の改行は `my:claude--setup-input-area` が三角のあとに自分で
+足すので、こちらに書く必要は無い（書いてあっても落とす）。
 
 batch 実測（同じプローブを修正前後で流し、区切りの先頭で `bolp`）:
 
@@ -1068,15 +1077,94 @@ batch 実測（同じプローブを修正前後で流し、区切りの先頭�
 **既に打ってある文字は直らない。** プロパティは挿入時に決まるので、
 `rear-nonsticky` を直しても遡及しない。検証するときは打ち直すこと。
 
-#### 区切りは帯にする（`:extend t`）
+#### 区切りは Powerline で閉じる（2026-09-11）
 
-`my:claude-prompt-face` は背景（`dark slate blue`）と前景
-（`light steel blue`）を持ち、**`:extend t`** で行頭からウィンドウ右端まで
-帯になる。Emacs 27 以降、`:extend` が無いと**背景が行末の文字までで切れる**。
-区切りの文字列は末尾の改行まで `font-lock-face` が載っているので、
-`:extend` を立てるだけで帯になる。
+区切りは 4 つの部分でできている（`my:claude--setup-input-area`）。
+
+| | | face |
+|---|---|---|
+| `my:claude-prompt-begin-string` | 左半円 U+E0B6 | `my:claude--prompt-edge-face`（前景だけ。**背景は地のまま**） |
+| `my:claude-prompt-string` | ` 🤖 (C-c C-c 送信 / …) ` | `my:claude-prompt-face`（背景 `dark slate blue` / 前景 `light steel blue`） |
+| `my:claude-prompt-end-string` | 右半円 U+E0B4 | `my:claude--prompt-edge-face` |
+| 改行 | | **無し** |
+
+**`:extend` は nil**。以前は `:extend t` で行頭からウィンドウ右端まで
+帯にしていたが、それでは Powerline の端を置く先が無くなる。帯は文字の
+両端で切り、その外を半円で閉じて、残りは塗らない。
+
+**記号の前景は `face-attribute` で帯の背景から引く**
+（`my:claude--prompt-edge-face`）。同じ色を 2 か所に書くと、片方だけ
+変えたときに継ぎ目が壊れて気づけない。
+
+**改行に face を載せないこと。** `:extend` が nil なので帯が伸びることは
+無いが、載せると記号の色が改行にも及ぶ。
+
+U+E0B4 / U+E0B6 は私用領域なので **Nerd Font が要る**（`fonts/NFM.ttf` =
+`Symbols Nerd Font Mono`。`my-appearance.el` が `#xe000-#xf8ff` をそこへ
+回している）。無い環境では両方を空文字列にすれば、帯が文字の端で切れる
+だけになる。記号は `etc/nerd-font-sample.org` の「Powerline」の節にある。
+
+##### 【重要】記号の高さは行に合わせて動的に決める
+
+**放っておくと記号の上に隙間ができる。** 行の高さは行内でいちばん背の
+高いフォントが決め（ascent の最大 + descent の最大）、グリフはベース
+ラインに揃うので、記号の ascent が行の ascent より小さいとその差が
+上に残る。GUI 実測（15px）:
+
+| フォント | ascent | descent | 高さ |
+|---|---|---|---|
+| Segoe UI Emoji（🤖） | **16** | **4** | **20** ← 行を決めている |
+| HackGen（帯の文字） | 14 | 3 | 17 |
+| Symbols Nerd Font Mono（記号） | 12 | 3 | **15** ← 4px 足りない |
+
+Nerd Font は **ピクセルサイズと ascent + descent が一致する**（実測で
+15→15 / 17→17 / 20→20）ので、必要な高さのサイズで開けば行に収まる。
+20px なら ascent 16 / descent 4 で絵文字と完全に一致する。
+`my:claude--prompt-edge-height` が `my:claude-prompt-string` の全文字を
+`char-displayable-p` で引いて最大の高さを求め、`:height` の倍率
+（実測で 20/15 = 1.333）を返す。
+
+**固定の倍率にしない。** 行の高さを決めるのは区切りの文言の中でいちばん
+背の高い文字なので、🤖 を外すだけで 20px から 17px に変わる。書き換える
+たびに測り直すのは現実的でない。
+
+GUI 実測（区切りを組み立てて各部分を観測）:
+
+| | |
+|---|---|
+| 先頭 / 末尾の文字 | **U+E0B6** / **U+E0B4** |
+| 両端の face | `(:foreground "dark slate blue" :height 1.333)` |
+| 帯の最大の高さ / 記号の素の高さ | **20px** / **15px** |
+| 改行のプロパティ | `read-only` / `keymap` / `front-sticky` / `rear-nonsticky` のみ（**`font-lock-face` 無し**） |
+| `my:claude-prompt-face` の `:extend` | **nil** |
+| 入力エリアに打った文字 | 打てる。**プロパティは 1 つも継承しない** |
 
 背景を敷く以上、前景も指定しないといけない（`shadow` の灰色では読めない）。
+
+##### 【重要】私用領域の文字はソースに直接書かない
+
+`my:claude-prompt-begin-string` / `-end-string` の値は `""` の
+エスケープで書いてある。**PUA の文字は経路によっては黙って落ちる**
+（この設定を書いたときに実際に落ちた）。CLAUDE.md 側も同じ理由で
+`U+E0B6` と書き、生の文字は置かない。
+
+**どの記号を指しているかは、Emacs のバッファから読むのが確実。**
+会話バッファを走査して PUA のコードポイントを数えれば分かる。
+
+```elisp
+(when (or (<= #xE000 c #xF8FF) (<= #xF0000 c #xF1FFF)) ...)
+```
+
+##### 【重要】検証で `string-pixel-width` に read-only な文字列を渡さない
+
+`buffer-substring` の戻り値には `read-only` プロパティが載っている。
+`string-pixel-width` は**中で作業バッファに `insert` する**ので、それを
+そのまま渡すと **`Text is read-only` で落ちる**。
+
+`condition-case` で `insert` を囲んでも捕まらない（落ちているのは幅を
+測るところで、`insert` ではない）ので、**入力できないのだと誤診する**。
+実際に一度そう読んだ。`buffer-substring-no-properties` で渡すこと。
+face は色しか持たないので幅は変わらない。
 
 #### font-lock は入力エリアだけに効かせる
 

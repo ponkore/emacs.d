@@ -226,11 +226,19 @@ nil にするとブロックが確定してから一度に出る (段階 3 ま�
   :type 'number)
 
 (defcustom my:claude-prompt-string
-  "── 入力 ─ C-c C-c 送信 / C-c a k 中断 / C-c C-k 破棄 / M-p 履歴 / M-v 画像\n"
-  "確定した会話と入力エリアを分ける区切り。
+  " 🤖 (C-c C-c 送信 / C-c a k 中断 / C-c C-k 破棄 / M-p 履歴 / M-v 画像) "
+  "確定した会話と入力エリアを分ける区切り。**帯になる部分だけ**を書く。
 
-**必ず改行で終えること。** 入力エリアはこの直後から始まるので、
-改行が無いと区切りの行の続きに書くことになる。
+ここに `my:claude-prompt-face' が載って帯になり、右端に
+`my:claude-prompt-end-string' (Powerline の ) が付いて閉じる。
+**行末までは塗らない** (`my:claude-prompt-face' の `:extend' は nil)。
+
+**末尾の改行は要らない。** `my:claude--setup-input-area' が終端記号の
+あとに自分で 1 つ足す (書いてあっても落とすので、付けても壊れない)。
+入力エリアはその改行の直後から始まる。
+
+前後を空白で囲ってあるのは帯の内側の余白。文字が帯の縁や
+Powerline の三角に接すると詰まって見える。
 
 **行頭から始まることは `my:claude--pad-before-prompt' が保証する。**
 この文字列の側に改行を足してはいけない (応答が改行で終わったときに
@@ -242,6 +250,32 @@ nil にするとブロックが確定してから一度に出る (段階 3 ま�
 
 この文字列自体も read-only になる。ここに案内を書いてあるのは、
 ヘッダ行がセッションの状態表示で埋まっているため。"
+  :type 'string)
+
+(defcustom my:claude-prompt-begin-string ""
+  "区切りの帯を開く記号。空文字列なら付けない。
+
+既定は Powerline の左半円 (U+E0B6)。閉じるほうは
+`my:claude-prompt-end-string' (U+E0B4 の右半円)。**前景に帯の背景色を
+敷いて背景は地のまま**にすることで、帯の両端が丸く閉じて見える
+ (`my:claude--prompt-edge-face')。starship のプロンプトが色の変わり目に
+使っているのと同じ手。
+
+**Nerd Font が要る。** U+E0B4 / U+E0B6 は私用領域なので、グリフを持つ
+フォントが無いと豆腐になる。このリポジトリでは `fonts/NFM.ttf'
+ (Symbols Nerd Font Mono) を OS にインストールしてあり、
+`my-appearance.el' が #xe000-#xf8ff をそこへ回している。無い環境では
+両方を空文字列にすれば、帯が文字の端で切れるだけになる。
+
+**ソースには文字ではなく `\\ue0b6' と書く。** 私用領域の文字は経路に
+よっては落ちる (実際、この設定を書くときに 1 度落ちた)。記号の一覧は
+`etc/nerd-font-sample.org' の「Powerline」の節。"
+  :type 'string)
+
+(defcustom my:claude-prompt-end-string ""
+  "区切りの帯を閉じる記号。空文字列なら付けない。
+既定は Powerline の右半円 (U+E0B4)。詳しくは
+`my:claude-prompt-begin-string' を参照。"
   :type 'string)
 
 (defcustom my:claude-image-max-bytes (* 3500 1024)
@@ -420,13 +454,16 @@ Windows の `play-sound-file' は WAV しか鳴らせない。"
 他の列と同じ。")
 
 (defface my:claude-prompt-face
-  '((t :background "dark slate blue" :foreground "light steel blue" :extend t))
+  '((t :background "dark slate blue" :foreground "light steel blue"))
   "確定した会話と入力エリアを分ける区切り (`my:claude-prompt-string')。
 
-**`:extend t' が要る。** Emacs 27 以降、これが無いと背景が行末の文字までで
-切れ、ウィンドウの右端まで伸びない。区切りの文字列は末尾の改行まで
-`font-lock-face' が載っている (`my:claude--setup-input-area') ので、
-`:extend' を立てるだけで行頭から右端までの帯になる。
+**`:extend' は立てない。** 立てると背景がウィンドウの右端まで伸びるが、
+それでは Powerline の終端 (`my:claude-prompt-end-string') を置く先が
+無くなる。帯は文字の右端で切り、その先を三角で閉じて、残りは地のまま。
+
+`:extend' が nil のとき背景が行末の文字までで切れるのは Emacs 27 以降の
+仕様。改行には face を載せていない (`my:claude--setup-input-area') ので、
+帯が改行のぶんだけ余計に伸びることもない。
 
 前景も指定する。以前は `:inherit shadow' で前景だけを持たせ背景をテーマに
 任せていたが、背景を敷くと `shadow' の灰色では読めない。")
@@ -1137,8 +1174,69 @@ insertion-type は t だが、挿入の間だけ nil に倒すのでマーカー
               (set-marker-insertion-type m t))
             (my:claude--protect pos (1+ pos)))))))))
 
+(defun my:claude--font-height (char)
+  "CHAR を実際に描くフォントの ascent + descent。分からなければ nil。
+
+`char-displayable-p' はそのフレームで実際に使われるフォントオブジェクトを
+返すので、フォールバックまで込みの答えになる (🤖 なら Segoe UI Emoji)。"
+  (let* ((font (char-displayable-p char))
+         (info (and (fontp font) (query-font font))))
+    (and info (+ (aref info 4) (aref info 5)))))
+
+(defun my:claude--prompt-edge-height ()
+  "帯の端の記号を行の高さに合わせる `:height' の倍率。要らなければ nil。
+
+**行の高さは行内でいちばん背の高いフォントが決める** (ascent の最大と
+descent の最大の和)。グリフはベースラインに揃うので、記号の ascent が
+行の ascent より小さいと **上に隙間**ができる。GUI 実測 (15px):
+
+  Segoe UI Emoji (🤖)           ascent 16 / descent 4 = 20  ← 行を決める
+  HackGen (帯の文字)            ascent 14 / descent 3 = 17
+  Symbols Nerd Font Mono (記号) ascent 12 / descent 3 = 15  ← 4px 足りない
+
+Nerd Font は **ピクセルサイズと ascent + descent が一致する** (実測で
+15→15 / 17→17 / 20→20) ので、必要な高さのサイズで開けば行に収まる。
+20px では ascent 16 / descent 4 になり、絵文字と完全に一致した。
+
+**固定の倍率にしない。** 行の高さを決めるのは `my:claude-prompt-string'
+の中でいちばん背の高い文字で、文言を書き換えれば変わる (🤖 を外すと
+20px から 17px に下がる)。そのたびに測り直すのは現実的でない。"
+  (let* ((sym (concat my:claude-prompt-begin-string my:claude-prompt-end-string))
+         (edge (and (> (length sym) 0) (my:claude--font-height (aref sym 0))))
+         (band 0))
+    (dolist (c (string-to-list my:claude-prompt-string))
+      (let ((h (my:claude--font-height c)))
+        (when h (setq band (max band h)))))
+    ;; 記号のほうが大きいなら行はそちらで決まるので、縮める必要は無い。
+    (when (and edge (> edge 0) (> band edge))
+      (/ (float band) edge))))
+
+(defun my:claude--prompt-edge-face ()
+  "帯の端の記号に使う face を返す (`my:claude-prompt-begin-string' など)。
+
+**前景は `my:claude-prompt-face' の背景から引く。** Powerline の区切りは
+「隣の帯の背景色で記号を描き、自分の背景は地のまま」にすることで帯が
+そこで閉じて見える。色を 2 か所に書くと、片方だけ変えたときに継ぎ目が
+壊れて気づけないので、実際の値を見て組み立てる。
+
+高さも同じ理由で実測から決める (`my:claude--prompt-edge-height')。"
+  (let ((height (my:claude--prompt-edge-height)))
+    (append (list :foreground
+                  (face-attribute 'my:claude-prompt-face :background nil t))
+            (and height (list :height height)))))
+
 (defun my:claude--setup-input-area ()
   "バッファの末尾に区切りを置き、その後ろを入力エリアにする。
+
+区切りは 4 つの部分でできている。
+
+  1. `my:claude-prompt-begin-string'  帯を開く半円 (前景だけ)
+  2. `my:claude-prompt-string'        帯 (`my:claude-prompt-face')
+  3. `my:claude-prompt-end-string'    帯を閉じる半円 (前景だけ)
+  4. 改行                             face を持たない
+
+**改行に face を載せないこと。** `:extend' は nil なので帯が伸びる
+ことは無いが、載せると記号の色が改行にも及ぶ。
 
 マーカーの insertion-type が肝 (`my:claude--output-marker' の説明を参照)。"
   (let ((inhibit-read-only t)
@@ -1146,9 +1244,18 @@ insertion-type は t だが、挿入の間だけ nil に倒すのでマーカー
     (save-excursion
       (goto-char (point-max))
       (unless (bolp) (insert "\n"))
-      (let ((beg (point)))
-        (insert (propertize my:claude-prompt-string
+      (let ((beg (point))
+            ;; 両端で同じものを使う。高さの計算が入るので 1 回で済ませる。
+            (edge (my:claude--prompt-edge-face)))
+        (when (and (stringp my:claude-prompt-begin-string)
+                   (not (string-empty-p my:claude-prompt-begin-string)))
+          (insert (propertize my:claude-prompt-begin-string 'font-lock-face edge)))
+        (insert (propertize (string-remove-suffix "\n" my:claude-prompt-string)
                             'font-lock-face 'my:claude-prompt-face))
+        (when (and (stringp my:claude-prompt-end-string)
+                   (not (string-empty-p my:claude-prompt-end-string)))
+          (insert (propertize my:claude-prompt-end-string 'font-lock-face edge)))
+        (insert "\n")
         (let ((end (point)))
           (my:claude--protect beg end)
           ;; 【重要】末尾の 1 文字だけ、後ろへの挿入を許し、何も継承させない。
