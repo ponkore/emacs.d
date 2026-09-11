@@ -118,7 +118,13 @@
         (set-fontset-font t 'symbol (font-spec :family "Segoe UI Emoji") nil 'append)
         (set-fontset-font t '(#x1f300 . #x1f9ff) "Segoe UI Emoji" nil 'append)
         (set-fontset-font t '(#x1fa70 . #x1fbff) "Segoe UI Emoji" nil 'append)
-        (set-fontset-font t '(#x1f900 . #x1f9e0) "Segoe UI Emoji" nil 'append))
+        (set-fontset-font t '(#x1f900 . #x1f9e0) "Segoe UI Emoji" nil 'append)
+        ;; U+FFFD (置換文字)。fontset-default は clearlyu を割り当てているが
+        ;; Windows には無く、16 進の箱になっていた。外部プロセスの出力を
+        ;; UTF-8 として読めなかったときに出る文字なので、claude のツール出力
+        ;; (cp932 で印字する curl.exe など) でよく見かける。手元で持っている
+        ;; のは Segoe UI と Arial Unicode MS だけ (実測)。
+        (set-fontset-font t '(#xfffd . #xfffd) (font-spec :family "Segoe UI") nil 'prepend))
       (setq face-font-rescale-alist `((,font-name . 1.0)))))
 
   (defun setup-font ()
