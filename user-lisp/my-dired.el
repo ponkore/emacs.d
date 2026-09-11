@@ -224,6 +224,15 @@ markdown-mode の C-c C-c o (`markdown-open') と同じ経路 —
           (with-current-buffer buffer (save-buffer))))
       (my:markdown-open-external file)))
 
+  (defun my:dired-open-directory-externally ()
+    "dired で見ているディレクトリをエクスプローラー (macOS は Finder) で開く。
+
+`i' で挿入したサブディレクトリの中にいるときはそのサブディレクトリを開く。
+`my:open-file-externally' はディレクトリも OS の関連付けに渡すので、
+Windows は ShellExecute の open、macOS は open(1) がそのまま効く。"
+    (interactive)
+    (my:open-file-externally (dired-current-directory)))
+
   ;; --- リネーム / コピー先の入力で RET が候補に化けないようにする ---
   ;;
   ;; `vertico-preselect' は既定 `directory' で、ファイル名の部分を打っている
@@ -319,6 +328,8 @@ vertico は `minibuffer-setup-hook' で `vertico-map' を composed keymap の
    ("C-c x d" . my:dired-exceldiff-marked)
    ;; markdown を MarkText で開く (markdown-mode の C-c C-c o 相当)。
    ("C-c m" . my:dired-markdown-open)
+   ;; 見ているディレクトリをエクスプローラー / Finder で開く。
+   ("C-c e" . my:dired-open-directory-externally)
    ("." . hydra-dired/body))
   :custom
   ;;
@@ -374,6 +385,7 @@ _C_opy      view _o_ther   _U_nmark all   un_Z_ip   _W_ get fullpath
 _D_elete    open _f_ile    _u_nmark       _s_ort    _g_ revert buffer
 _R_ename    ch_M_od        _t_oggle       _e_dit    _[_ hide detail     _._togggle hydra
 excel diff: _x_ 前のリビジョンと   _X_ マークした 2 つ   markdown: _O_ MarkText で開く
+_E_xplorer / Finder で開く
 "
     ("[" dired-hide-details-mode)
     ("+" dired-create-directory)
@@ -405,6 +417,7 @@ excel diff: _x_ 前のリビジョンと   _X_ マークした 2 つ   markdown:
     ("x" my:dired-exceldiff-vcs :exit t)
     ("X" my:dired-exceldiff-marked :exit t)
     ("O" my:dired-markdown-open :exit t)
+    ("E" my:dired-open-directory-externally :exit t)
     ("z" dired-zip-files)
     ("Z" dired-do-compress)
                ;; ("F" my:finder-app)
