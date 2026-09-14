@@ -323,6 +323,34 @@ This affects both the echo area and the `*Messages*' buffer."
   ;; leaf の :global-minor-mode 相当
   :config (global-auto-revert-mode 1))
 
+;;; [3] editorconfig
+
+;; Emacs 30 で本体に入った (:straight は付けない。org / transient と同じ扱い)。
+;; .editorconfig があるディレクトリでだけ効くので、実質の効き先は
+;; RINSETSU/AdjacentAreaTool/AdjacentAreaTool/ (C#) と、php-mode の repo や
+;; node_modules など他所のリポジトリ。範囲を絞る defcustom は**同梱版には無い**
+;; (MELPA 版の editorconfig-exclude-regexps は本体に入るときに落ちた)。
+;;
+;; Emacs 30 以降はフックを 2 つ足すだけ (29 以前の find-file-noselect への
+;; advice はこの経路では使わない)。
+;;   hack-dir-local-get-variables-functions … ディレクトリローカル変数として
+;;     適用する。add-hook の末尾に足すので .dir-locals.el のほうが優先される
+;;   auto-coding-functions … end_of_line / charset
+;; dir-local はメジャーモードのフックより後に適用されるので、my:*-mode-setup が
+;; setq したものには勝つ。効くのはコアプロパティだけで、.NET の
+;; dotnet_* / csharp_* (Roslyn 用) は読み飛ばされる。
+;;
+;; 【重要】:custom に editorconfig-mode を書いてはいけない。
+;; customize-set-variable はパッケージ未ロードだと変数に t を入れるだけで
+;; モード関数を呼ばない (corfu で踏んだのと同じ罠)。:demand t + :config で呼ぶ。
+;;
+;; コストの実測: ロードが 9〜25 ms (ファイルキャッシュが冷えていると 80 ms)、
+;; .editorconfig を引くのがファイルあたり 0.13 ms (該当なしなら 0.087 ms)。
+(use-package editorconfig
+  :demand t
+  :config
+  (editorconfig-mode 1))
+
 ;;; [3] editor global configuration
 
 ;; 疑似パッケージなので use-package の名前は emacs にする。

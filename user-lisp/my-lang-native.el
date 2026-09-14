@@ -73,6 +73,14 @@
     "csharp-ts-mode 用のセットアップ。"
     (turn-on-auto-revert-mode)
     (setq indent-tabs-mode nil)
+    ;; .editorconfig の indent_size をこのモードのオフセットに効かせる
+    ;; (my-editor.el の editorconfig)。Emacs 31 では csharp-ts-mode が
+    ;; csharp-mode の派生なので、放っておくと editorconfig-indentation-alist の
+    ;; (csharp-mode c-basic-offset) に当たり、**ts 版が見ない c-basic-offset**
+    ;; に入って何も変わらない。Emacs 31 はこの変数をモード側がバッファローカルに
+    ;; 設定する前提で、js.el と c-ts-mode.el はやっているが csharp-mode.el は
+    ;; まだやっていない。
+    (setq-local editorconfig-indent-size-vars '(csharp-ts-indent-offset))
     (setq comment-column 40)
     (yas-minor-mode-on)
     (eglot-ensure))
