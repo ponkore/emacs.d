@@ -56,6 +56,15 @@
   :straight t
   :defer t)
 
+;;; [3] XML (MSBuild のプロジェクトファイル)
+
+;; .xml / .xsl / .svg は Emacs 既定で nxml-mode になる (auto-mode-alist の
+;; 登録は xml-mode 名だが、nxml-mode.el が (defalias 'xml-mode 'nxml-mode)
+;; しているので実体は nxml-mode)。MSBuild は拡張子が独自なので登録が無い。
+;; 31.1 に入っているのは新形式のソリューション .slnx だけ。
+(use-package nxml-mode
+  :mode ("\\.csproj\\'" . nxml-mode))
+
 ;;; [3] xxx
 
 (provide 'my-fileformat)
