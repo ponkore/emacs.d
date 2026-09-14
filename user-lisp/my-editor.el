@@ -465,20 +465,71 @@ This affects both the echo area and the `*Messages*' buffer."
   :config
   (which-key-mode))
 
-;;; [3] 行頭への移動(C-a)の改善
+;;; [3] 行頭 / 行末への移動 (C-a / C-e) の改善
 
 ;; 疑似パッケージなので use-package の名前は emacs にする。
 (use-package emacs
   ;; http://qiita.com/ShingoFukuyama/items/62269c4904ca085f9149
   :bind
-  ("C-a" . my:goto-line-beginning-or-indent)
+  (("C-a" . my:goto-line-beginning-or-indent)
+   ("C-e" . my:end-of-visual-line))
   :init
   (defun my:goto-line-beginning-or-indent (&optional $position)
     (interactive)
     (or $position (setq $position (point)))
     (let (($starting-position (progn (back-to-indentation) (point))))
       (if (eq $starting-position $position)
-          (move-beginning-of-line 1)))))
+          (move-beginning-of-line 1))))
+
+  ;; C-e は論理行の末尾ではなく「見た目の行末」= ウィンドウの右端へ動かす。
+  ;; line-move-visual は既定の t で C-n / C-p が視覚行単位に動くので、C-e も
+  ;; そちらに揃える。end-of-visual-line の中身は vertical-motion に
+  ;; x = window-width を渡すだけ。
+  ;;
+  ;; ウィンドウ幅に収まる行では従来どおり行末 (eolp が t) に着く。違いが出るのは
+  ;; 幅を超える行だけで、そこでは右端の文字の上で止まる。**truncate-lines が t
+  ;; でも同じ** (幅 144 のウィンドウで 603 桁の行を実測: 折り返しの有無に
+  ;; よらず 143 桁)。
+  ;;
+  ;; 【重要】素の end-of-visual-line は 2 つの場面で行き過ぎる。どちらも
+  ;; 「行末に着いたはずなのにカーソルが右端の文字の上にいない」形で表面化する。
+  ;;
+  ;; 1. 折り返した行。word-wrap が nil だと**次の視覚行の先頭**に着くので、
+  ;;    ブロックカーソルが次の行の 1 桁目に出る。実測 (幅 144): point は
+  ;;    145 で posn-at-point は row 1 col 0、その 1 つ手前の文字が row 0
+  ;;    col 143。1 文字戻せば右端の文字の上に来る。
+  ;;    word-wrap が t のときは折り返しの空白の上 (row 0) に着くので戻さない。
+  ;;    truncate-lines が t のときは次の視覚行が無いので「行末でなければ
+  ;;    画面の 1 つ外側」で判定する。素のままだと col 144 (画面の外) に着く。
+  ;;    なお折り返さない長い行では、右端の文字に載せても hscroll-margin と
+  ;;    hscroll-step の既定により横スクロールは起きる (実測で 0 -> 71)。
+  ;;    行末まで飛ぶよりはましという程度。
+  ;; 2. 畳んだ領域。org の畳んだ見出しでは改行ごと不可視になっていて見出しと
+  ;;    配下が 1 視覚行なので、見出しの末尾ではなく**サブツリーの末尾**に着く。
+  ;;    そこで打つと畳まれた中身に紛れ込む。org は move-end-of-line を
+  ;;    org-end-of-line に remap して避けているが、C-e を別のコマンドに
+  ;;    張り替えると remap は経由しない。
+  ;;
+  ;; 不可視テキストが無ければ視覚行が論理行を越えることはないので、2 は
+  ;; 論理行の末尾を越えたときだけ引き戻せばよい。1 は「視覚行の先頭に着いた」
+  ;; ことで判定する (beginning-of-visual-line が動かない = そこが先頭)。
+  ;; 桁を自分で数えないのは、display-line-numbers などで実際に使える幅が
+  ;; window-width より狭くなるため。着いた場所で判断する。
+  (defun my:end-of-visual-line ()
+    "視覚行の末尾 (折り返していればウィンドウの右端の文字) へ移動する。
+折り返し位置で次の行の先頭に着いてしまう場合と、畳まれた領域を
+飛び越える場合は引き戻す。"
+    (interactive "^")
+    (let ((start (point))
+          (eol (line-end-position)))
+      (end-of-visual-line)
+      (cond
+       ((> (point) eol) (goto-char eol))
+       ((<= (point) start) nil)
+       ((or (and (not (bolp))
+                 (= (point) (save-excursion (beginning-of-visual-line) (point))))
+            (and truncate-lines (not (eolp))))
+        (backward-char 1))))))
 
 (provide 'my-editor)
 ;;; my-editor.el ends here

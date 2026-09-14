@@ -475,7 +475,13 @@ overlay があること自体は「畳まれている」ことを意味しない
   :mode ("\\.\\(markdown\\|md\\|mkd\\)\\'" . gfm-mode)
   :preface
   (defun my:setup-markdown-mode ()
-    (setq line-move-visual nil)
+    ;; line-move-visual は触らない (Emacs 既定の t のまま)。折り返した長い行の
+    ;; 中で C-n / C-p が「見た目の下・上」へ動く。
+    ;;
+    ;; 【重要】ここに (setq line-move-visual nil) を書いてはいけない。この変数は
+    ;; 自動バッファローカルではない (local-variable-if-set-p が nil) ので、
+    ;; setq はグローバル値を潰す。.md を一度でも開くと、そのセッションの全バッファ
+    ;; で C-n が論理行移動になる。
     (setq truncate-lines nil)
     (electric-indent-local-mode -1))
 
