@@ -2249,13 +2249,14 @@ point が末尾から外れて自動スクロールが止まっていた**。"
   "tool_use の入力を 1 行にまとめる。"
   (let* ((input (alist-get 'input block))
          ;; AskUserQuestion だけは決まったキーを持たない。空のままだと
-         ;; 名前しか出ないので、最初の質問文を出す。
+         ;; 名前しか出ないので、見出しを出す。**質問文は出さない**
+         ;; (`my:claude--question-headers' を参照)。
          (questions (append (alist-get 'questions input) nil))
          (s (or (alist-get 'command input)
                 (alist-get 'file_path input)
                 (alist-get 'pattern input)
                 (alist-get 'description input)
-                (and questions (alist-get 'question (car questions)))
+                (and questions (my:claude--question-headers questions))
                 "")))
     (truncate-string-to-width (replace-regexp-in-string "\n" " " s) 100 nil nil "…")))
 
@@ -2477,17 +2478,41 @@ JSON の配列はベクタで来るのでリストに直す。"
             (cycle-sort-function . identity))
         (complete-with-action action labels str pred)))))
 
+(defun my:claude--question-line (q)
+  "質問 Q を \"QUESTION [HEADER]\" の 1 行にする。"
+  (let ((s (string-trim (or (alist-get 'question q) "")))
+        (h (alist-get 'header q)))
+    (concat s (if (and (stringp h) (not (string-empty-p h)))
+                  (format " [%s]" h) ""))))
+
+(defun my:claude--question-headers (questions)
+  "QUESTIONS の見出しを \"[H1] [H2]\" の 1 行にする。
+
+▶ 行 (`my:claude--tool-summary\') に出すのは**見出しだけ**。質問文を
+出すと `my:claude--show-question\' の `?\' 行と必ず 2 本並ぶ。しかも
+要約は 100 **桁**で切るので、日本語は 50 字で `…\' になる。全文が
+読めるのは `?\' 行だけなので、消すならこちらではなく ▶ 行の側。
+
+見出しは 12 文字以内なので切れない。`my:claude-answer-questions\' が
+nil のときや `can_use_tool\' が飛んで来ないときは `?\' 行が出ないが、
+それでもツール名だけよりは何を聞かれたか分かる。"
+  (mapconcat (lambda (q)
+               (let ((h (alist-get 'header q)))
+                 (if (and (stringp h) (not (string-empty-p h)))
+                     (format "[%s]" h)
+                   (string-trim (or (alist-get 'question q) "")))))
+             questions " "))
+
 (defun my:claude--show-question (session q)
   "質問 Q と選択肢を会話バッファに出す。
 
 説明は長いのでミニバッファの注釈だけでは読み切れない。聞く前にここへ
-出しておけば、選ぶときの材料になり、そのまま会話の記録にもなる。"
+出しておけば、選ぶときの材料になり、そのまま会話の記録にもなる。
+
+**質問文を出すのはここだけ。** ▶ 行には見出ししか出さない
+ (`my:claude--question-headers\')。"
   (my:claude--insert session
-                     (format "  ? %s%s\n"
-                             (or (alist-get 'question q) "")
-                             (let ((h (alist-get 'header q)))
-                               (if (and (stringp h) (not (string-empty-p h)))
-                                   (format " [%s]" h) "")))
+                     (format "  ? %s\n" (my:claude--question-line q))
                      'my:claude-tool-face)
   (let ((n 0))
     (dolist (o (my:claude--question-options q))
