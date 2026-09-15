@@ -1,845 +1,129 @@
+<!-- -*- gfm -*- -->
+
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with
+code in this repository.
 
-## 概要
+@README.md
 
-Windows（主）、macOS、Linux 向けの個人 Emacs 設定リポジトリ。Emacs 31.1 を対象とする。
+## この文書の役割
 
-以前は Org-mode のリテラルプログラミング形式（`my-config/init.org` を
-`org-babel-load-file` で展開）だったが、Org の恩恵が薄い割にコストが大きかったため
-素の Emacs Lisp に戻し、Emacs 31.1 で新設された `user-lisp/` に機能分割してある。
+3 つに分けてある。**同じことを 2 か所に書かない。**
 
-## エントリポイントとアーキテクチャ
-
-- `early-init.el` — `init.el` より前に読まれる。`init.el` では手遅れになる設定だけを置く
-  - `package-enable-at-startup` を `nil`（パッケージ管理は straight に一本化）
-  - 起動中の GC 抑制（`emacs-startup-hook` で通常値に戻す）
-  - `user-lisp-auto-scrape` を `nil`（後述）
-  - ツールバー等の非表示を `default-frame-alist` に前倒し（ちらつき回避）
-- `init.el` — ブートストラップと読み込み順の宣言のみ
-  1. straight.el のブートストラップ
-  2. 組み込みを使うパッケージの宣言（`org` / `transient` を `:type built-in`）
-  3. use-package の初期化（Emacs 同梱。キーワード順と挙動を調整する）
-  4. `site-lisp/` を `load-path` に追加
-  5. `(prepare-user-lisp ...)`
-  6. `custom.el` の読み込み
-  7. `user-lisp/` 各モジュールの `require`（順序は分割前の記述順のまま）
-- `user-lisp/` — 設定本体。23 モジュールに分割（下記）
-- `custom.el` — `customize` が自動生成するファイル
-- `site-lisp/` — パッケージマネージャで入手できないローカルベンダの Emacs Lisp
-- `gitd/` — magit の git 実行を肩代わりする常駐プロセス（Rust）。
-  ソースは管理下、`gitd/target/` は git 管理外で各マシンでビルドする（後述）
-- `ptyd/` — 疑似コンソール（ConPTY）を持って対話 TUI を動かすプロセス（Go）。
-  同じく、ソースは管理下で `ptyd/ptyd.exe` は git 管理外（`M-x my:pty-build`）
-- `docs/` — 設計メモ・計画・実測の記録（git 管理下）。
-  過去に `tmp/` に置いていたものは 2026-09-04 にここへ移した。
-  同日にテーマ別のサブディレクトリへ分けた
-  - `docs/refactoring/` — `.emacs.d` 以下のリファクタリング（Org からの移行、ベースライン計測）
-  - `docs/magit/` — magit の高速化と自動更新（`gitd/`、`my-magit-watch`）
-  - `docs/hydra/` — hydra の棚卸しメモ
-  - `docs/claude/` — Claude Code を Emacs から使う（`my-claude.el`）
-- `docs/_archived/` — 役目を終えた移行スクリプトと旧設定（履歴として保存）
-- `etc/` — 設定から使う添え物。文字を目で選んでコピーするための一覧と、
-  その生成スクリプト（`M-x` で作り直せる）
-  - `emoji-sample.org` / `make-emoji-sample.el` — Unicode の emoji-test.txt から。
-    肌の色付きは落としてある
-  - `nerd-font-sample.org` / `make-nerd-font-sample.el` — starship で使っている
-    記号（設定と `starship print-config` の両方）と、Nerd Fonts のコードチャート。
-    **グリフの有無を実フォントに聞くので GUI で作ること**
-- `tmp/` — 作業用の捨て場。`.gitkeep` 以外は git 管理外
-- `docs/_archived/archive-init.org` — Org 方式だった頃の設定（履歴として保存）
-- `docs/_archived/extract.el`, `docs/_archived/verify.el`,
-  `docs/_archived/split.py`, `docs/_archived/verify-split.el` —
-  Org からの抽出・分割に使った検証スクリプト（等価性の証跡）
-- `docs/_archived/snapshot.el` — 設定を読み込んだ Emacs の観測可能な状態
-  （defcustom 全変数、全 `*-hook` / `*-functions`、全キーバインド、face の
-  `theme-face` / `defface` / 実効属性、ロード済み feature）を決定的な順序で
-  ダンプする。leaf → use-package 移行の等価性検証に使った。同一設定なら
-  2 回採取して差分 0 行になるので、書き換えの前後で diff すれば足りる
-
-  ```sh
-  emacs --batch -l early-init.el -l init.el -l docs/_archived/snapshot.el \
-        --eval '(my:snapshot-dump "before.txt")'
-  ```
-
-## `user-lisp/` の扱い（重要）
-
-Emacs 31.1 の `user-lisp/` は、既定では `package-activate-all` の直後・
-`init.el` の読み込み**前**に `prepare-user-lisp` が走り、配下を再帰的に
-バイトコンパイルして autoload を生成し `load-path` に追加する。
-
-しかしその時点では straight.el のブートストラップが済んでおらず、
-`use-package` も未初期化のため、モジュールが壊れた `.elc` にコンパイルされる。
-
-そのため以下のようにしている：
-
-- `early-init.el` で `user-lisp-auto-scrape` を `nil` にして自動実行を止める
-- `init.el` で straight と use-package を用意したあと `(prepare-user-lisp ...)` を明示的に呼ぶ
-- **バイトコンパイルはしない**（`prepare-user-lisp` の第 1 引数 JUST-ACTIVATE を `t`）。
-  コンパイルすると、パッケージ由来のマクロを `:init` / `:config` で使っている箇所が壊れる。
-  コンパイル時点では当該パッケージが未ロードでマクロが未定義のため、
-  関数呼び出しとしてコンパイルされてしまう。
-  実例: `doom-modeline-def-segment` が関数扱いになり、実行時に引数の
-  `my:buffer-encoding` が変数として評価されて void エラーになった。
-  `defhydra` や `define-clojure-indent` も同じ問題を持つ。
-
-モジュールを追加した場合は `init.el` の `require` 列に加える。
-
-### コンパイルしない根拠（2026-09-05 に測り直した）
-
-**壊れたのは「straight のブートストラップ前だから」であって、
-「コンパイルしたから」ではなかった。** バイトコンパイラは autoload された
-マクロなら自分でロードして展開するので、straight が autoload を生成した後に
-コンパイルすれば `defhydra` も `doom-modeline-def-segment` も
-`define-clojure-indent` も正しく展開される。
-
-全モジュールを `require` し終えた状態（= `init.el` の末尾と同じ）で
-`user-lisp/*.el` をコンパイルすると、残る警告は 22 件でその内訳は:
-
-```
-my-appearance.el   7  eglot-current-server, eglot--project-nickname, ...
-my-dired.el        5  dired-view-file-other-window, svn-status, ...
-my-lang-native.el  4  eglot-format-buffer, eglot-execute, ...
-my-text.el         4  markdown-insert-reference-link-dwim, md2html, ...
-my-magit-watch.el  1  magit--with-temp-process-buffer
-my-shell.el        1  exec-path-from-shell-initialize
-```
-
-**すべて素の関数**（実行時に解決されるので無害）で、マクロは 1 件も無い。
-
-それでもコンパイルしないのは、**速くならないから**。`.elc` を作って
-3 回ずつ起動した実測:
-
-| | 1 | 2 | 3 | 平均 |
-|---|---|---|---|---|
-| `.elc` あり | 0.993 | 1.017 | 0.969 | **0.993 s** |
-| `.elc` なし | 1.008 | 0.996 | 0.980 | **0.995 s** |
-
-差はノイズ以下。**このビルドは native-comp が使えない**
-（`native-comp-available-p` が nil なので `prepare-user-lisp` の
-`native-compile-async` の分岐は死んでいる）ため、コンパイルしても
-byte-code 止まりで、起動の 1 秒はパッケージ本体のロードが大半を占める。
-
-得るものが 0 ms である一方、失うものは具体的にある。
-
-- `prepare-user-lisp` は `init.el:140`、`require` 列より**前**に走る。
-  組み込みの経路でコンパイルすると結局マクロが壊れる。
-  正しい `.elc` を得るには「全部ロードし終えてからコンパイル」が要るが、
-  それは**そのセッションでたまたまロードされていたパッケージ次第で
-  `.elc` の中身が変わる**ということでもある
-- **`load-prefer-newer` は既定 nil。** 古い `.elc` があれば新しい `.el` より
-  優先される。`prepare-user-lisp` は `byte-recompile-file file force 0` で
-  タイムスタンプを見るので起動時には追随するが、`C-M-x` で評価しながら
-  書く運用とは噛み合わない
-
-`site-lisp/` も同じ。唯一測れる差がある `eaw.el`（253 KB）でも
-ロードが 14.9 ms → 0.9 ms、起動全体の 1.4% でしかない。しかも
-`site-lisp/` は `user-lisp-directory` の外なので `prepare-user-lisp` の
-対象外で、`gitd/` / `ptyd/` と同じくマシンごとの手動ビルドが増える。
-
-コンパイル時チェックが欲しいだけなら `.elc` を残す必要は無い。
-lexical-binding の検証（後述）と同じく、一時ディレクトリにコピーして
-コンパイルし `*Compile-Log*` を読めばよい。
-
-## モジュール構成（`user-lisp/`）
-
-| モジュール | 内容 |
-|---|---|
-| `my-core` | 汎用ヘルパ（`my:pandoc-data-file`、`my:open-file-externally` など）、`s` |
-| `my-japanese` | 文字コード、cp932/UTF-8 変換テーブル、Windows IME（tr-ime）、migemo |
-| `my-appearance` | フォント、フレーム、modus-vivendi テーマ、doom-modeline、all-the-icons |
-| `my-completion` | vertico、consult、marginalia、orderless、corfu、cape |
-| `my-keybind` | グローバルキーバインド（`C-h` → `delete-backward-char`、`C-z` → `scroll-down`） |
-| `my-editor` | hydra、symbol-overlay、smartparens、whitespace、yasnippet、recentf、editorconfig ほか |
-| `my-dired` | dired、hydra-dired、dired-sidebar（`F8`。差分表示は my-vc の diff-hl）、dired-x の上書き対策、exceldiff / MarkText の起動 |
-| `my-text` | text-mode、org-mode、ox-pandoc、markdown、rst、adoc |
-| `my-lang-lisp` | Emacs Lisp、Clojure（cider）、Common Lisp（slime） |
-| `my-lang-python` | Python（python-ts-mode、pyvenv、py-isort、blacken） |
-| `my-lang-web` | PHP、JavaScript / TypeScript（js-ts-mode / typescript-ts-mode、web-mode、scss） |
-| `my-lang-native` | Rust、C++、C#、Go |
-| `my-lang-misc` | SQL、bat、Swift、Lua、VisualBasic |
-| `my-lsp` | eglot（組み込み、プレフィックス: `C-c l`）、flymake（`C-c !`） |
-| `my-fileformat` | yaml、diff、log4j、Dockerfile、vimrc、XML（`.csproj`） |
-| `my-project` | projectile（プレフィックス: `C-c p`） |
-| `my-vc` | magit、diff-hl（`C-c g` の hydra）、Windows の SVN 対応 |
-| `my-gitd` | magit の同期 git 実行を常駐プロセス（`gitd/`）に肩代わりさせる。Windows のみ |
-| `my-magit-watch` | ワークツリーを監視して magit バッファを自動更新。Windows のみ |
-| `my-shell` | exec-path-from-shell、Windows 用 shell 設定 |
-| `my-utils` | calendar、open-junk-file、grep/ripgrep、server（emacsclient 用） |
-| `my-claude` | Claude Code を stream-json で使う（プレフィクス: `C-c a`） |
-| `my-htnblog` | はてなブログ AtomPub API へ投稿する（`M-x htnblog`） |
-| `my-pty` | ConPTY 経由で対話 TUI を動かす（`ptyd/`）。Windows のみ |
-| `my-platform` | Windows / macOS 固有設定 |
-
-## LSP サーバ
-
-eglot が使う言語サーバは自分で入れる。2026-08 時点の導入状況:
-
-| 言語 | サーバ | 入れ方 |
+| | 読者 | 答える問い |
 |---|---|---|
-| TypeScript / JS | typescript-language-server 5.3.0 + **typescript 5.9.3** | `npm i -g typescript@5 typescript-language-server` |
-| PHP | intelephense 1.18.5 | `npm i -g intelephense` |
-| bash | bash-language-server 5.6.0 | `npm i -g bash-language-server` |
-| Rust | rust-analyzer 1.97.1 | `rustup component add rust-analyzer` |
-| Python | basedpyright 1.39.10 | `uv tool install basedpyright` |
-| Go | gopls 0.23.0 | `go install golang.org/x/tools/gopls@latest` |
+| [README.md](README.md) | 人 | 何ができる / どう入れる / どこに何がある |
+| **CLAUDE.md（これ）** | エージェント | **触るときに何を壊すな** |
+| [docs/](docs/README.md) | 掘る人 | なぜそうしたか / その根拠の数字 |
 
-### East Asian Ambiguous 幅 (site-lisp/eaw.el)
+**README.md は上で import してある。** モジュール構成・キーバインド・外部依存・
+セットアップ手順はそちらに書いてあるので、ここには複製しない。
 
-`site-lisp/eaw.el` は残す。Emacs 31 の組み込み処理では足りないため。
+ここに書くのは次の 4 つだけ。
 
-Emacs 31 は `ambiguous-width-chars` を持ち、`cjk-ambiguous-chars-are-wide`
-が t なら `use-cjk-char-width-table` がそれを幅 2 にする。日本語環境に
-すると自動で適用されるので、組み込みだけでもある程度は効く。
+1. **知らずに書くと壊れ、かつエラーが出ないこと**
+2. **決定事項**（再提案すると、その都度ひっくり返そうとして時間を溶かす）
+3. **検証の作法**
+4. 既知の課題
 
-HackGen で実測した結果（GUI）:
+`【重要】` は 1 のうちでも**とくに静かに壊れる**ものに付けてある。**多用しない。**
+全部が重要だと何も重要でなくなる。
 
-| | 文字数 |
-|---|---|
-| eaw が挙げる ambiguous 文字 | 3666 |
-| 組み込みだけで幅 2 になるもの | 2170 |
-| **eaw が追加で幅 2 にするもの** | **1496** |
+新しく分かったことの追記先は、**横断する規約なら §1、1 機能に閉じた詳細なら
+`docs/` の該当ファイル**（結論だけ §3 に 1〜3 行 + リンク）。
 
-その 1496 文字を実際に描画して測ると:
+---
 
-| 実測幅 | 文字数 | |
-|---|---|---|
-| 16px（全角） | 335 | eaw が正しい |
-| 8px（半角） | 63 | 組み込みが正しい |
-| それ以外 | 1098 | 絵文字・麻雀牌など。プロポーショナルなフォールバックで描かれ、`char-width` をどちらにしても桁は揃わない |
+# 1. 作業の規約
 
-桁揃えが成立する 398 文字のうち **84% で eaw のほうが実描画と一致する**。
-`○△□★※①→≒` のような日常的な記号は組み込みでも幅 2 になるので、
-差が出るのは記号類が中心。
+## 反映と検証
 
-**計測は必ず GUI で行うこと。** Windows の batch では `initial-window-system`
-が nil のため `use-cjk-char-width-table` が ambiguous を幅 1 に倒す分岐に入り、
-組み込みのカバー範囲を過小評価する（2170 ではなく 1424 に見える）。
-
-### 機種依存文字の coding system (site-lisp/cp5022x.el)
-
-`site-lisp/cp5022x.el` も残す。eaw と同じく、**組み込みでは足りない**ため。
-
-Emacs 31.1 は `lisp/international/cp51932.el` を同梱しているが、あれは
-**翻訳テーブルだけ**で coding system の定義は無い（`lisp/` 全体を grep して
-`define-coding-system 'cp51932` が 1 件も無いことを確認済み）。
-
-```elisp
-(define-translation-table 'cp51932-decode map)
-(define-translation-table 'cp51932-encode map)
-(provide 'cp51932)
-```
-
-`cp5022x.el` は**そのテーブルを使って** `cp50220` / `cp50221` / `cp50222` /
-`cp51932` を `define-coding-system` する側なので、組み込みでは置き換えられない。
-
-`my-japanese.el` が `(define-coding-system-alias 'euc-jp 'cp51932)` と
-`set-coding-system-priority` でこれらを使っている。
-
-#### public repo はあるが、乗り換える利点が無い（2026-09-09 に調査）
-
-MELPA の `cp5022x`（[awasira/cp5022x.el](https://github.com/awasira/cp5022x.el)）が
-それで、straight のレシピキャッシュにも既に入っている。
-
-```
-straight/repos/melpa/recipes/cp5022x
-  (cp5022x :repo "awasira/cp5022x.el" :fetcher github)
-```
-
-**中身はバイト単位で同一。** raw を落として diff を取ると、差分は
-`;;; cp5022x.el --- …  -*- lexical-binding: nil -*-` の cookie 1 行だけで、
-これは `693f6d1` でこちらが足したもの。156 行とも一致する。
-
-| | |
-|---|---|
-| upstream の最新コミット | **2012-03-23**（コミット総数 1） |
-| MELPA のバージョン | `20120323.2335` |
-| fork 3 つ | `emacsmirror` / `hrs-allbsd` / `yasuhirokimura`（FreeBSD ports 用）。**master の中身は 3 つとも同一** |
-
-つまり「より新しい / 保守されている代替」は無く、どこから取っても同じファイル。
-
-乗り換えると **straight がバイトコンパイルするので警告が増える**（実測）。
-
-```
-cp5022x.el:1:1: Warning: file has no `lexical-binding' directive on its first line
-```
-
-ファイルはトップレベルの `define-translation-table` / `define-coding-system`
-だけでクロージャを作らないため dynamic binding でも動作は変わらないが、
-**得るのは site-lisp の管理対象が 1 つ減ることだけで、失うのは cookie**。
-現状維持とした。**再提案しないこと。**
-
-なお **Emacs 本体に取り込まれたかどうかは `(featurep 'cp5022x)` では分からない**
-（site-lisp 側が必ず先に provide する）。`emacs -Q` で見ること。
+設定を変えたら、該当モジュールを編集して再起動するか、編集した式を `C-M-x` で
+評価する。batch での素通し確認は次の 1 行。
 
 ```sh
-emacs -Q --batch --eval '(message "%S %S" (coding-system-p (quote cp51932)) (coding-system-p (quote cp50220)))'
-# 31.1 では nil nil
+# Emacs は PATH に無い。フルパスで呼ぶこと
+C:/Apps/emacs/emacs-31.1/bin/emacs.exe --batch --debug-init \
+  -l early-init.el -l init.el --eval '(message "OK")'
 ```
 
-### 日本語フォントの全角/半角ピッチ
+**batch 実行でも `recentf` と `history`（savehist）は書き換えられる。**
+検証前にバックアップし、終了後に戻すこと。
 
-HackGen は「全角＝半角×2」で設計されているが、**サイズによっては 1px ずれる**。
-Windows で実測した結果:
+### 【重要】batch では確かめられないもの
 
-| `:height` | 半角 | 全角 | |
-|---|---|---|---|
-| 110 / 113 / 116 | 8 | 16 | 一致 |
-| **120 / 124** | 8 | **17** | **ずれる** |
-| 128 / 130 | 9 | 18 | 一致 |
-| 140 | 10 | 20 | 一致 |
+下のどれかに触れる検証は、**GUI で実際に測らないと嘘の結論が出る**。
+しかも多くは「エラーにならず、それらしい値が返る」形で外れる。
 
-以前は 120 を使っていて桁が揃っていなかった。11.6（= 116）にしてある。
-
-**`face-font-rescale-alist` では直せない。** ASCII と日本語が同じフォント
-なので、スケールすると両方が同じ比率で縮むだけ。サイズを変えるしかない。
-確認は `(string-pixel-width "あ")` と `(string-pixel-width "aa")` の比較で。
-
-### TypeScript は 5.x に固定すること
-
-**`npm i -g typescript` で入る 7.x（Go 実装のネイティブ版）は使えない。**
-7.x には `lib/tsserver.js` が無く、typescript-language-server が
-`Could not find a valid TypeScript installation` で初期化に失敗する。
-`npm i -g typescript@5` を使う。
-
-basedpyright の実行ファイルは `~/scoop/persist/uv/tools/shims`（PATH 済み）。
-eglot は pylsp → pyls → basedpyright-langserver の順に探すので、
-pylsp を入れるとそちらが優先される点に注意。
-
-### npm グローバルは nvm のバージョンに紐づく
-
-prefix は `~/scoop/apps/nvm/current/nodejs/nodejs`。**nvm で Node を切り替えると
-グローバルパッケージも切り替わる**ので、切り替えたら入れ直しが要る。
-プロジェクトローカル（`npm i -D`）に寄せると安定する。`add-node-modules-path` が
-`node_modules/.bin` を `exec-path` に足すので、ローカル版が優先される。
-
-### 上流の非互換で eglot が黙って壊れることがある
-
-eglot は `eglot--maybe-activate-editing-mode` の中で
-
-```elisp
-(eglot--managed-mode)                  ; ここで eglot--managed-mode-hook が走る
-(eglot--signal-textDocument/didOpen)   ; ← ここが飛ぶ
-(eglot-inlay-hints-mode 1) ...
-```
-
-の順に呼ぶ。**フックの中でエラーが出ると `textDocument/didOpen` が送られない**。
-接続は成立してモードラインにも出るのに、サーバはバッファの存在を知らないため
-診断も補完も一切出ない、という分かりにくい壊れ方をする。
-
-実例: doom-modeline 4.3.0 の eglot セグメントが Emacs 31.1 で無くなった
-`jsonrpc--request-continuations` / `eglot--spinner` / `eglot--major-mode` を
-呼んでおり、`my-appearance.el` で差し替えている（upstream 未修正）。
-同種の症状が出たら、まず `eglot--managed-mode-hook` の中身を疑うこと。
-
-### 【重要】Windows で大文字のドライブレターを返すサーバは診断が出ない
-
-**gopls で実際に踏んだ。** 接続もジャンプも補完も整形も効くのに、
-flymake の診断だけが 1 件も出ない、という壊れ方をする。
-
-gopls は `textDocument/publishDiagnostics` の uri を
-
-```
-file:///C:/Users/masao/...          ← 大文字 C
-```
-
-で返す（eglot が送る `workspaceFolders` は `file:///c%3A/...` と小文字）。
-受け取り側の `eglot--flymake-handle-push` は `eglot-uri-to-path` の結果を
-`eglot--find-buffer-visiting` に渡すが、そこは `buffer-file-name` との
-**文字列 `equal`** で突き合わせる（`file-truename` が遅いので避けている。
-bug#70036）。Emacs の `buffer-file-name` はドライブレターが小文字なので
-一致せず、診断は `flymake-list-only-diagnostics` に回されて
-**警告も出ないまま消える**。
-
-`eglot-uri-to-path` 自身が持つ正規化（`trueroot` で始まるならプロジェクトの
-root に置換する）も `string-prefix-p` が大文字小文字を区別するので効かない。
-
-実測（gopls v0.23.0 / Emacs 31.1）:
-
-| | |
+| 見たいもの | batch だとどうなるか |
 |---|---|
-| `(eglot-uri-to-path "file:///C:/...")` | `"C:/..."` → `eglot--find-buffer-visiting` は nil |
-| advice で `"c:/..."` に直す | **0.5 秒で診断が出る** |
+| `format-mode-line`（`header-line-format` / `mode-line-format`） | **常に `""` を返す**。`%` の escape も face の生死も分からない |
+| フォントの幅・`font-at`・`string-pixel-width` | フォントが無い。`char-width` だけ見ても描画幅は分からない |
+| face の実効属性、テーマとの優先順位 | |
+| `w32notify` のイベント | **コマンドループ経由で配送されるので 1 件も届かない** |
+| `eglot-ensure` の接続 | `post-command-hook` で繋ぐので永久に繋がらない（`(run-hooks 'post-command-hook)` を手で呼ぶ） |
+| `flymake` の初回チェック | **バッファが実際に表示されてから**走る。`switch-to-buffer` してから `(flymake-start nil t)` |
+| `straight-prune-build` / `straight-remove-unused-repos` | `:if window-system` のパッケージが登録されず、使用中のものまで削除対象になる |
+| `locale-coding-system` | PowerShell から起動すると **`cp65001`**（GUI は `cp932`）。cp932 への束縛が no-op になって修正前後の区別がつかない |
+| `cua--select-keymaps` | `pre-command-hook` で走るので、`key-binding` は `cua-mode` 有効化時点の値のまま |
+| `use-cjk-char-width-table` | `initial-window-system` が nil だと ambiguous を幅 1 に倒す分岐に入る |
+| `line-move-visual` の効き | バッファをウィンドウに出さないと折り返しが再現できない |
 
-`my-lsp.el` で `eglot-uri-to-path` に `:filter-return` の advice
-（`my:eglot-normalize-drive-letter`）を張って、Windows のときだけ
-ドライブレターを小文字に揃えている。既に小文字なら no-op なので
-他のサーバには影響しない。
+### 【重要】`emacs -Q` で再現しないものがある
 
-**診断だけ出ないときは、まずサーバが返す uri の綴りを疑うこと。**
-`eglot-events-buffer-config` を一時的に有効にして
-`publishDiagnostics` の uri を見る（既定では `:size 0` で記録されない）。
+この設定は `w32-get-true-file-attributes` を nil にしている（`my-platform.el`）ため
+**inode が常に 0**。`emacs -Q` では正しい値が返るので、**`-Q` で書いたコードを
+持ち込むと静かに壊れる**。詳細は §1「Windows 固有」。
 
-### php-mode は 1.28 (2026-08) で cc-mode 依存が外れた
+### プローブの作法
 
-`c-set-style` / `c-basic-offset` は使えない（`Buffer ... is not a CC Mode buffer`）。
-インデントは `php-mode-coding-style` で指定する。
-cc-mode 版が要るときは `php-cc-mode` が別に残っている。
+- **必ず `condition-case` で囲み、`unwind-protect` で `kill-emacs` する。**
+  タイマーの中でエラーが出ると GUI の Emacs がそのまま残り、外からは
+  「固まった」ようにしか見えない
+- **`inhibit-interaction` を立てるか外すかを意識する。** batch の `yes-or-no-p` は
+  stdin を待つのでプローブが固まる。逆にミニバッファの読み取りを検証したいときは
+  外す必要がある
+- **検証用のディレクトリは毎回ユニークな名前で作る。** dired バッファを kill した
+  直後は w32notify の watch が握っていて `Permission denied` で消せないことがある
 
-### elisp の flymake は「信頼されたバッファ」でしか動かない
+### 【重要】「設定されたか」と「効いたか」は別々に見る
 
-Emacs 30 で `trusted-content` が入った（`files.el:718`）。
-`elisp-flymake-byte-compile` はバッファをバイトコンパイルする
-（= マクロ展開でそのバッファのコードが走りうる）ため、`trusted-content-p` が
-偽なら自ら降りる（`elisp-mode.el:2733`）。
+変数の値を確認しても、それが効いていることの証明にはならない。実際に 3 回誤診した。
 
-```
-Disabling elisp-flymake-byte-compile in *scratch* (untrusted content)
-```
-
-`my-lsp.el` の `(prog-mode-hook . flymake-mode)` が `*scratch*`
-（lisp-interaction-mode → emacs-lisp-mode → prog-mode）にも付くので、
-起動のたびにこれが出ていた。エラーを返したバックエンドは flymake が
-そのバッファで無効化する（`flymake.el:736`）ので、メッセージ自体は
-1 バッファにつき 1 回。
-
-**信頼の例外は `user-init-file`（init.el）だけ。** 明示しないと
-`early-init.el` も `user-lisp/` も `site-lisp/` も診断が出ない。
-`my-lsp.el` の `:custom` で 3 箇所を登録してある。`~/.emacs.d/` を丸ごと
-信頼させると `straight/repos/` のパッケージソースまで対象になるので広げない。
-
-| バッファ | `trusted-content-p` |
-|---|---|
-| `init.el` | t（`user-init-file` の例外） |
-| `early-init.el` / `user-lisp/` / `site-lisp/` | t（登録したもの） |
-| `straight/repos/*.el` | nil |
-| `*scratch*` | ファイル名が無いので `trusted-content` では救えない |
-
-#### 【重要】`*scratch*` の設定は `prog-mode-hook` に depth 付きで載せる
-
-`*scratch*` は `buffer-file-truename` が nil なのでバッファローカルに
-`(setq-local trusted-content :all)` するしかない（ielm.el:715 と
-simple.el:2072 が同じことをしている）。
-
-**`lisp-interaction-mode-hook` に置いても間に合わない。** `flymake-mode` は
-有効化した時点でチェックを 1 回走らせる（`flymake.el:1487`。表示済みの
-バッファなら即座に）が、`run-mode-hooks` は `delay-mode-hooks` で溜めた
-**親のフックを子のフックより先に**回すので、`prog-mode-hook` の
-`flymake-mode` のほうが早い。`add-hook` の depth を `-100` にして
-`prog-mode-hook` に載せること。
-
-GUI 実測（`lisp-interaction-mode-hook` → depth -100）:
-
-| | 修正前 | 修正後 |
+| | 「設定されたか」 | 「効いたか」 |
 |---|---|---|
-| `*scratch*` の `trusted-content` | `:all` | `:all` |
-| `flymake-disabled-backends` | **`(elisp-flymake-byte-compile)`** | **nil** |
-| `*Messages*` にメッセージ | **t** | **nil** |
+| `*scratch*` の `trusted-content` | `:all` が入っているか | **`flymake-disabled-backends` が nil か** |
+| カレンダーの祝日 | `calendar-check-holidays` が返す値 | **`overlays-in` に `holiday` face があるか**（マークは overlay。`font-lock-face` を見ても分からない） |
+| editorconfig の `indent_size` | 値が 4 か | **その変数がバッファローカルか**（グローバル値も 4 なので値だけでは区別が付かない） |
 
-フック自体はどちらも走っているので、**「変数が設定されていること」を
-確かめても検証にならない**。バックエンドが生きているかを見ること。
+flymake ではもう 1 つ。**バックエンドを外しても、報告済みの診断はそのバックエンドが
+再報告しない限り残る。** 「外れているか」はバックエンドの一覧で、「消えたか」は
+診断で、別々に見ること。
 
-#### 【重要】`init.el` では byte-compile バックエンドを外してある（2026-09-09）
+### 書き換えたときの検算
 
-`init.el` は `user-init-file` なので `trusted-content` の**組み込みの例外**で、
-上の 3 箇所を登録する前から `elisp-flymake-byte-compile` が動いていた。
-ところが**このバックエンドは 147 行目より先へ進めない**。
-
-```
-147: Cannot open load file: No such file or directory, my-core
-```
-
-子プロセスは `emacs -Q` 相当なので `load-path` に `user-lisp/` が無く、
-**バイトコンパイラが評価する `(require 'my-core)` が落ちる**。その 4 行上の
-`(prepare-user-lisp t)` はただの関数呼び出しなのでコンパイラは実行せず、
-`load-path` は伸びない。require の失敗はハードエラーなのでそこで中断する。
-
-**つまり偽診断が 1 件出るだけで、本物の誤りは 1 件も検出できていなかった。**
-2026-08-30 の `c60a17f`（flycheck → flymake 移行）から 10 日ほどこの状態。
-
-`my-lsp.el` の `my:flymake-disable-byte-compile-in-init` が `init.el` でだけ
-`remove-hook` する。**`my:trust-scratch-content` と同じく `prog-mode-hook` に
-depth `-100`**（`flymake-mode` は有効化した時点でチェックを走らせるので
-`emacs-lisp-mode-hook` では間に合わない）。`elisp-flymake-checkdoc` は残る。
-
-##### `elisp-flymake-byte-compile-load-path` に足す手は採らない
-
-`user-lisp/` を足せば require は通る。**が、子プロセスが 25 モジュールを
-全部ロードするようになる。** 子プロセスを実装どおり再現して実測:
-
-| | `("./")` | `user-lisp/` を追加 |
-|---|---|---|
-| `my-core` のエラー | 出る | 消える |
-| 残る診断 | 上記 1 件 | `straight-use-package' is not known to be defined`（別の偽診断） |
-| 所要時間 | **0.51 秒** | **1.10 秒** |
-| **`recentf` / `history`** | **変化なし** | **毎回書き戻す**（mtime で確認） |
-
-`flymake-no-changes-timeout` は 1.0 秒なので、`init.el` を編集するたびに
-これが走る。偽診断が別の偽診断に入れ替わるだけで、副作用だけが増える。
-
-再現は次の 1 行で足りる（`elisp-flymake-byte-compile` が組み立てる引数列と同じ）。
+`:bind` を `:map` 形式に直すときに閉じ括弧を 1 つ余らせると、`use-package` の
+フォームがそこで閉じ、後続の `:custom` の各行がトップレベルの関数呼び出しになる
+（`void-function (dired-sidebar-theme)` のような形で表面化する）。
+括弧のバランスは取れているので **`check-parens` では検出できない。**
+**トップレベルのフォーム数を書き換え前と突き合わせる**のが確実。
 
 ```sh
-emacs -Q --batch -L ./ -f elisp-flymake--batch-compile-for-flymake FILE
+emacs --batch --eval '(dolist (f command-line-args-left)
+  (with-temp-buffer (insert-file-contents f) (goto-char (point-min))
+    (let ((n 0)) (ignore-errors (while t (read (current-buffer)) (setq n (1+ n))))
+      (message "%s: %d forms" f n))))' user-lisp/*.el
 ```
 
-##### 【重要】バックエンドを外しても報告済みの診断は消えない
-
-flymake は診断をバックエンドごとに持つので、**そのバックエンドが再報告
-しない限り古いものが残る**。検証中、`flymake-diagnostic-functions` が
-`(elisp-flymake-checkdoc t)` になっているのに 147 行目の診断がまだ出ていて
-一度誤診した。`flymake-mode` を入れ直すと消える。
-
-実セッションではフックがモード設定時（`flymake-mode` が有効になる前）に
-走るのでバックエンドは登録されず、この残留は起きない。**「外れているか」は
-バックエンドの一覧で、「消えたか」は診断で、別々に見ること。**
-
-#### 偽警告は避けられない
-
-`elisp-flymake-byte-compile` は `emacs -Q` 相当の子プロセスでコンパイルする。
-`user-lisp/` は use-package / straight でパッケージを読む前提なので、
-パッケージ由来のマクロが未定義扱いになる。バイトコンパイルしない方針
-（`user-lisp/` の節）と同じ理由。実測（byte-compile / checkdoc）:
-
-| | byte-compile | checkdoc |
-|---|---|---|
-| `my-appearance.el` | 21（`doom-modeline-def-segment` など） | 5 |
-| `my-lsp.el` | 9（全部 `defhydra`） | 0 |
-| `my-editor.el` | 9 | 1 |
-| `my-claude.el` | 2 | 206 |
-| `my-core.el` | 0 | 8 |
-
-checkdoc 側は `trusted-content-p` を見ないので、こちらは信頼設定とは
-無関係に以前から出ていた。うるさければ `trusted-content` から
-`user-lisp/` を落とせば byte-compile 側だけ止まる。
-
-#### 検証は GUI で、遅延に付き合うこと
-
-`flymake-mode` の初回チェックは `flymake-start-on-flymake-mode` の
-ドキュメントどおり**バッファが実際に表示されてから**走る。
-`find-file-noselect` してプローブすると `flymake-start` を呼んでも
-何も起きず、診断 0 件になる。`switch-to-buffer` してから
-`(flymake-start nil t)`（deferred を nil、force を t）で今すぐ走らせる。
-
-プローブは必ず `condition-case` で囲み、`unwind-protect` で
-`kill-emacs` すること。タイマーの中でエラーが出ると GUI の Emacs が
-そのまま残り、外から見ると「固まった」ようにしか見えない。
-
-## tree-sitter
-
-メジャーモードは tree-sitter 版（`*-ts-mode`）を使う方針。ただし文法は
-共有ライブラリで別途ビルドが必要（**C コンパイラと git が要る**）。
-文法が無い環境で `*-ts-mode` に切り替えると何も動かなくなるため、
-**従来のモードを残したうえで、文法が実際に使えるときだけ差し替える**形にしてある。
-
-- `my:treesit-remap MODE TS-MODE LANGUAGE`（`my-core.el`）が
-  `major-mode-remap-alist` に登録する。文法が無ければ何もしない
-- `my:install-treesit-grammars`（`M-x`）で `treesit-language-source-alist` の
-  文法をまとめてビルドする。反映には再起動が必要
-- **フォントロックやインデントの設定はモードごとに別物**。`csharp-mode` は
-  cc-mode 派生（`c-set-offset`）、`csharp-ts-mode` は tree-sitter 派生
-  （`csharp-ts-mode-indent-offset`）なので、セットアップ関数を分けてある
-- `*-ts-mode` は従来モードのフックを継承しない。`:hook` は
-  `((foo-mode-hook foo-ts-mode-hook) . func)` の形で両方に張ること
-
-- **`my:treesit-remap` は必ずトップレベルで呼ぶこと**。`:config` は
-  `(eval-after-load '<パッケージ名>)` に包まれるので、そこで差し替えても
-  「その回に開いたバッファ」には間に合わない。さらに差し替えが効くと
-  従来のモードはもうロードされないため、`:config` は二度と実行されない
-- `.tsx` の `auto-mode-alist` 登録は **web-mode のブロックより後**に置くこと。
-  `:mode` が先頭に積むので、前に置くと web-mode に負ける
-
-導入済みの文法（`tree-sitter/`、git 管理外）:
-bash / c-sharp / css / dockerfile / go / gomod / gowork / html /
-javascript / jsdoc / json / python / rust / toml / tsx / typescript / yaml
-の 17 個。
-`jsdoc` は `js-ts-mode` がコメント解析に `treesit-ensure-installed` するので必要。
-
-コンパイラは scoop の `gcc`（mingw-w64 15.2.0、`~/scoop/apps/gcc/current/bin`）。
-Emacs は `cc` → `gcc` → `c99` の順に探すので `gcc` があれば足りる。
-
-## Go
-
-Emacs 31.1 は Go に必要なものをほぼ同梱している。**外部から入れるのは gopls だけ**。
-設定は `my-lang-native.el`、gopls への設定は `my-lsp.el` の
-`eglot-workspace-configuration` にある。
-
-| 役割 | 使うもの | 備考 |
-|---|---|---|
-| メジャーモード | 組み込み `go-ts-mode` / `go-mod-ts-mode` / `go-work-ts-mode` | 外部 `go-mode` は入れない（後述） |
-| LSP | gopls | eglot に既定エントリがある（設定不要で繋がる） |
-| 整形 | gopls 内蔵の gofumpt（`:gofumpt t`） | gofumpt のバイナリは要らない |
-| import 整理 | gopls の `source.organizeImports` | goimports のバイナリは要らない |
-| 静的解析 | gopls 内蔵の staticcheck（`:staticcheck t`） | flymake（`C-c !`）に出る |
-| 追加 lint | golangci-lint 2.13.2（scoop） | `C-c C-l` で `compile` |
-| テスト実行 | `go-ts-mode` 組み込みの `C-c C-t t` / `f` / `p` | gotest.el 等は要らない |
-| docstring 雛形 | `C-c C-d`（`go-ts-mode-docstring`） | 組み込み |
-
-`go install` したものは `~/go/bin`（PATH 済み）に入る。
-**nvm の npm グローバルと違い、Go のバージョンを変えても消えない**が、
-`go install` はビルドし直しなので Go を上げたら入れ直しておくのが無難。
-
-### 【重要】外部の `go-mode` を入れてはいけない
-
-Rust / C# は「従来モードを残して `my:treesit-remap` で差し替える」形にしてあるが、
-**Go でそれをやると tree-sitter 版に一生切り替わらない**。
-
-`go-ts-mode.el` は autoload で自分の登録を済ませている。
-
-```elisp
-(add-to-list 'auto-mode-alist '("\\.go\\'" . go-ts-mode-maybe))
-(add-to-list 'treesit-major-mode-remap-alist '(go-mode . go-ts-mode))
-```
-
-- `go-ts-mode-maybe` は文法があれば `go-ts-mode`、無ければ **`fundamental-mode`**
-- `treesit-major-mode-remap-alist` が `major-mode-remap-alist` に反映されるのは
-  **`treesit-enabled-modes` が非 nil のときだけ**（既定は `nil`）
-
-つまり `go-mode` を `:mode "\\.go\\'"` で足すと、`auto-mode-alist` の先頭に
-積まれて必ず `go-mode` が勝ち、remap も起きない。`.tsx` を web-mode より後に
-置かねばならないのと同じ罠。
-
-文法が無い環境への保険が要るなら、`go-mode` ではなく
-**`treesit-enabled-modes` に `go-ts-mode` を入れる**。こうすると文法が無いときに
-`treesit-ensure-installed` が導入を提案する（`treesit-auto-install-grammar` の既定は `ask`）。
-このリポジトリでは `my:install-treesit-grammars` で入れる運用にしている。
-
-なお `go-ts-mode.el` は `treesit-language-source-alist` に go / gomod / gowork を
-`add-to-list` するが、`my-core.el` はその変数を `setq` で丸ごと上書きするので、
-**`my-core.el` 側にも同じ内容を書いておかないと `my:install-treesit-grammars` から
-見えない**。commit ハッシュまで一致させること。1 文字でも違うと `add-to-list` の
-`equal` 判定をすり抜けて二重登録になり、2 回ビルドされる。
-
-### 保存時は「import 整理 → 整形」の順で呼ぶ
-
-`my:go-before-save`（`before-save-hook`）が 2 つを順に呼ぶ。
-逆にすると、あとから足された import 行が整形されないまま残る。
-
-**`eglot-code-actions` を対話的に呼んではいけない。**
-INTERACTIVE 非 nil で呼ぶと `eglot--read-execute-code-action` に入り、該当が
-0 件のとき `eglot--error` が飛ぶ。`before-save-hook` の中で飛ぶので
-**import を整理する必要が無いファイルは保存できなくなる**。
-`my:go-organize-imports` は非対話（INTERACTIVE nil）で候補リストを受け取り、
-あるときだけ `eglot-execute` する形にしてある。
-
-### インデントはタブ
-
-gofmt がタブなので `go-ts-mode` は `indent-tabs-mode` を `t` にする。
-`go-ts-indent-offset` は「タブ何個ぶんか」ではなく桁数なので、`tab-width` と
-揃えないと継続行がずれる。既定の 8 は広いので両方 4 にしてある
-（ファイルの中身はタブのままなので他のツールとは衝突しない）。
-
-`whitespace-global-modes` に go 系は入っていないので、タブが強調されることはない。
-
-### golangci-lint は flymake に載せない
-
-モジュール全体を型検査するため 1 回が重く、`flymake-no-changes-timeout`（1.0 秒）で
-回す用途には向かない。日常の指摘は gopls 内蔵の staticcheck で足りるので、
-golangci-lint は `C-c C-l`（`my:go-golangci-lint`）で `go.mod` のあるディレクトリから
-`golangci-lint run ./...` を `compile` する形にした。出力は
-`main.go:10:5: S1002: ...` の形式なので、`compilation-error-regexp-alist` の
-既定（gnu）でそのまま辿れる。
-
-### 検証は GUI で、かつコマンドループを回すこと
-
-`eglot-ensure` は **`post-command-hook` で接続する**。プローブ用の elisp を
-`-l` で読ませて一気に実行すると、`find-file` しても永久に繋がらない
-（実際に 90 秒待って TIMEOUT した）。`(run-hooks 'post-command-hook)` を
-手で 1 回呼ぶ。flymake の診断も同様に `(flymake-start)` を明示的に呼ぶ。
-
-## パッケージ管理
-
-**straight.el に一本化**している（`package.el` は `early-init.el` で無効化済み）。
-
-- 新しいパッケージは該当モジュール内で `(use-package package-name :straight t ...)`
-- 組み込みライブラリには `:straight` / `:ensure` を付けない
-- Emacs 同梱のものを使いたい場合は `init.el` で
-  `(straight-use-package '(NAME :type built-in))` を宣言する（`org`、`transient` が該当）。
-  これをしないと依存解決で straight が古い版をビルドして `load-path` に載せてしまう
-
-### 更新状況の棚卸し
-
-`straight/repos/*` を一括で fetch して、手元と upstream の差を見る:
+あわせて `docs/_archived/snapshot.el` の前後 diff を取る。defcustom 全変数・
+全フック・全キーバインド・face・ロード済み feature を決定的な順序でダンプするので、
+同一設定なら差分 0 行になる。
 
 ```sh
-cd ~/.emacs.d/straight/repos
-for d in */; do r="${d%/}"
-  case " melpa gnu-elpa-mirror nongnu-elpa emacsmirror-mirror el-get straight.el " in
-    *" $r "*) continue;; esac
-  ( cd "$r" && git fetch -q origin && git remote set-head origin -a >/dev/null
-    up=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD)
-    printf '%-24s behind=%s
-' "$r" "$(git rev-list --count HEAD..$up)" )
-done
+emacs --batch -l early-init.el -l init.el -l docs/_archived/snapshot.el \
+      --eval '(my:snapshot-dump "before.txt")'
 ```
-
-更新したあとは **`straight/build` をまるごと消してから起動する**。
-straight の変更検知は当てにならない（corfu / doom-modeline で取りこぼした実績あり）。
-再ビルドは GUI 起動で数分かかる。
-
-2026-08 の棚卸しでは 93 個中 50 個が遅れていた。**全 50 個を更新済み**
-（段階 1〜4 に分けて、各段階で GUI 起動して検証した）。
-
-更新の過程で、設定側の非互換が 2 件と、更新とは無関係の既存バグが 3 件見つかった。
-棚卸しは「古いまま放置していると壊れているのに気づけない」ことの確認になった。
-
-### org のクローンは使っていない
-
-`init.el` で `(org :type built-in)` と宣言しているので Emacs 同梱の org を使う。
-`straight/repos/org` と `straight/build/org` があっても `load-path` には載らない。
-recipe cache には残るため `straight-prune-build` では消えないので、手で消す。
-（2026-08 に削除。合わせて 120 MB あった）
-
-### 不要になったパッケージの掃除
-
-```elisp
-(straight-prune-build)             ; 今のセッションで使われていない build/ を消す
-(straight-remove-unused-repos t)   ; どのビルドからも参照されない repos/ を消す
-```
-
-**GUI で起動してから実行すること。** batch では `:if window-system` の
-パッケージ（doom-modeline、org-bullets など）が登録されず、
-使用中のものまで削除対象になる。
-OS 判定で外れるもの（`exec-path-from-shell` は macOS / Linux 専用）も同様に
-消えるが、`straight/` は git 管理外なので他マシンには影響しない。
-
-### 更新の手順
-
-straight は自動更新しない。追従が必要なときは：
-
-```elisp
-(straight-pull-recipe-repositories)  ; レシピ定義（melpa 等）を更新
-(straight-pull-package "NAME")       ; 個別パッケージを更新
-```
-
-レシピリポジトリを更新しても、**すでに clone 済みのパッケージ本体は古いまま**
-であることに注意。`straight/repos/NAME` の HEAD は clone 時点で止まる。
-2026-08 時点で vertico / consult / marginalia / orderless などは
-まだ 2021 年のままになっている。
-
-パッケージ本体を更新したあとは **`straight/build/NAME` を消してから起動**する。
-straight の変更検知はこれを取りこぼすことがあり、`straight-rebuild-package` でも
-再ビルドされない場合がある (corfu の extensions がコピーされない事例があった)。
-
-過去に **レシピリポジトリと straight.el 本体が 2021 年で凍結**しており、
-それが「新しいバージョンに追従できていない」原因になっていた。
-upstream がデフォルトブランチを `master` → `main` に変えている場合は
-`straight/repos/NAME` で手動チェックアウトが必要になることがある（magit で発生）。
-
-## custom.el の扱い
-
-`init.el` の読み込み順は **custom.el → `user-lisp/` の各モジュール**。
-つまり同じ変数を両方で設定すると **`user-lisp/` 側が勝つ**。
-`custom.el` に書いても効かないので、設定は `user-lisp/` に置くこと。
-
-2026-08 に重複を整理して、`custom.el` に残すのは次の 4 変数だけにした:
-
-- `safe-local-variable-values` … ディレクトリローカル変数の許可リスト（Emacs が書く）
-- `warning-suppress-log-types` / `warning-suppress-types` … straight の警告抑制
-- `yas-new-snippet-default` … スニペットのテンプレート
-
-face は `rst-level-1`〜`6` の 6 面だけ残した（modus も同じ face を定義するが、
-`rst.el` はテーマより後にロードされるため `user` テーマ側が勝ち、実際に効いている）。
-
-**face がテーマに勝つかどうかはロード順で決まる**。テーマより先に定義済みの
-face（`font-lock-*` など）はテーマが勝ち、`custom.el` に書いても効かない。
-テーマより後にロードされるパッケージの face は `custom.el` 側が勝つ。
-確実に当てたいときは `load-theme` のあとに設定する。
-
-`customize` を使うと `custom.el` に書き戻されるので、モジュール側と
-重複していないか時々確認する。重複の検出は、`custom.el` の
-`custom-set-variables` から変数名を集め、`user-lisp/` の `use-package` を
-`macroexpand-1` して出てくる `customize-set-variable` と突き合わせればよい。
-
-なお `use-package` の `:custom` は既定 (`use-package-use-theme` = `t`) では
-`custom-theme-set-variables`（`use-package` という擬似テーマ）を使う。これだと
-`custom.el` が書く `user` テーマのほうが優先順位が高くなり、上の
-「`user-lisp/` 側が勝つ」が逆転してしまう。`init.el` で
-`use-package-use-theme` を `nil` にして `customize-set-variable` に戻してある。
-
-## use-package を使うときの注意
-
-設定の記述は **Emacs 同梱の use-package**（`lisp/use-package/`）で行う。
-2026-08 に leaf から移行した。leaf は直近 12 ヶ月で 3 コミットまで開発が細り、
-日本語圏以外ではほとんど使われていないのに対し、use-package は Emacs 本体に
-入っているため腐りようがない、というのが理由。パッケージマネージャは straight の
-まま（elpaca への移行は見送り）。設定本体が use-package なら、将来 elpaca や
-package.el に移るときも `:straight` の 1 行を差し替えるだけで済む。
-
-### `init.el` で調整している 3 点
-
-素の use-package のままでは leaf と挙動が変わってしまうため、`init.el` で以下を
-設定している。**外すと静かに壊れる**ので注意。
-
-| 設定 | 外すとどうなるか |
-|---|---|
-| `use-package-hook-name-suffix` = `nil` | `:hook (foo-mode-hook . f)` が `foo-mode-hook-hook` に登録される |
-| `use-package-use-theme` = `nil` | `:custom` が擬似テーマ経由になり、`custom.el` に負ける（上記） |
-| `:straight` を `:unless` の直後へ移動 | `:straight` は `use-package-keywords` の先頭に push されるため `:if` より先に処理され、**`:if` が偽でも `straight-use-package` が走る**。Windows で `exec-path-from-shell`、Linux で `w32-ime` / `tr-ime` まで clone / build しにいく |
-
-### 遅延キーワードが無いブロックには `:defer t` を足す
-
-leaf は `:require t` が無い限り `(require)` を出さないが、**use-package は遅延
-キーワード（`:commands` `:bind` `:hook` `:mode` `:after` など）が 1 つも無いと
-`(require)` を出す**。インストールするだけのブロックには `:defer t` を付ける。
-
-`:defer t` を付けると `:config` は `(with-eval-after-load '<name>)` に包まれる。
-そのパッケージを誰もロードしないなら `:config` は永久に走らないので、
-「ロードせずに実行したい設定」は `:init` に置くこと（leaf の `:config` が
-インライン実行だったものはここに移す）。
-
-### 名前は実在する feature にする。疑似パッケージは `emacs`
-
-`:hook` / `:bind` / `:mode` などがあると `:config` は
-`(eval-after-load '<パッケージ名>)` に包まれる。**名前が実在する feature で
-ないと `:config` も `:bind` も永久に適用されない**（leaf でも同じ罠だった）。
-
-- 実在する feature 名を使う（例: `sql-mode` ではなく `sql`）
-- OS 別のまとまりなど**疑似パッケージには `emacs` を使う**。`(require 'emacs)`
-  は no-op、`(with-eval-after-load 'emacs ...)` は即実行されるので安全
-
-### `:custom-face` は使わない
-
-**use-package の `:custom-face` はテーマに負ける。** 実測:
-
-| 方法 | modus-vivendi が同じ face を定義しているとき |
-|---|---|
-| `custom-set-faces`（leaf の `:custom-face` 相当） | `theme-face` に `user` が積まれ **自分の指定が勝つ** |
-| use-package の `:custom-face`（`face-spec-set` + `face-defface-spec`） | **テーマが勝ち、指定が消える** |
-| `face-spec-set` に spec-type `user` を明示 | 同上、**消える** |
-
-そのため `:init` から `custom-set-faces` を直接呼ぶ形にしてある
-（`diff-hl` / `highlight-indent-guides` / `doom-modeline` の 3 箇所）。
-
-### `require` できないものには `:no-require t`
-
-use-package は **`require` に失敗すると `:config` ごと実行しない**。
-`modus-themes` は `etc/themes/` にあり `load-path` に載っていないため
-`(require 'modus-themes)` は失敗する。`:no-require t` が無いと `load-theme` が
-呼ばれず、テーマが一切適用されない。
-
-### `:custom` にマイナーモードの変数を書く場合
-
-`customize-set-variable` は `(get VAR 'custom-set)` が未設定のとき
-`set-default` にフォールバックするため、**パッケージが未ロードだと変数に `t` が
-入るだけでモード関数が呼ばれない**。
-実例: `(corfu :custom (global-corfu-mode t))` では corfu が読まれず補完が出なかった。
-`:demand t` でロードした上で `:config` から明示的に呼ぶこと。
-
-ただし autoloads に `custom-autoload` が入っている変数（`cua-mode`、
-`global-whitespace-mode`、`yas-global-mode` など）は `customize-set-variable` が
-パッケージをロードして setter を呼ぶので動く。**動いていることが正しさの証拠に
-ならない**点に注意。
-
-### leaf キーワードの対応表
-
-| leaf | use-package |
-|---|---|
-| `:straight t` | 同じ |
-| `:custom (var . val)` | `:custom (var val)`。値の位置は式として評価されるのでバッククォートは不要 |
-| `:custom-face (face . '(...))` | 使わない。`:init (custom-set-faces '(face (...)))` |
-| `:bind (:foo-map ...)` | `:bind (:map foo-map ...)`。グローバル束縛は `:map` より前に置き、全体を 1 つのリストにまとめる |
-| `:require t` | `:demand t` |
-| `:require OTHER-FEATURE` | `:demand t` + `:config (require 'OTHER-FEATURE)` |
-| `:leaf-defer nil` | 不要（名前を `emacs` にする） |
-| `:hydra (name () ...)` | `:init (defhydra name () ...)`。leaf の `:hydra` は init 時にインライン展開されるので `:config` に置くと意味が変わる |
-| `:advice (:around f fn)` | `:init (advice-add 'f :around #'fn)`。これも init 時インライン |
-| `:global-minor-mode M` | `:config (M 1)` |
-| `:diminish t` | `:diminish`（引数なしで `<name>-mode` が対象） |
-| `:after a b` | `:after (a b)`。ただし use-package は条件が満たされると `require` するので、leaf と同じく読み込みたくないときは `:defer t` + `:init` |
-| `:doc` / `:tag` / `:includes` | 無い。コメントに落とす |
-| `:disabled t` | 同じ（両者とも完全な no-op） |
 
 ### 到達不能な設定の検出
 
@@ -851,3037 +135,167 @@ use-package は **`require` に失敗すると `:config` ごと実行しない**
       (princ (format "%s\n" f)))))
 ```
 
-この検出スニペットは `locate-library` が通る（= インストール済みだがロードされない）
-パッケージに対する `:after` は拾えない点に注意。実際に GUI 起動して
-`(featurep 'FOO)` を確認するのが確実。
+`locate-library` が通る（= インストール済みだがロードされない）パッケージに対する
+`:after` は拾えない。実際に GUI 起動して `(featurep 'FOO)` を確認するのが確実。
 
-### 書き換えたときの検算
+---
 
-`:bind` を `:map` 形式に直すときに閉じ括弧を 1 つ余らせると、`use-package` の
-フォームがそこで閉じてしまい、後続の `:custom` の各行がトップレベルの関数呼び出しに
-なる（`void-function (dired-sidebar-theme)` のような形で表面化する）。
-括弧のバランスは取れているので `check-parens` では検出できない。
-**トップレベルのフォーム数を書き換え前と突き合わせる**のが確実。
+## 文字コード
 
-```sh
-emacs --batch --eval '(dolist (f command-line-args-left)
-  (with-temp-buffer (insert-file-contents f) (goto-char (point-min))
-    (let ((n 0)) (ignore-errors (while t (read (current-buffer)) (setq n (1+ n))))
-      (message "%s: %d forms" f n))))' user-lisp/*.el
-```
+→ 詳細と実測: [docs/japanese/encoding.md](docs/japanese/encoding.md)
 
-あわせて `docs/_archived/snapshot.el` の前後 diff を取る（前掲）。
+Windows では `default-process-coding-system` が `(utf-8 . cp932)`。
+**cdr は「引数」と「標準入力」の両方を兼ねる。**
 
-## フォントとアイコン
-
-本文フォントは `HackGen`（Windows 12pt / macOS 16pt）。アイコンは `nerd-icons`。
-
-`nerd-icons` は **Nerd Fonts v3** のコードポイント割り当てを前提にしている。
-とくに Material Design アイコンは第 15 面 `U+F0001`〜`U+F1AF0` にあり、
-v2 世代のパッチ済みフォントはこの面をまるごと持っていない。
-このマシンにインストール済みのフォントを実測した結果：
-
-| フォント | 世代 | mdicon (U+F0001) | seti 上位 (U+E6AD) | codicon (U+EA60) |
-|---|---|---|---|---|
-| `HackGenNerd` / `HackGen35Nerd`（Console 版含む） | v2 | ✗ | ✗ | ✗ |
-| `HackGen Console NF` | v3 系 | ○ | ✗ | ○ |
-| `Symbols Nerd Font Mono` (`fonts/NFM.ttf`) | v3 | ○ | ○ | ○ |
-
-dired のディレクトリアイコンが `U+E6AD` なので、HackGen 系だけでは豆腐になる。
-`fonts/NFM.ttf` を入れてあり、これを使う。
-
-**リポジトリに置いてあるだけでは効かない。OS 側にインストールすること。**
-`my:nerd-font-family` はシステムに登録されたフォントの中から選ぶため、
-`fonts/NFM.ttf` が未インストールの環境では HackGen 系（v2）にフォールバックし、
-dired のディレクトリアイコンだけが豆腐になる（2026-08、macOS で実際に踏んだ）。
-clone しただけの新しいマシンでは必ず必要になる手順。
-
-| OS | 導入方法 |
+| 経路 | どう決まるか |
 |---|---|
-| Windows | `%LOCALAPPDATA%\Microsoft\Windows\Fonts` へコピーし、`HKCU\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts` にレジストリ登録（ユーザー単位） |
-| macOS | `cp fonts/NFM.ttf ~/Library/Fonts/` のみ。登録作業は不要で、OS が自動で拾う |
+| `call-process` / `start-process` の**引数** | `default-process-coding-system` の cdr = **cp932**。Emacs のプロセス起動は ANSI API なのでこれが正しい |
+| 標準入力 | 同じ cdr。**UTF-8 を要求する相手（pandoc）は `process-coding-system-alist` で個別指定** |
+| シェル経由（`M-x grep` / ripgrep / `compilation-start`） | **`process-coding-system-alist` が優先**（`my-shell.el` が `.*sh\.exe` を utf-8 に固定）。個別に `coding-system-for-write` を束縛する |
+| `w32-shell-execute`（`my:open-file-externally`） | ワイド API なので影響を受けない |
+| url.el（`my-htnblog`）などプロセスを通らない経路 | `encode-coding-string` で明示するしかない |
+| claude（`my-claude`）の stdin | 起動時に `(utf-8-unix . utf-8-unix)` を**束縛する** |
 
-どちらもインストール後に **Emacs の再起動が要る**（`font-get-glyphs` の判定は
-起動時に済んでいるため）。フォントのファミリ名は `Symbols Nerd Font Mono`
-（PostScript 名 `SymbolsNFM`）。macOS には `fc-list` が無いので、入っているかの
-確認は `ls ~/Library/Fonts` で足りる。
+### 【重要】日本語で「一致なし」になったら、まずこれを疑う
 
-`my:nerd-font-family`（`user-lisp/my-appearance.el`）が `font-get-glyphs` で
-実際のグリフ有無を見て選ぶので、**フォント名を決め打ちしないこと**。
-名前で決め打ちすると、v2 のフォントを掴んでアイコンが全滅する。
+grep も rg も**エラーを出さず 0 件を返す**。`my:grep-with-cp932` /
+`my:ripgrep-with-cp932`（`my-utils.el`）が `coding-system-for-write` を
+`locale-coding-system` に束縛して直してある。
 
-`fonts/` に置くのは `NFM.ttf` だけ。all-the-icons 用の 6 フォントは
-（all-the-icons をやめたので）リポジトリからも Windows からも削除済み。
+**束縛はコマンドではなく `ripgrep-regexp` に張ること。** コピーした
+`my:ripgrep-regexp` の中だけで束縛していた時期があり、`projectile-ripgrep` と
+`M-x ripgrep-regexp` が漏れていた。
 
-## Claude Code を Emacs から使う (`my-claude.el`)
+### 【重要】`prefer-coding-system` が後から上書きする
 
-Windows の Emacs には PTY が無いので claude の対話 TUI は動かない
-（stdin が TTY でないと claude は自動で `--print` に落ちる）。代わりに
-**双方向のストリーミング JSON を素のパイプで駆動する**。端末エミュレーションも
-常駐プロキシも要らない。
-
-検討の経緯（ConPTY プロキシ方式との比較、PoC の実測）は
-`docs/claude/emacs-claude-pty-proxy-study.md`、設計は
-`docs/claude/emacs-claude-stream-json-plan.md`。
-
-改善の第 1 弾（作業ディレクトリ・レイアウト・整形・ステータス）は
-`docs/claude/emacs-claude-improve-01.md` にまとめてある。
-
-| キー | |
-|---|---|
-| `C-c a a` | セッションを開き、画面をレイアウトする（`C-u` で立て直す） |
-| `C-c a l` | いつでも同じレイアウトに戻す |
-| `C-c a e` | 環境（アカウント）を切り替える |
-| `C-c a t` | ワークスペースを信頼済みにする（下記） |
-| `C-c a c` | 直近の会話を継いで開く（`--continue`） |
-| `C-c a r` | 過去のセッションを一覧から選んで再開（`--resume`） |
-| `C-c a m` | モデルを変える（会話は `--resume` で継続） |
-| `C-c a i` | 会話バッファを出して入力エリアへ（レイアウトも組む） |
-| `C-c a s` | リージョンを送る（**レイアウトは変えない**） |
-| `C-c a k` | 中断 |
-| `C-c a q` | セッション終了 |
-
-`*claude(PROJ)*` の中では、**確定した会話の側と入力エリアでキーが変わる**
-（後述）。
-
-| キー | 確定した会話（区切りより前） | 入力エリア（区切りより後） |
-|---|---|---|
-| `i` | 入力エリアへ移動 | 自己挿入 |
-| `TAB` | 畳んだツール出力を別バッファに出す | `markdown-cycle` |
-| `z` / `q` | 最大化トグル / ウィンドウを閉じる | 自己挿入 |
-| `C-c C-c` | 送信（どちらからでも） | 送信 |
-| `C-c C-k` | 書きかけを捨てる（**中断ではない。中断は `C-c a k`**） | 同左 |
-| `C-c C-z` | 最大化トグル | 同左 |
-| `M-p` / `M-n` | 入力の履歴 | 同左 |
-| `M-v` / `C-c C-v` | クリップボードの画像 / ファイルを添付 | 同左 |
-
-### 入力は会話バッファの中で行う（2026-09-09）
-
-`*claude-input(PROJ)*` は**廃止した**。バッファは区切り
-（`my:claude-prompt-string`）で 2 つに分かれる。
-
-```
-*claude(PROJ)*
-┌────────────────────────────┐
-│ > 前の入力                  │  read-only + keymap プロパティ
-│ ● Read(foo.el) … 42 行      │  1 文字キー (i / TAB / z / q) が効く
-│ 応答テキスト …              │  font-lock は触らない（自前装飾のまま）
-├────────────────────────────┤ ← my:claude--output-marker / --input-marker
-│ 書きかけの入力              │  素の編集領域。markdown の font-lock
-└────────────────────────────┘
-```
-
-**応答は区切りの前に挿さる**ので、読みながら次を書ける。実測（haiku で
-1 往復、応答が流れている最中に入力エリアへ書いた）:
-
-| | |
-|---|---|
-| 応答後の入力エリア | `応答を待ちながら書いている`（**残る**） |
-| 区切りの数 | 1（常に末尾） |
-| 確定領域を `delete-char` | `text-read-only` |
-
-区切りの案内文（`my:claude-prompt-string`）には **`C-c a k`（中断）も
-並べてある**。あれはセッションへの操作なのでグローバルに割り当てて
-あるが、考え中・応答中にいちばん押したくなるキーがそこに見えていないと
-探せない。ヘッダ行はセッションの状態表示で埋まっている。
-
-#### マーカーは 2 つ。insertion-type が肝
-
-| | 指す位置 | insertion-type | |
-|---|---|---|---|
-| `my:claude--output-marker` | 確定した会話の末尾（区切りの手前） | **t** | 出力を書くとその後ろへ動く |
-| `my:claude--input-marker` | 区切りの直後 | **nil** | 入力エリアの先頭に打っても動かない |
-
-**区切りを挟むのはこのためでもある。** 区切りが無いと、insertion-type t の
-マーカーは「入力エリアの先頭に打った文字」の後ろへ動き、その文字が確定側に
-取り込まれる。区切りは read-only なのでそこに打つことはできない。
-
-**会話バッファに書き足す処理は `point-max` ではなく
-`my:claude--output-end` を見ること。** `point-max` は入力エリアの末尾で、
-そこに書くと書きかけを壊す。移行のときに直したのは 4 か所
-（`my:claude--fold` / `--fontify-markdown` / `--mark-text-start` /
-`--end-paragraph`）。とくに `--end-paragraph` は
-`(delete-region (point) (point-max))` で**書きかけを丸ごと消す**ところだった。
-
-#### 【重要】区切りは詰め物の改行で行頭に留める（2026-09-09）
-
-出力は区切りの手前に挿さるので、**delta の途中では末尾が改行で終わって
-いない**。そのままだと区切りが応答の途中から始まり、1 文字届くたびに
-横へ流れる。案内文は常に同じ場所にいてほしい。
-
-`my:claude--pad-before-prompt` が `my:claude--at-end` の最後で調整する。
-
-| 出力の末尾 | 詰め物 |
-|---|---|
-| 改行で終わっていない | **入れる**（区切りは次の行の行頭へ） |
-| 改行で終わっている | **捨てる**（空行が 2 つ並ばないように） |
-
-**詰め物はマーカーの後ろに置く。** 挿入の間だけ
-`my:claude--output-marker` の insertion-type を nil に倒すので、
-マーカーは詰め物の前に留まる。次の delta はこの改行より前 = 同じ行の
-続きに挿さるので、**逐次表示の行が詰め物で分断されない**。
-
-**区切りの側に改行を足して済ませてはいけない**（`my:claude-prompt-string`
-を `"\n 🤖 …"` にする手）。応答が改行で終わったときに空行が 2 つ並ぶ。
-なお**末尾**の改行は `my:claude--setup-input-area` が三角のあとに自分で
-足すので、こちらに書く必要は無い（書いてあっても落とす）。
-
-batch 実測（同じプローブを修正前後で流し、区切りの先頭で `bolp`）:
-
-| | 修正前 | 修正後 |
-|---|---|---|
-| 開いた直後 / 送信直後 | t | t |
-| **delta の途中**（`応答の途` → `中です`） | **nil** | **t**（詰め物 1） |
-| delta が改行で終わったあと | t | t（詰め物 0） |
-| `--end-paragraph` のあと | t | t（詰め物 0） |
-
-詰め物も確定領域（`read-only` + `my:claude-view-map`）。書きかけの入力は
-どの状態でも壊れない。
-
-#### 保護は 3 つのテキストプロパティ
-
-`my:claude--protect` が挿入のたびに載せる。
-
-| | |
-|---|---|
-| `read-only t` | 編集を拒む |
-| `front-sticky (read-only)` | 直前への挿入も拒む |
-| `keymap` | ここでだけ 1 文字キーを効かせる（`my:claude-view-map`） |
-
-**`rear-nonsticky` は区切りの末尾 1 文字にだけ付ける**
-（`my:claude--setup-input-area`）。これが無いと入力エリアに 1 文字も
-打てない。実測での落とし穴が 2 つ:
-
-- **挙げ忘れたプロパティは打った文字にそのまま継承される。**
-  `self-insert-command` は `insert-and-inherit` で挿すため。**列挙する形に
-  していると必ず取りこぼす**ので、`rear-nonsticky` は `t`（このテキストの
-  全プロパティを継承させない）にしてある。実際に 2 回踏んだ:
-
-  | 挙げ忘れ | 症状 |
-  |---|---|
-  | `keymap` | 入力エリアなのに `i` が `my:claude-goto-input` になり、文字が打てない |
-  | `font-lock-face` | **入力した文字が区切りの face を引きずる**（2026-09-10） |
-
-  後者は `my:claude-prompt-face` に背景を敷いて初めて見えた。それまでは
-  前景だけ（`:inherit shadow`）だったので、継承されていても気づけなかった。
-  A/B 実測（同じテキストで `rear-nonsticky` だけ変えて 1 文字打つ）:
-
-  | `rear-nonsticky` | 打った文字の `font-lock-face` |
-  |---|---|
-  | `(read-only keymap)` | **`my:claude-prompt-face`** |
-  | **`t`** | **nil** |
-
-- **プロパティを付ける操作自体が read-only に阻まれる。**
-  `inhibit-read-only` の束縛が要る
-
-**既に打ってある文字は直らない。** プロパティは挿入時に決まるので、
-`rear-nonsticky` を直しても遡及しない。検証するときは打ち直すこと。
-
-#### 区切りは Powerline で閉じる（2026-09-11）
-
-区切りは 4 つの部分でできている（`my:claude--setup-input-area`）。
-
-| | | face |
-|---|---|---|
-| `my:claude-prompt-begin-string` | 左半円 U+E0B6 | `my:claude--prompt-edge-face`（前景だけ。**背景は地のまま**） |
-| `my:claude-prompt-string` | ` 🤖 (C-c C-c 送信 / …) ` | `my:claude-prompt-face`（背景 `dark slate blue` / 前景 `light steel blue`） |
-| `my:claude-prompt-end-string` | 右半円 U+E0B4 | `my:claude--prompt-edge-face` |
-| 改行 | | **無し** |
-
-**`:extend` は nil**。以前は `:extend t` で行頭からウィンドウ右端まで
-帯にしていたが、それでは Powerline の端を置く先が無くなる。帯は文字の
-両端で切り、その外を半円で閉じて、残りは塗らない。
-
-**記号の前景は `face-attribute` で帯の背景から引く**
-（`my:claude--prompt-edge-face`）。同じ色を 2 か所に書くと、片方だけ
-変えたときに継ぎ目が壊れて気づけない。
-
-**改行に face を載せないこと。** `:extend` が nil なので帯が伸びることは
-無いが、載せると記号の色が改行にも及ぶ。
-
-U+E0B4 / U+E0B6 は私用領域なので **Nerd Font が要る**（`fonts/NFM.ttf` =
-`Symbols Nerd Font Mono`。`my-appearance.el` が `#xe000-#xf8ff` をそこへ
-回している）。無い環境では両方を空文字列にすれば、帯が文字の端で切れる
-だけになる。記号は `etc/nerd-font-sample.org` の「Powerline」の節にある。
-
-##### 【重要】記号の高さは行に合わせて動的に決める
-
-**放っておくと記号の上に隙間ができる。** 行の高さは行内でいちばん背の
-高いフォントが決め（ascent の最大 + descent の最大）、グリフはベース
-ラインに揃うので、記号の ascent が行の ascent より小さいとその差が
-上に残る。GUI 実測（15px）:
-
-| フォント | ascent | descent | 高さ |
-|---|---|---|---|
-| Segoe UI Emoji（🤖） | **16** | **4** | **20** ← 行を決めている |
-| HackGen（帯の文字） | 14 | 3 | 17 |
-| Symbols Nerd Font Mono（記号） | 12 | 3 | **15** ← 4px 足りない |
-
-Nerd Font は **ピクセルサイズと ascent + descent が一致する**（実測で
-15→15 / 17→17 / 20→20）ので、必要な高さのサイズで開けば行に収まる。
-20px なら ascent 16 / descent 4 で絵文字と完全に一致する。
-`my:claude--prompt-edge-height` が `my:claude-prompt-string` の全文字を
-`char-displayable-p` で引いて最大の高さを求め、`:height` の倍率
-（実測で 20/15 = 1.333）を返す。
-
-**固定の倍率にしない。** 行の高さを決めるのは区切りの文言の中でいちばん
-背の高い文字なので、🤖 を外すだけで 20px から 17px に変わる。書き換える
-たびに測り直すのは現実的でない。
-
-GUI 実測（区切りを組み立てて各部分を観測）:
-
-| | |
-|---|---|
-| 先頭 / 末尾の文字 | **U+E0B6** / **U+E0B4** |
-| 両端の face | `(:foreground "dark slate blue" :height 1.333)` |
-| 帯の最大の高さ / 記号の素の高さ | **20px** / **15px** |
-| 改行のプロパティ | `read-only` / `keymap` / `front-sticky` / `rear-nonsticky` のみ（**`font-lock-face` 無し**） |
-| `my:claude-prompt-face` の `:extend` | **nil** |
-| 入力エリアに打った文字 | 打てる。**プロパティは 1 つも継承しない** |
-
-背景を敷く以上、前景も指定しないといけない（`shadow` の灰色では読めない）。
-
-##### 【重要】私用領域の文字はソースに直接書かない
-
-`my:claude-prompt-begin-string` / `-end-string` の値は `""` の
-エスケープで書いてある。**PUA の文字は経路によっては黙って落ちる**
-（この設定を書いたときに実際に落ちた）。CLAUDE.md 側も同じ理由で
-`U+E0B6` と書き、生の文字は置かない。
-
-**どの記号を指しているかは、Emacs のバッファから読むのが確実。**
-会話バッファを走査して PUA のコードポイントを数えれば分かる。
-
-```elisp
-(when (or (<= #xE000 c #xF8FF) (<= #xF0000 c #xF1FFF)) ...)
-```
-
-##### 【重要】検証で `string-pixel-width` に read-only な文字列を渡さない
-
-`buffer-substring` の戻り値には `read-only` プロパティが載っている。
-`string-pixel-width` は**中で作業バッファに `insert` する**ので、それを
-そのまま渡すと **`Text is read-only` で落ちる**。
-
-`condition-case` で `insert` を囲んでも捕まらない（落ちているのは幅を
-測るところで、`insert` ではない）ので、**入力できないのだと誤診する**。
-実際に一度そう読んだ。`buffer-substring-no-properties` で渡すこと。
-face は色しか持たないので幅は変わらない。
-
-#### font-lock は入力エリアだけに効かせる
-
-確定した会話は挿入時に `font-lock-face` を直に載せてある
-（`my:claude--fontify-markdown`）。入力エリアは `markdown-mode` の
-font-lock に任せる。両立させるのが `my:claude--fontify-region`。
-
-**`beg` を入力エリアの先頭まで切り上げるだけでは足りない。**
-`font-lock-extend-region-functions` がリージョンを押し戻すので、確定した
-会話の `# 見出し` が `markdown-header-face-1` に塗り替えられる（実測）。
-**`narrow-to-region` して呼ぶこと**（`font-lock-dont-widen` も立ててある）。
-
-GUI 実測:
-
-| | 確定した会話の見出し | 入力エリアの見出し |
-|---|---|---|
-| 切り上げるだけ | **`markdown-header-face-1`** | `markdown-header-face-1` |
-| narrowing して呼ぶ | **`my:claude-heading-face`** | `markdown-header-face-1` |
-
-#### undo は入力エリアのためだけにある
-
-出力は `buffer-undo-list` を t に束縛して記録しない。加えて、**前方に挿すと
-既存の undo エントリの位置がずれる**（Emacs は調整しない）ので、実際に
-書いたときは履歴ごと捨てる（`my:claude--at-end`）。応答が届くと書きかけの
-undo は効かなくなるが、壊れた位置を undo するよりはよい。
-
-#### 入力履歴（`M-p`）は会話バッファごと（2026-09-10）
-
-`my:claude--input-history` は **`defvar-local`**。グローバルな `defvar` に
-していたため、`*claude(a)*` で `M-p` すると `*claude(b)*` に打った入力まで
-混ざっていた。セッションはプロジェクトごとなので履歴もそうあるべき。
-
-たどる位置（`my:claude--input-index`）と書きかけ（`my:claude--input-draft`）は
-元から `defvar-local` だった。**位置だけがバッファごとで中身が共有**という
-ちぐはぐな状態だった。
-
-立て直し（`C-c a m` / `C-c a e` / `C-c a r`）は**会話バッファを使い回し、
-`my:claude-mode` を立て直さない**（`my:claude--start` の `unless`）ので
-履歴は残る。それでも `permanent-local` を立ててある。ここが
-`kill-all-local-variables` を通ると「モデルを変えただけで履歴が消える」
-という分かりにくい壊れ方をするため（`my-htnblog.el` で踏んだのと同じ罠）。
-
-会話バッファを kill するとセッションごと終わるので、履歴も消える。
-
-##### 【重要】`kill-buffer-query-functions` はローカル値が残る
-
-検証でモックの会話バッファを 7 個残した。`my:claude-mode` は
-`my:claude--kill-query` を**バッファローカルに**積むので、
-`(let ((kill-buffer-query-functions nil)) (kill-buffer b))` では消えず、
-入力エリアに文字があると `yes-or-no-p` が出る。batch / `ec.sh` では
-`inhibit-interaction` で落ちて **kill されないままバッファが残る**。
-片付けるときは `setq-local` で外すこと。
-
-#### 追従（自動スクロール）の仕掛けが要らなくなった
-
-挿入位置が `point` より**前**になったので、`point` も `window-point` も
-自動でずれて相対位置が保たれる。入力エリアにカーソルがある窓は redisplay が
-それを可視に保つので末尾に追いつき、読み返している窓は動かない。
-`my:claude--at-end` から `goto-char` / `set-window-point` を落とした
-（残しておくと、入力の途中にあるカーソルを末尾へ飛ばす**害**になる）。
-
-### セッションはプロジェクトごとに持てる（2026-09-08）
-
-`~/.emacs.d` と `~/.config` でそれぞれ `C-c a a` すると、
-`*claude(.emacs.d)*` と `*claude(.config)*` が別の claude プロセスとして並ぶ。
-同じプロジェクトで押したときは動いているものに戻るだけ。
-**環境（アカウント）はセッションごと**なので、プロジェクトごとに別の
-アカウントを当てることもできる。
-
-以前は「Emacs 全体で 1 つ」に限っていた（`my:claude--the-session`）。
-`CLAUDE_CONFIG_DIR` はプロセス起動時にしか読まれず、複数あるとどちらに
-送っているのか分からなくなる、というのが理由だった。**その心配は
-「送り先をバッファで決める」ことで消える**ので、一覧
-（`my:claude--sessions`）に変えた。
-
-| 関数 | |
-|---|---|
-| `my:claude--current-session` | いま操作の対象。①バッファローカル ②このバッファのプロジェクト ③生きているのが 1 つだけならそれ |
-| `my:claude--read-session` | 決まらないときに選ばせる（`C-c a k` / `C-c a q` / `C-c a l`） |
-| `my:claude--session-for-directory` | ディレクトリで引く |
-| `my:claude--live-sessions` | 使えなくなったものを畳んで捨てながら返す |
-
-**③ で止めること。** 複数あるときに「直近のもの」で代用すると、別の
-プロジェクトに向かって送ってしまう。決まらないなら選ばせるか、
-`C-c a a` なら新しく起こす。
-
-`C-c a a`（`my:claude--ensure-session`）だけは③を**プロジェクトが
-決まらないバッファ（`*scratch*` など）に限る**。プロジェクトが決まる
-バッファからは、そのプロジェクトのセッションしか使わない。そうしないと
-「別プロジェクトで開いたつもりが、たまたま 1 つだけ動いていた別の
-セッションに繋がる」ことになる。
-
-### バッファ名にはプロジェクト名が入る
-
-`my:claude--project-label` が作業ディレクトリの名前を付ける。上で
-`*claude*` と書いてあるものは実際には `*claude(.emacs.d)*` になる
-（`*claude-log*` も同じ）。
-
-**basename が同じプロジェクトを 2 つ開いたら親をたどる。**
-`~/work/foo/src` を開いている状態で `~/other/src` を開くと、後者は
-`*claude(other/src)*` になる。同じディレクトリなら `#2` を付ける。
-**先に開いていたほうの名前は変えない**（見えているバッファの名前が
-後から変わるほうが分かりにくい）。名前は起動時に 1 回決めて
-`my:claude-session-label` に持たせ、ヘッダ行の 2 列目にも同じものを出す。
-
-**そのため「claude のバッファか」を名前で判定してはいけない。**
-`my:claude--buffer-p` はメジャーモード（`my:claude-mode`）で見る。
-
-**バッファは名前で `get-buffer-create` しない**（`my:claude--buffer-for`）。
-死んだセッションの会話バッファは記録として残るので、別プロジェクトの
-セッションが同じ名前を取ると、他人の記録の続きに書き足してしまう。
-持ち主のディレクトリが違えば `generate-new-buffer` で別名にする。
-
-`my:claude-layout` はセッションより先に呼ばれることがある（`C-c a l`）ので、
-そのときは `my:claude--guess-directory`（**確認を出さない版**）で名前を決める。
-`my:claude--project-directory` を使うと画面を整えるだけで `y/n` が出る。
-あわせて 2 点:
-
-- **上半分に残すバッファは会話バッファを作るより先に決める。**
-  あとに回すと、まだメジャーモードが立っていない新品のバッファを
-  `my:claude--buffer-p` が claude 系と見なせず、上半分に選んでしまう
-- 作った会話バッファにはその場で `my:claude-mode` を立てる（同じ理由）
-
-### 会話バッファを kill したらセッションも終わる
-
-別プロジェクトに移るのに kill する必要は無い（そちらで `C-c a a` すれば
-並ぶ）。**書きかけの入力があるときは `yes/no` で聞く**
-（`my:claude--kill-query`）。入力エリアは会話バッファの中にあるので、
-退避先はもう無い。
-
-`kill-buffer-hook` では kill を止められないので
-`kill-buffer-query-functions` に載せること。
-
-**「セッションが生きているか」をプロセスだけで判定してはいけない。**
-`make-process` の `:buffer` は nil（出力は自前のフィルタが捌く）なので、
-会話バッファを kill してもプロセスは生き残る。プロセスだけを見ていると
-`C-c a a` が消えたバッファを持つセッションを使い回そうとして
-`Selecting deleted buffer` になる（2026-09-06 に修正）。
-
-- `my:claude--session-usable-p` が**プロセスとバッファの両方**を見る。
-  `my:claude--live-sessions` / `my:claude--current-session` はこれを通す
-- バッファが死んでいたら `my:claude--live-sessions` がその場で
-  `my:claude-quit-session`（EOF）を送って一覧から外す。
-  呼び出し側は新しいセッションを起こす
-- `my:claude-mode` の `kill-buffer-hook` でも同じことをする。ただし EOF を
-  送ってから sentinel が走るまでには間があるので、**その隙に `C-c a a` しても
-  古いセッションを掴まないよう `my:claude--live-sessions` 側でも見る**
-
-### 作業ディレクトリの決め方
-
-**さかのぼりはしない。**
-
-1. projectile のプロジェクトルート
-2. 取れなければ、cwd に `.claude/` があれば cwd
-3. どちらも外れたら `y/n` で確認し、拒否されたら `read-directory-name`
-
-`project.el` は見ない（projectile と役目が重なる）。判定は 2 つの関数に
-分けてある。**`my:claude--guess-directory` は確認を出さない**版で、
-「起動済みのセッションを使い回すだけ」の場面ではこちらを使う。
-分けないと `.claude/` の無いディレクトリから `C-c a a` するたびに
-`y/n` が出る。
-
-### ウィンドウのレイアウト（`my:claude-layout`）
-
-```
-┌──────────────┐
-│ 編集中のバッファ │  フレームの 1/2
-├──────────────┤
-│ *claude*      │  残り（カーソルは末尾＝入力エリア）
-└──────────────┘
-```
-
-`my:claude-window-height-ratio`（既定 0.5）で変えられる。入力エリアは
-会話バッファの中にあるので、**分割は 2 つで足りる**（入力バッファが
-あった頃は 3 分割で、送信のたびに畳んでいた）。
-
-**`window-configuration` は退避しない。** 最大化トグルの復帰先も
-`C-c a l` も同じ関数を呼ぶだけなので、どこから何度押しても同じ形に
-落ち着く。高さは `window-total-height` から採る（`window-body-height`
-だとモードラインとヘッダ行を数え落とす）。
-
-### 環境（アカウント）の切り替え
-
-Pro / Enterprise / Max 20x を `CLAUDE_CONFIG_DIR` で使い分けている。
-claude はこれを**プロセスの起動時にしか読まない**ので、切り替え
-（`C-c a e`）は立て直すことでしか行えない。**環境はセッションごと**に
-固定される（プロジェクトごとに別のアカウントを当てられる）。
-どれに送っているかはヘッダ行の 1 列目で確かめる。
-
-`my:claude-environments` に `(ラベル . CLAUDE_CONFIG_DIR)` で並べる。
-選択時に `claude auth status --json` を呼んで実際のアカウントを見せる
-（実測 0.24 秒。結果はキャッシュし、`M-x my:claude-refresh-auth` で捨てる）。
-
-```
-personal   pro         ponkore@gmail.com's Organization
-jighead    max         masao.kato@jighead.co.jp's Organization
-ESC-Web    enterprise  株式会社　熾火
-```
-
-ヘッダ行に
-
-```
-jighead(max) v2.1.260 | .emacs.d | master | claude-opus-5 (high) | ctx 103.2k 52% | (5h 4%)(7d 8%)(reset 09/05 03:00) | $6.17
-```
-
-を出す。残量は `rate_limit_event` から取っている。**アカウントを
-切り替える判断はこの数字で行う**ので、常に見えるようにしてある。
-
-### ステータスの表示はヘッダ行に集約する（モードラインには出さない）
-
-`~/.claude/statusline-command.sh` が端末の TUI に出している項目を
-Emacs 側で再現してある。**`statusLine` は端末 TUI の機能で、`-p`
-（stream-json）経路では発火しない**（実測でイベントに一切現れない）ので、
-スクリプトの出力をもらうのではなく同じ情報を stream-json から自前で
-組み立てている。
-
-ヘッダ行は 6 列で、色は statusline スクリプトが使っている ANSI 色に
-合わせてある。
-
-| 列 | 内容 | 色 | 取得元 |
-|---|---|---|---|
-| 1 | アカウント（プラン）と claude のバージョン | マゼンタ | auth cache と `system/init` の `claude_code_version` |
-| 2 | プロジェクト名（フルパスは `help-echo`） | シアン | セッションの cwd |
-| 3 | git ブランチ | グリーン | `.git/HEAD`（後述。git は呼ばない） |
-| 4 | モデルと effort | イエロー | `system/init` の `model` と `my:claude--effort` |
-| 5 | コンテキスト使用量 | グリーン | `assistant` の `message.usage` の `input_tokens` + `cache_read_input_tokens` + `cache_creation_input_tokens` / `result` の `modelUsage.<model>.contextWindow`（1M 版なら 1000000 が来る） |
-| 6 | レート上限とリセット時刻 | シアン | `rate_limit_event` の `unifiedWindows` |
-| 7 | 累計コストと応答待ちの `...` | dim | `result` の `total_cost_usd` と `busy`（後述） |
-
-face は `my:claude-header-{plan,dir,branch,model,context,limit,cost}-face`。
-**`:foreground` だけを指定する。** ヘッダ行では `header-line` face が
-下地になり、テキストプロパティの face はその上に重なるので、背景は
-テーマのものがそのまま残る。
-
-**`claude --version` を別に呼ぶ必要は無い。** statusline スクリプトが
-1 時間キャッシュまでして避けていたプロセス起動が、`system/init` に
-最初から入っている。
-
-#### git ブランチは `.git/HEAD` を読む（git は呼ばない）
-
-かつては「プロセス起動のコストに見合わない」として載せていなかったが、
-**そもそも git を起動する必要が無い**。ブランチ名は `.git/HEAD` の
-1 行目にそのまま入っている。実測（1 回あたり）:
-
-| | |
-|---|---|
-| `file-attributes` で stat（キャッシュのヒット判定） | **0.043 ms** |
-| `.git/HEAD` を読んでパース（キャッシュのミス時） | **0.061 ms** |
-| `call-process git rev-parse --abbrev-ref HEAD` | **55.6 ms** |
-
-1300 倍違うので「Emacs の `call-process` が Windows で遅い」（既知の課題）
-を丸ごと迂回できる。
-
-**列の中身は `header-line-format` の `(:eval ...)` で出す。**
-ブランチの切り替えは Emacs の外（端末や magit）でも起きるため、
-ターンごとの `my:claude--update-header` では古い表示が残る。`:eval` なら
-再描画のたびに評価されるので、監視もタイマーも要らない。GUI 実測で
-`:eval` 1 回 0.044 ms、ヘッダ行全体でも 0.048 ms。
-
-そのため **`my:claude--header` の戻り値は文字列ではなくリスト**
-（mode-line 構文）になっている。`mapconcat` で 1 本の文字列にすると
-`:eval` が死ぬ。
-
-- **列を出すかどうかは gitdir の有無で決める。** これはセッションの
-  作業ディレクトリで決まり起動後に変わらないので、探索
-  （`my:claude--git-dir`。`locate-dominating-file` で上へ辿るだけ）は
-  セッションを作るときの 1 回だけ。`:eval` 側が空文字列を返すと区切りが
-  二重に残るので、読めなければ `?` を出す
-- **`%` の escape は `:eval` の戻り値にも要る。** `:eval` の結果は
-  mode-line 構文として**再解釈される**ため。`my:claude--header-segment`
-  を通すこと（`pct-100%-done` で確認済み）
-- worktree と submodule では `.git` がファイルで、中身が `gitdir: PATH`。
-  それを辿る
-- detached HEAD では `ref:` ではなく生の SHA が入っているので短縮して出す
-- **ブランチ名は UTF-8 で decode する。** `insert-file-contents-literally`
-  は unibyte バッファを作るので、そのままでは非 ASCII のブランチ名が化ける
-
-##### 【重要】検証で `call-process` から git にブランチを作らせない
-
-日本語のブランチ名を `call-process` の引数で渡すと、**引数の側で化ける**。
-実測（`emacs -Q`、「機能」= UTF-8 で `e6 a9 9f e8 83 bd`）:
-
-| 作り方 | `.git/HEAD` に書かれたバイト列 |
-|---|---|
-| `call-process` の引数にそのまま | `e8 ae 96 e6 ba af e3 83 bb`（= 「讖溯・」） |
-| 引数を `utf-8` で encode して渡す | 同上 |
-| `cmd.exe /c chcp 65001 && git ...` 経由 | 同上 |
-
-3 通りとも同じ。UTF-8 のバイト列が cp932 として解釈された結果で、
-CLAUDE.md の「`call-process` の引数は cp932 でエンコードすること」と
-同じ罠。**読み取り側は正しいのに壊れて見える**ので、検証では
-`.git/HEAD` を直接書くこと。git が HEAD を UTF-8 で書くこと自体は
-上の 3 通りとも一致していて確認できている。
-
-##### 【重要】`format-mode-line` は選択ウィンドウのバッファで `:eval` を評価する
-
-BUFFER 引数を省略すると、カレントバッファではなく**選択ウィンドウの
-バッファ**が使われる。`with-temp-buffer` の中で
-
-```elisp
-(setq-local my:claude--session session)
-(format-mode-line header-line-format)   ; ← :eval は *scratch* で評価される
-```
-
-としても、バッファローカルの `my:claude--session` が見えず `:eval` が
-黙って空になる。**列が消えるだけでエラーは出ない。** 実際に
-`switch-to-buffer` してから測ること（batch では `format-mode-line` が
-常に `""` を返すのでそもそも検証できない）。
-
-#### effort level は stream-json に出てこない
-
-全イベントの全キーを列挙して確認した。`system/init` には
-`permissionMode` / `output_style` / `fast_mode_state` はあるが
-`effort` は無い。そこで `my:claude--effort` が次の順で求める。
-
-1. `my:claude-effort`（defcustom）。非 nil なら `--effort` で明示するので
-   その値がそのまま効く
-2. `settings.json` の `modelSettings.<model>.effortLevel`
-3. `settings.json` の `effortLevel`
-
-`settings.json` は claude 自身の優先順位に合わせて 3 つ見る。
-
-```
-<プロジェクト>/.claude/settings.local.json
-<プロジェクト>/.claude/settings.json
-<CLAUDE_CONFIG_DIR>/settings.json     ← 既定なら ~/.claude/settings.json
-```
-
-**`.claude.json` とは置き場が違う。** 信頼判定などが入る `.claude.json`
-は `~/.claude.json` だが、`settings.json` は `~/.claude/settings.json`。
-`my:claude--config-json` と `my:claude--settings-files` で組み立て方を
-分けてある。
-
-**`modelSettings` のキーは前方一致で突き合わせる。** キーは
-`claude-opus-5` のように日付が付かないのに対し、`system/init` が返す
-モデル名は `claude-haiku-4-5-20251001` のように日付付きのことがある。
-
-effort は毎ターン求め直さない（`system/init` はターンごとに来る）。
-モデルが変わったときだけ取り直す。**判定はモデルを更新するより先に
-行うこと。**
-
-#### 【重要】`header-line-format` に出す `%` は `%%` に escape する
-
-`header-line-format` / `mode-line-format` に**素の文字列**を渡すと、
-Emacs が `%` を書式指定子として解釈し、**`%` と直後の 1 文字がまとめて
-消える**。`%` の次が空白でも `)` でも同じ。
-
-```
-raw       : ... ctx 103.2k 52% | (5h 5%)(7d 8%)(reset 09/04 23:10)
-displayed : ... ctx 103.2k 52| (5h 5(7d 8(reset 09/04 23:10)
-```
-
-**escape は列ごとに、色を付ける前に済ませる**
-（`my:claude--header-segment`）。組み立てた**全体**に
-`replace-regexp-in-string` を掛けると、**差し込まれる `%%` だけが face を
-持たない**素の文字列になり、その桁で色が切れる。ディレクトリ名や
-モデル名に `%` が入る場合もあるので escape 自体はやめられない。
-
-**この検証は batch ではできない。** `format-mode-line` は batch では
-常に `""` を返す。GUI で `(format-mode-line 文字列)` を見ること。
-**「組み立てた文字列」ではなく「実際に表示される文字列」を見ないと、
-`%` の扱いも face の生き死にも分からない。** `help-echo` も
-`format-mode-line` を通って残る（実測）。
-
-2026-09-04 に発見。`5h 4% 7d 8%` が `5h 47d 8` と表示されていた。
-あわせてレート上限の表示を `(5h 5%)(7d 8%)(reset MM/DD HH:MM)` の形に
-変えてある（`%` が区切りに埋もれず読めるように）。
-
-#### モードラインには何も出さない（2026-09-05）
-
-かつては `mode-line-process` に `[.emacs.d ... $0.12]`（プロジェクト名 /
-応答待ち / 累計コスト）を出していたが、3 項目ともヘッダ行と重複するので
-やめた。累計コストと応答待ちの `...` はヘッダ行の 7 列目に移してある。
-
-```
-personal(pro) | .emacs.d | main | claude-opus-5 | ctx 103.2k 52% | $6.17 ...
-```
-
-- コストは直近の `result` の `total_cost_usd`。**1 往復ぶんではなく
-  セッション開始からの累計**が来る（`--resume` で継いだ会話ぶんを含む）
-- **7 列目も `:eval`。** `busy` は送信した時点で立って `result` で降りる
-  ので、ターンごとの `my:claude--update-header` では立ち上がりに
-  間に合わない。ブランチ（3 列目）と同じ理由
-- **7 列目は区切りも自分で出す**（`my:claude--cost-segment`）。末尾の列
-  なので、起動直後（`result` がまだ無く応答待ちでもない）に
-  区切りだけが行末に残らないようにする必要がある。ブランチの列が
-  「gitdir の有無で列ごと出し入れする」のに対し、こちらは毎回変わるため
-  `:eval` の側で判断するしかない
-- 色は `shadow` を継ぐ。statusline スクリプトがコストを `C_DIM`（ANSI の
-  dim）で出しており、dim に対応する固定の色が無いため。ここだけ色名を
-  直接書いていない
-
-GUI 実測（`format-mode-line` を通した実表示。末尾だけ抜粋）:
-
-| 状態 | 末尾 |
-|---|---|
-| `result` なし・応答待ちでない | `… ctx 103.2k 52%`（**区切りも出ない**） |
-| 応答待ちのみ | `… 52% \| ...` |
-| 応答待ち + `result` | `… 52% \| $6.17 ...` |
-| `result` のみ | `… 52% \| $6.17` |
-
-`my:claude-mode` の `mode-line-process` は空。
-**この検証はモードを実際に立てて行うこと。** 変数の既定値を見ても
-「モードが設定しない」ことの証明にはならない。
-
-### 逐次表示（`my:claude-stream`、既定 t）
-
-`--include-partial-messages` を付けて `stream_event` を拾い、書かれる端から
-バッファに流す。イベントの並びは実測でこうなっている。
-
-```
-content_block_start (thinking / text / tool_use)
-content_block_delta … (thinking_delta / signature_delta /
-                       text_delta / input_json_delta)
-assistant                  ← そのブロックの確定版
-content_block_stop
-```
-
-**`assistant` は `content_block_stop` より先に、ブロック 1 つぶんずつ届く。**
-そのため text は delta で出し、`assistant` 側では出さない（出すと二重になる）。
-tool_use は逆に delta（`input_json_delta`）を捨てて `assistant` の確定版だけ使う。
-JSON の断片は揃うまで意味を持たないため。
-
-中断すると `content_block_stop` が来ないことがあるので、`result` を受けた
-ところでブロックを閉じる。
-
-`thinking_delta` の本文は **haiku では空文字列で届く**。`my:claude-show-thinking`
-を t にしても何も出ないことがある。
-
-### 過去セッションの一覧（`C-c a r`）
-
-`--continue` は「そのディレクトリの直近の 1 つ」しか選べない。
-記録ファイルを直接読んで一覧にする。
-
-セッションは
-`<CLAUDE_CONFIG_DIR>/projects/<エンコードしたパス>/<session-id>.jsonl`
-に貯まる。ディレクトリ名は **ワークスペースのパスの英数字以外をすべて
-`-` に置き換えたもの**。`C:/Users/masao/.emacs.d` なら
-`C--Users-masao--emacs-d`。手元の 10 個で突き合わせて確かめた
-（合わなかった 1 つはドライブレターの大小違いだけで、Windows の
-ファイルシステムでは同じ場所を指す）。
-
-#### 【重要】`message.content` は文字列とは限らない
-
-一覧に出すプロンプトを取り出すとき、**文字列だけを見てはいけない。**
-ブロックの配列で入っていることがあり、**Emacs から送ったものは必ず配列**。
-文字列しか見ないと、自分で作ったセッションが全部「(プロンプトなし)」に
-なる。実際にそうなっていた。`my:claude--content-string` が両方を扱う。
-
-1 MB を超えるファイルもあるので、先頭 200 KB / 400 行で打ち切る。
-
-### サブエージェントの表示
-
-サブエージェントの発言は **`parent_tool_use_id` 付きの assistant / user
-イベント**として届く。`--forward-subagent-text`（`my:claude-forward-subagent-text`、
-既定 t）を付けると増えるが、**付けなくても一部は届く**（実測）。
-
-**`stream_event` に `parent_tool_use_id` が付くことは無い。**
-つまりサブエージェントの本文は delta では来ないので、
-`streamed-text` を見ずに必ず出す。見てしまうと、本体のブロックが
-開いている間はサブエージェントの発言が捨てられる。
-
-表示は字下げ + `my:claude-subagent-face` で本体と区別する。
-
-### ツールの実行結果は既定で全部畳む
-
-`my:claude-tool-result-max-lines` の既定は **0**（= 常に畳む）。
-畳んだ行は 1 行の要約になり、`TAB` で全体を `*claude tool output*` に出す。
-
-```
-  ● Read(user-lisp/my-claude.el) … 42 行
-```
-
-`Read(...)` の中身は `my:claude--tool-summary` の結果だが、
-**`tool_result` には入力が入っていない**。`tool_use` を受けた時点で
-名前と一緒に要約も覚えておく必要があるので、`tool-names` ハッシュの値は
-`(NAME . SUMMARY)` の cons にしてある。
-
-**エラーだけは畳まない**（`my:claude-error-result-max-lines`、既定 30 行まで）。
-一律に畳むと「なぜ失敗したか」がその場から消え、雑音を減らすという
-目的とは逆にいちばん見たいものが隠れる。
-
-### Edit / Write の差分表示
-
-`tool_use` の入力に `old_string` と `new_string`（Write は `content`）が
-そのまま入っているので、行頭に `-` / `+` を付けて色分けする。
-`my:claude-diff-max-lines`（既定 30）を超えたら行数だけ知らせる。
-
-**外部の diff は呼ばない。** Windows に入っている保証が無いうえ、
-Edit の入力は置換前と置換後がそのまま来るので、行単位で並べれば足りる。
-
-差分に `TAB` は効かない。**「TAB で全体を表示」と案内していたのは嘘**
-だった（`my:claude--show-edit` は `my:claude-full` を設定しないので
-`ここには折りたたまれた出力が無い` になるだけ）。案内は
-`(差分 %d 行。git diff で確認)` に直してある。
-
-### 許可の `permission_suggestions`
-
-要求には `permission_suggestions`（例: `acceptEdits` に切り替える）が
-付いてくる。これを `updatedPermissions` に載せて allow を返すと
-**claude 側が以後聞いてこなくなる**。実測で 2 回目の `Write` が
-聞かれなくなった。
-
-許可プロンプトの `a` がこれを使う。候補が付いていないときだけ
-Emacs 側で覚える従来動作に落ちる。
-
-### 【重要】AskUserQuestion の答えは `deny` の `message` に載せる
-
-**AskUserQuestion はホスト側が実行するツール**で、選択 UI を出して答えを
-`tool_result` の `answers` に載せるのは端末 TUI の仕事になっている。
-`-p`（stream-json）にはその UI が無いので、**allow を返しても答えは返らない**。
-
-しかし **ツール自体は `-p` でも提供されている**（`system/init` の `tools` に
-入っている。149 個中に `AskUserQuestion` があることを実測）ので、claude は
-普通に呼んでくる。放っておくと質問が出ないまま止まる。
-
-そこで `can_use_tool` を横取りして Emacs 側で聞き、**答えを `deny` の
-`message` に載せて返す**（`my:claude--answer-questions`）。deny の message は
-そのまま claude に届く（別節）ので、これが唯一の回答経路になる。
-
-実測（`--model haiku`、実際に 1 往復させた）:
-
-| | |
-|---|---|
-| `tool_use` の入力 | `questions` が丸ごと来る（`question` / `header` / `multiSelect` / `options[].label` / `options[].description`） |
-| `control_request` | `subtype=can_use_tool` / `tool_name=AskUserQuestion` で**必ず飛んで来る** |
-| `permission_suggestions` | **`null`**（このツールには付かない） |
-| deny の message | `is_error=true` の `tool_result` として**逐語で届く** |
-| claude の反応 | 「**青**をお選びになりました」= **答えとして解釈された** |
-
-`is_error` が立つのは避けられないので、message には
-「Emacs には UI が無いので拒否の形で答えが届く。ツールを呼び直すな」を
-併記してある。これが無いと claude が失敗と見て再試行しかねない。
-
-- **`my:claude-auto-approve` より先に判定する**（`my:claude--ask-permission` の
-  `cond` の先頭）。auto-approve に一致して allow で通すと、質問がどこにも
-  出ないまま答えが返らない
-- 質問と選択肢は**聞く前に会話バッファへ出す**。説明文は長く、ミニバッファの
-  注釈だけでは読み切れない。出しておけば会話の記録にもなる
-- 候補の並びは `display-sort-function` を `identity` にして**claude が並べた
-  ままにする**（推奨が先頭に来ることがある）
-- `require-match` は nil。候補に無い文字列も返せる（本家 UI の「Other」）。
-  空で確定されたら聞き直す
-- `multiSelect` が `t` なら `completing-read-multiple`。答えは `, ` で連結する
-- **`C-g` でも必ず応答を返す**（`condition-case` の `quit` 節）。返さないと
-  claude が待ち続ける。エラー時も同じ
-- 切るときは `my:claude-answer-questions` を nil にする（従来の許可プロンプトに
-  戻る）。ただし `--permission-mode` が `dontAsk` / `bypassPermissions` のときや
-  `permissions.allow` に `AskUserQuestion` があるときは `can_use_tool` 自体が
-  飛んで来ないので、そもそもこの経路は効かない
-
-#### 答えは赤で出さない（`my:claude-answer-face`、2026-09-09）
-
-deny で返す以上 `is_error` は必ず立つので、素直に扱うと
-**自分で選んだ答えが `my:claude-error-face`（赤）で返ってくる**。
-エラーではないのに失敗したように見えるので、緑にしてある。
-
-色は **IME ON のときのカーソルと同じ `green`**（`my-japanese.el` の
-`input-method-activate-hook`）。当初は `yellow green` にしていたが、
-黄色に寄って見えたので純緑にした（2026-09-09）。明るい背景では純緑が
-読めないので、そちらは `dark olive green` のままにしてある。
-
-| | face |
-|---|---|
-| 聞いた直後の `→ 選んだ答え` | `my:claude-answer-face` |
-| claude から返る `is_error` の `tool_result` | `my:claude-answer-face` |
-| 他のツールの `is_error` | `my:claude-error-face`（赤のまま） |
-| `my:claude-answer-questions` が nil のときの deny | `my:claude-error-face`（本物の拒否） |
-
-判定は `my:claude--handle-user` で `tool-names` に覚えたツール名が
-`AskUserQuestion` かどうかで行う。**畳む閾値も error と同じ扱いにする**
-（`my:claude--fold` の `verbatim`）。既定の `0` のままだと、答えが
-灰色の 1 行に畳まれて消える。
-
-### 入力待ちは音で知らせる（`my:claude-notify-sound`、2026-09-10）
-
-許可プロンプトと AskUserQuestion は claude 側の都合で突然ミニバッファを
-開くので、別の窓を見ていると気づけない。鳴らすのはこの 2 つだけ
-（`my:claude--notify-input-wait`）。`C-c a e` のような自分で始めた選択は
-待っていると分かっているので鳴らさない。許可プロンプトでは `v`（入力を
-全部見る）で聞き直すぶんも鳴らさない（ループの外で 1 回だけ呼ぶ）。
-
-**`C-g` の音とは別のものを選ぶこと。** Windows の既定のビープは
-レジストリの
-`HKCU\AppEvents\Schemes\Apps\.Default\.Default\.Current` にあり、この
-マシンでは `Windows Background.wav`。既定値はそれを避けて
-`chimes.wav`（1.23 秒）にしてある。
-
-#### 【重要】同期再生してはいけない
-
-| 鳴らし方 | Emacs が止まる時間 | |
-|---|---|---|
-| `play-sound-file` | **1.43 秒** | Windows は PlaySound を SND_SYNC で呼ぶ |
-| `make-thread` + `play-sound-file` | **1.40 秒** | spawn は 0.1 ms だが逃げられない |
-| **powershell の SoundPlayer に投げる** | **7.9 ms** | 鳴り始めるのは約 0.6 秒後 |
-
-同期で鳴らすと**音が鳴り終わってからプロンプトが出る**。順序が逆で、
-気づかせるという目的を果たさない。
-
-**`make-thread` でも逃げられない。** 再生はグローバルロックを握ったまま
-走るので、メインスレッドが入力を待った瞬間にそこで止まる（実測: スレッドを
-起こした直後の `sleep-for 0.3` が **1.40 秒**かかった）。押したキーは
-失われないが、1.3 秒のあいだ反応が返らない。
-
-そのため `my:claude--play-sound` が子プロセスに投げる（macOS は `afplay`、
-Linux は `paplay` / `aplay`）。どれも見つからない環境でだけ
-`play-sound-file` に落ちる。powershell の起動 0.6 秒は待つのが向こうなので
-こちらは止まらない。
-
-音が読めない / 鳴らせないときは `message` で知らせるだけにする。
-**プロンプトは必ず出す**（聞きそびれるのと、応答が止まるのとでは重さが違う）。
-
-wav の長さも実測してある。`chimes.wav` 1.23 秒、
-`Windows Notify System Generic.wav` 1.29 秒、
-`Windows Information Bar.wav` 0.13 秒、`ding.wav` 0.40 秒。
-
-### 会話バッファの markdown 装飾
-
-`my:claude--fontify-markdown` が 3 つを順に行う。**この順でなければ
-ならない。**
-
-1. ``` のブロックを塗る。言語指定があればその言語として着色する
-2. `|` の表を罫線に組み直す。1 の結果を見てコードブロックの中を避ける
-3. 見出しと行中のコード
-
-**font-lock は使わない。** このバッファは `special-mode` 派生で、挿入時に
-`font-lock-face` を直に載せているため、font-lock を有効にすると
-そちらに上書きされて競合する。ブロックが確定した時点で一度だけ塗る。
-
-塗る位置は 2 か所ある。逐次表示の経路（`content_block_stop`）と、
-delta が来ない経路（スラッシュコマンドの `assistant`）。
-**どちらか片方だけだと `/context` の見出しが素のままになる。**
-
-#### コードブロックの言語別着色
-
-一時バッファで該当モードを立てて `font-lock-ensure` し、付いた `face` を
-`font-lock-face` としてコピーする（org の
-`org-src-font-lock-fontify-block` と同じ手口）。フックは
-`delay-mode-hooks` で走らせず、全体を `condition-case` で囲んである。
-
-言語 → メジャーモードは **`markdown-get-lang-mode` を流用**する。
-`<lang>-mode` / `<lang>-ts-mode` の推測と `fboundp` の確認までやって
-くれるので、自前の `my:claude-lang-mode-alist` に書くのは名前が
-一致しないもの（`elisp` `sh` `console` `json` …）だけで済む。
-
-**背景色を消さないこと。** `my:claude-code-face` は背景しか持たないので、
-構文の face と**並べてリストで**載せる。帰結として `font-lock-face` の
-値がリストになるため、「コードブロックの中か」の判定を `eq` で
-書けなくなる（`my:claude--code-face-p` を使う）。旧コードのまま
-`(eq (get-text-property …) 'my:claude-code-face)` にしておくと、
-**コードブロックの中の `# …` が見出しとして塗り直される。**
-
-描画コストは GUI 実測で **250 行のコードブロック 1 個につき 15.8 ms**。
-ブロックが確定した時点で 1 回だけなので詰まらない。上限は
-`my:claude-fontify-code-max-lines`（既定 300）で押さえてある。
-
-#### 【重要】罫線の表は「罫線素片が 1 文字 2 桁」を勘定に入れる
-
-markdown のパイプ表は罫線（box-drawing）の表に組み直す
-（`my:claude-render-tables`、既定 t）。**桁は Emacs の規則で決める。**
-`site-lisp/eaw.el` が ambiguous を幅 2 にし、`my-appearance.el` が
-罫線素片（JIS X 0208）を HackGen に割り当てるので、**論理幅と実描画幅が
-一致する**。claude 側の桁組みには合わせず、セルの中身だけを取り出して
-`string-width` で組み直す。
-
-> `my-pty`（端末）で ambiguous を幅 1 に切り替えているのとは**逆の話**。
-> あちらは桁を数えているのが conhost なので合わせにいくが、
-> こちらは Emacs 自身が数えるので合わせる必要が無い。
-
-罠は列幅の刻み方にある。**セルの詰め物は半角空白（1 桁）だが、罫線は
-1 文字で 2 桁ある。** 列幅 `w` に対して `(make-string (+ w 2) ?─)` と
-書くと罫線の行だけが倍の長さになる。
-
-```
-幅= 44 |┌─────┬────────┬─────┐|   ← 5 文字 = 10 桁
-幅= 26 |│ 列  │ 説明   │  値 │|   ← セルは 5 桁
-```
-
-`w + 2` が罫線 1 文字の桁数の倍数になるまで列幅を広げて直した。
-倍数の判定に使う値は決め打ちせず `(char-width ?─)` を実測する
-（eaw を外した Emacs では 1 になる）。
-
-GUI 実測（`string-width` だけでは検算にならないので
-`string-pixel-width` も見る）:
-
-```
-幅= 28 px= 224 |┌───┬────┬───┐|
-幅= 28 px= 224 |│ 列   │ 説明   │   値 │|
-幅= 28 px= 224 |├───┼────┼───┤|
-幅= 28 px= 224 |│ a    │ あいう │    1 │|
-幅= 28 px= 224 |│ bb   │ ○△□ │   22 │|
-幅= 28 px= 224 |│ ccc  │ ─│   │  333 │|
-幅= 28 px= 224 |└───┴────┴───┘|
-```
-
-全角・ambiguous・罫線素片を混ぜても全 7 行が一致する。
-`┌┬┐├┼┤└┴┘│─` はすべて `char-width` 2 / 16px。
-
-変換するのは**区切り行（`|---|:---:|`）を伴う表だけ**。無いと
-`a | b` のような何気ない行まで拾う。
-
-#### 【重要】会話バッファへの書き込みは必ず `my:claude--at-end` を通す
-
-このマクロが 3 つを引き受ける。**`insert` を直接書いてはいけない。**
-
-1. 挿す先を区切りの手前（`my:claude--output-end`）にする
-2. 書いたぶんを `my:claude--protect` で確定領域にする
-   （read-only / keymap を付け忘れるとそこだけ編集できてしまう）
-3. undo を汚さない（前掲）
-
-インライン入力にする前は「末尾を見ている窓だけ `set-window-point` で
-追従させる」仕掛けがここにあった。**いまは要らない**（挿入位置が `point`
-より前なので勝手に追従する）。当時の教訓は残しておく価値がある:
-`save-excursion` のマーカーは `insertion-type` が nil なので、**末尾での
-挿入では挿入したテキストの前に取り残される**。2026-09-04 には
-`my:claude--insert-diff` と `my:claude--end-paragraph` が直接書いていた
-せいで「差分が 1 回出ると自動スクロールが止まる」状態になっていた。
-書き込み口を 1 か所に寄せる理由はこれで、その必要は今も変わらない。
-
-#### `my:claude-mode` は markdown-mode 派生
-
-入力エリアを markdown として書けるようにするため、会話バッファごと
-`markdown-mode` から派生させてある（`special-mode` はやめた。read-only は
-テキストプロパティで実現している）。コードブロックの着色は
-`markdown-fontify-code-blocks-natively` に任せる。
-
-**`markdown-mode-hook` は走らせない。** `my-text.el` の
-`my:setup-markdown-mode` は `.md` ファイルを編集する前提の設定で、
-会話バッファに持ち込む理由が無い。`define-derived-mode` は親を
-`delay-mode-hooks` で包み、最後に `run-mode-hooks` が `run-hooks` で
-回すので、モード本体で `(setq-local markdown-mode-hook nil)` すれば
-親のフックだけを外せる。**`text-mode-hook` は潰さない**ので、
-`display-line-numbers-mode` は `my:claude-mode-hook` で個別に切る
-（親のフックのほうが先に走るため、モード本体で切っても間に合わない）。
-
-`C-c C-c` は markdown 側では prefix だが、子のキーマップが先に引かれる
-ので `my:claude-send` が勝つ。`completion-at-point-functions` の
-`my:claude--capf`（深さ -100）は**必ず張り直すこと**（落とすと行頭の
-`/` が `cape-file` に食われて C: 直下の一覧が出る）。
-
-`markdown-mode` は autoload なので `my-claude.el` から
-`(require 'markdown-mode)` する必要は無い。`define-derived-mode` は
-親のキーマップを**モード関数の中で** `set-keymap-parent` する
-（`derived.el` のコメントが「親がまだロードされていないことがある」と
-明記している）。
-
-### 画像を送る（`M-v`）
-
-端末版の claude は `M-v` でクリップボードの画像を送れる。同じことを
-stream-json 経路でやる。user メッセージの content は**ブロックの配列**
-なので、Anthropic API と同じ形の image ブロックを混ぜればよい。
-
-```json
-{"type":"image","source":{"type":"base64","media_type":"image/png","data":"..."}}
-```
-
-**一時ファイルに保存して Read ツールに読ませる必要は無い。** それだと
-1 往復とツールの許可が余計に要る。実測（`--model haiku`、320x160 の PNG を
-`赤い円 + BANANA` で作って送った）:
-
-| | |
-|---|---|
-| CLI に直接パイプ | 「赤い円と BANANA という英単語が描かれています」 |
-| **Emacs が組み立てた JSON をパイプ** | 「赤いピンク色の円と、青色で『BANANA』と書かれています」 |
-
-後者は `my:claude--user-content` が作った 2903 バイトの行をそのまま
-`claude -p --input-format stream-json` に流したもの。日本語のプロンプトと
-画像が同居しても壊れない（base64 は ASCII なので
-`default-process-coding-system` の影響を受けない）。
-
-#### クリップボードからは `image/png` が直接取れる
-
-**OS ごとの分岐は要らない。** Emacs 30 で MS-Windows も `yank-media` に
-対応し、クリップボードの DIB を PNG に変換して提供する。実測
-（Emacs 31.1 / Windows 11、PowerShell の `Clipboard::SetImage` で載せた）:
-
-```elisp
-(gui-get-selection 'CLIPBOARD 'TARGETS)
-;; => [DataObject BITMAP System.Drawing.Bitmap Ole\ Private\ Data DIB image/png]
-(gui-get-selection 'CLIPBOARD 'image/png)
-;; => 1960 バイトの **unibyte** 文字列。先頭は "\211PNG\n\n"
-```
-
-そのまま `base64-encode-string` に渡せる（multibyte だと落ちるので
-`my:claude--clipboard-image` は念のため `encode-coding-string` を通す）。
-送れる型は API の制約で png / jpeg / gif / webp の 4 つだけ。
-
-#### 送るかどうかはバッファの中身で決める
-
-`M-v` が入力エリアに挿すのは `[Image #1]` というプレースホルダで、
-画像そのものはバッファローカルの `my:claude--input-images` が持つ。
-**送信時に本文へ残っているプレースホルダだけを送る**
-（`my:claude--input-attachments`）。
-
-- 消せば取り消せる。添付の管理コマンドが要らない
-- 並べ替えれば送る順も変わる（**添付リストの順ではなく本文の出現順**）
-- 同じ番号を 2 回書いても 1 枚しか送らない
-
-**消えたことを警告してはいけない。** 当初は送信時に「プレースホルダが
-消えていた画像 N 枚は送っていない」と知らせていたが、**貼り直すには
-「消す → 貼る」の 2 手が要る**ので、正常な操作のたびに必ず出る。
-画像は送れているのに失敗したように見えるだけだった。
-
-代わりに、新しく貼るときに**本文から消えている添付を捨てて番号を
-詰め直す**（`my:claude--input-prune-images`）。`[Image #1]` を消して
-貼り直せばまた #1 になる。掃除を「貼るとき」に限るのは、編集のたびに
-やると undo で戻したプレースホルダの画像が失われるため。
-
-content は「ラベル → 画像 → …→ 本文」の順に並べる。Anthropic の
-ドキュメントが複数画像のときはラベルを付けて先に置くことを勧めており、
-本文からも `[Image #1]` と同じ表記で参照できる。
-
-```
-[{"type":"text","text":"[Image #1]"}, {"type":"image",...}, {"type":"text","text":"本文"}]
-```
-
-**履歴に残すテキストからはプレースホルダを外す**
-（`my:claude--strip-placeholders`）。`M-p` で呼び出しても画像は付いて
-こないので、`[Image #1]` だけが claude に届いて話が食い違う。
-
-#### プレビューは overlay。テキストプロパティでは駄目
-
-`display` でプレースホルダを画像に置き換えてしまうと、上の
-「消せば取り消せる」が壊れる（文字が見えないものは消しにくいし、
-1 文字消しても残りに `display` が残る）。overlay の `before-string` なら
-文字の前にサムネイルが並ぶだけで編集の邪魔にならず、`evaporate` を
-立てておけばプレースホルダを消したときに overlay も消える。
-
-face も overlay に載せる。`markdown-mode` の font-lock は `[...]` を
-参照リンクとして着色するが、overlay の face はその上に重なる。
-
-サムネイルは `create-image` の `:max-height` で行数に合わせる
-（入力エリア 2 行、送信後のエコー 8 行）。ImageMagick は要らない
-（Emacs 27 以降はネイティブに拡縮する）。実測で 320x160 → 272x136。
-
-#### ログの base64 は落とす
-
-`my:claude-log` が t のとき、画像を送ると数百 KB の base64 が
-`*claude-log(PROJ)*` に残ってログが読めなくなる。`my:claude--log-line`
-が 200 文字以上続く `"data":"..."` だけを `<2616 文字>` に潰す。
-
-#### `M-v` は cua に奪われない
-
-`cua-mode` は `emulation-mode-map-alists` 経由なのでメジャーモードの
-ローカルマップより先に引かれるが、`cua-global-keymap` の `M-v`
-（`cua-scroll-down`）が出るのは**ローカルマップに `M-v` が無いとき
-だけ**。実測（`cua-enable-cua-keys` は nil）:
-
-| バッファ | `M-v` |
-|---|---|
-| `my:claude-mode`（入力エリア） | `my:claude-input-yank-image` |
-| `org-mode` | `my:org-yank-image` |
-| `fundamental-mode` | `cua-scroll-down` |
-
-画面送りが要るときは `C-z`（`my-keybind.el`）。org で `M-v` を
-潰しているのと同じ流儀。
-
-#### 上限は 3.5 MB（エンコード前）
-
-API の上限は**base64 にしたあとで 5 MB** なので、生バイトではその 3/4 が
-天井（`my:claude-image-max-bytes`）。超えたら `user-error` で断る。黙って
-送っても API がリクエストごと弾くだけで、理由の分からないエラーが返る。
-
-### セッションの再開とモデルの変更
-
-| | |
-|---|---|
-| `--continue` | そのディレクトリの直近の会話を継ぐ。Emacs を再起動しても、端末で続けていた会話でも繋がる |
-| `--resume <id>` | `session_id` を指定して継ぐ |
-
-どちらも stream-json と併用できる（実測）。`init` イベントの `session_id` を
-覚えているので、`C-c a m` は **`--resume` でモデルだけ差し替える**。
-Opus と Haiku を行き来しても、それまでの話は消えない（実測で確認）。
-
-**アカウントをまたぐ再開はできない。** セッションの保存先が
-`CLAUDE_CONFIG_DIR` の下なので、`C-c a e` で環境を変えると会話は切れる。
-
-### スラッシュコマンドの補完
-
-`initialize` の control_response に `commands`（名前・説明・引数ヒント）が
-入っている。実測で 52 個。これを覚えて入力エリアの `completion-at-point`
-に流す（確定した会話の側では何も出さない）。
-
-**行頭の `/` だけを対象にすること。** 文中のスラッシュまで拾うと
-`src/foo` のようなパスを書くたびに候補が出て邪魔になる。
-2 つめの `/` が来たらパスだと見なして手を引き、`cape-file` に譲る。
-
-#### 【重要】補完領域に先頭の `/` を含めること
-
-`/` の**後ろ**から補完領域を始めると接頭辞の長さが 0 になり、
-`corfu-auto-prefix`（`my-completion.el` で 1）に満たないという理由で
-**corfu の自動補完に捨てられる**。捨てられると次の capf が呼ばれ、
-深さ 90 にいる `cape-file` が `/` を絶対パスと解釈して
-C: 直下のディレクトリ一覧を出す。実際にそうなっていた。
-
-領域を `/` から取り、候補も `/name` の形にすれば接頭辞長が 1 以上になる。
-
-| 入力 | |
-|---|---|
-| `/` | claimed（接頭辞長 1、候補 52、corfu の条件を満たす） |
-| `/cont` | claimed（接頭辞長 5） |
-| `/c/Projects/foo` | 手を引く（`cape-file` がパスとして扱う） |
-| `see src/foo` | 手を引く |
-| `/context and more` | 手を引く |
-
-capf は深さ `-100` で入れて `cape-file`（90）より確実に先に来るようにしてある。
-
-#### 【重要】許可と拒否で control_response の形が違う
-
-claude が返してくるエラーが契約を明示している。
-
-```
-Expected {behavior: 'allow', updatedInput?: object}
-      or {behavior: 'deny', message: string}
-```
-
-**拒否に `updatedInput` を付けてはいけない。`message` は必須。**
-どちらを外しても不正な応答と判定され、claude には「拒否された」ではなく
-「許可フックでエラーが起きた」と伝わる。実測:
-
-| 送った形 | claude が受け取った tool_result |
-|---|---|
-| `{deny, updatedInput}` | `The canUseTool callback returned an invalid permission result. …` |
-| `{deny}` だけ | 同上 |
-| **`{deny, message}`** | **その message がそのまま届く** |
-
-**ツールが実行されない点はどれも同じなので気づきにくい。**
-違いは claude への伝わり方だけで、不正な形だと
-「システム側の問題です」と的外れな返事をしてくる。
-
-許可プロンプトの `r`（理由を書いて拒否）はこの `message` に載る。
-日本語もそのまま届く。「そのファイルは触らないで、代わりに…」と
-書くと claude が別の手を考える。
-
-#### 【重要】スラッシュコマンドは `stream_event` を伴わない
-
-`num_turns=0` で API を通らないため、**`assistant` で本文が来るのに
-`stream_event` が 1 つも来ない**。実測:
-
-| 入力 | イベント | assistant 本文 |
-|---|---|---|
-| `/context` | `assistant` `result` のみ | 6948 文字 |
-| `/mcp` | 同上 | 98 文字 |
-| `/usage` | 同上 | 855 文字 |
-| 普通の質問 | `stream/*` が並ぶ | 135 文字 |
-
-そのため「逐次表示が有効なら `assistant` の text は捨てる」としてはいけない。
-`my:claude-stream` ではなく **そのブロックを実際に delta で出したか**
-（`streamed-text` フラグ）で判断する。これを間違えると
-**`/mcp` などが送信できたのに何も表示されない**。実際にそうなっていた。
-
-スラッシュコマンドは API を消費しない（`$0.0000`）ので気軽に使える。
-ただし `/mcp` は「詳細は端末の `/mcp` で」と要約を返すだけで、対話 UI は出ない。
-`init` の `terminal_slash_commands`（`doctor` / `color` / `reload-plugins`）は
-端末が要るもので、補完の注釈に `[端末専用]` と出るようにしてある。
-
-### 【重要】Emacs から起動すると cwd のドライブレターが小文字になる
-
-`.claude/settings.json` を置いてあるプロジェクトで `C-c a a` すると、
-かつては会話バッファにこれが出ていた。
-
-```
-Ignoring 17 permissions.allow entries from .claude/settings.json:
-this workspace has not been trusted. ...
-set projects["c:/Projects/ESC-Web/WebCoreSystem_v1"].hasTrustDialogAccepted: true
-```
-
-原因は **Emacs が子プロセスの作業ディレクトリのドライブレターを小文字にする**こと。
-実測（Emacs 31.1 / Windows 11）:
-
-| 式 | 値 |
-|---|---|
-| `(expand-file-name "C:/Users/masao/.emacs.d/")` | `C:/Users/masao/.emacs.d/`（明示した大文字は保つ） |
-| `(expand-file-name "~/.emacs.d/")` | **`c:/Users/masao/.emacs.d/`** |
-| `(directory-file-name "C:/Users/masao/.emacs.d/")` | **`c:/Users/masao/.emacs.d`** |
-| **子プロセスが見る cwd** | **`c:\Users\masao\.emacs.d`** |
-
-`default-directory` を大文字にしても変わらない。`make-process` は
-`directory-file-name` と同じ経路で作業ディレクトリを組み立てるので、
-そこで小文字に落ちる。**Lisp 側に逃げ道は無い。**
-
-一方、端末で対話的に起動した claude は大文字のまま記録するので、
-`.claude.json` の `projects` に**大小 2 つのエントリができる**。
-
-```
-C:/Projects/ESC-Web/WebCoreSystem_v1   trusted=True    ← 端末の TUI が書いた
-c:/Projects/ESC-Web/WebCoreSystem_v1   trusted=False   ← Emacs 経由で作られた
-```
-
-JSON のキーなので claude は別のプロジェクトとして扱う。信頼設定も
-MCP サーバの設定も片方にしか効かない。gopls が大文字のドライブレターを
-返して診断が出なかったのとまったく同じ罠。
-
-**`~/.claude/projects/` のディレクトリ名は分かれない。** Windows の
-ファイルシステムが大小を区別しないので、`c--…` を作ろうとしても既にある
-`C--…` が再利用される。記録された `cwd` は小文字なのにディレクトリ名は
-大文字、という状態になっていた。**分かれるのは `.claude.json` のキーだけ。**
-
-`--settings` でファイルや JSON 文字列を明示しても回避できない（実測）。
-`-p` は仕様として信頼ダイアログを出さない。
-
-#### cmd.exe の `cd /d` を挟んで大文字に揃える（2026-09-07）
-
-`cmd.exe` の `cd /d` は**ドライブレターを大文字に正規化する**（残りの桁も
-ディスク上の綴りに揃う）。そこを通して起こせば、端末から起動したときと
-同じ cwd になる。
-
-```
-cmd.exe /d /c cd /d C:\Users\masao\.emacs.d && C:\Users\masao\.local\bin\claude.exe -p …
-```
-
-`my:claude--wrap-command` がこれを組み立てる（`my:claude-uppercase-cwd`、
-Windows で既定 t）。実測（`tmp/` に作った新しいディレクトリで `-p` を 1 往復）:
-
-| | 出来た `projects/` のディレクトリ | 記録された `cwd` |
-|---|---|---|
-| `my:claude-uppercase-cwd` = t | `C--…-cwd-probe-dir` | **`C:\Users\masao\.emacs.d\tmp\cwd-probe-dir`** |
-| `my:claude-uppercase-cwd` = nil | `c--…-cwd-probe-dir2` | — |
-
-- **引数はそのまま素通しされる。** 空白を含む引数も壊れない（同じ引数列を
-  node に直接渡した場合と cmd.exe 越しの場合で `argv` が一致することを実測）
-- **cmd.exe が解釈する文字（`& | < > ^ " %`）が引数にあれば包まない。**
-  `my:claude-extra-args` には何でも書けるので、壊すより諦める
-- **UNC パスでも包まない。** cmd.exe は UNC をカレントディレクトリにできない
-- プロセスの木に cmd.exe が 1 つ挟まるが、cmd.exe は stdin を自分では
-  読まないので stdin / stdout はそのまま claude に繋がる。EOF での終了も効く
-- **パスを `directory-file-name` / `expand-file-name` で組み立てないこと**
-  （上の表のとおり、そこで小文字に落ちる）。`my:claude--dos-path` が
-  文字列として `/` → `\` の置換と末尾の除去をして、ドライブレターを大文字にする
-
-`.claude.json` のキー（`my:claude--workspace-key`）と過去セッションの
-置き場（`my:claude--session-directory`）も**同じ関数から採る**。
-起こし方と綴りがずれると別のプロジェクトを指してしまう。
-`my:claude-uppercase-cwd` を nil にすれば両方とも小文字に戻る。
-
-**既にできてしまった小文字のエントリは消えない。** `.claude.json` の
-`projects` に大小 2 つ並んでいるなら、小文字側の設定（MCP サーバ、信頼）を
-大文字側へ移してから消す。
-
-`C-c a t`（`my:claude-trust-workspace`）が
-`projects[KEY].hasTrustDialogAccepted` を `t` にする。KEY は claude が
-警告で言ってきたものをそのまま使う。**セッションを先に終了させてから
-書く**（claude 自身がこのファイルを書き戻すため）。書き換え前に
-`.claude.json.bak-my-claude-<時刻>` を作る。
-
-書き戻しは `json-parse-buffer` → `json-serialize` の往復で行う。
-69 KB の設定で検証したところ、差分は追加した 1 エントリのみで
-`oauthAccount` を含め無傷だった。
-
-> 検証で `equal` を使ってハッシュテーブルを比べてはいけない。
-> **Emacs の `equal` はハッシュテーブルの中身を見ない**ので、
-> 同一でも nil になる。中身を比べるなら serialize してから。
-
-#### 【重要】既定の環境には `CLAUDE_CONFIG_DIR` を「設定しない」
-
-`~/.claude` を明示的に指定してはいけない。claude は
-`$CLAUDE_CONFIG_DIR/.claude.json` を探すが、実体は `~/.claude.json` に
-あるため見つからない。実測:
-
-| | `email` / `orgName` | 標準出力 |
-|---|---|---|
-| 未設定（既定） | `ponkore@gmail.com` / 取れる | JSON のみ |
-| `CLAUDE_CONFIG_DIR=~/.claude` | **どちらも `null`** | **警告が混ざる** |
-
-警告は stderr ではなく**標準出力**に出るので、stream-json の途中に
-非 JSON の行が混ざることになる。`my:claude-environments` では
-既定の環境の CONFIG-DIR を `nil` にすること。
-
-#### 【重要】nil のときは「設定しない」ではなく「消す」
-
-Emacs 自身が `CLAUDE_CONFIG_DIR` の設定された環境から起動されていると、
-何もしなければそれを継承する。**「既定（Pro）」を選んだつもりで別の
-アカウントに繋がる。** 実際に踏んだ（`personal` が `max` と表示された）。
-
-`my:claude--process-environment` が `setenv` に nil を渡して
-明示的に削除している。
-
-### 【重要】起動オプションは 4 つとも省略できない
-
-```
-claude -p --verbose --input-format stream-json --output-format stream-json        --permission-prompt-tool stdio
-```
-
-| 省略すると | |
-|---|---|
-| `--verbose` | **即エラー終了**（`--output-format=stream-json requires --verbose`） |
-| `--permission-prompt-tool stdio` | **許可要求が黙って自動拒否される** |
-
-後者がとくに厄介。`--permission-prompts` の既定は `host`（= クライアントが答える）
-なのに、このオプションが無いと `control_request` が**一度も飛んで来ず**、
-`system/permission_denied` が流れてツールが実行されないだけになる。
-実測では `Write` が拒否され、付けると `can_use_tool` が届いて許可でき、
-ファイルが実際に作られた。**ツールが動かないときの第一容疑者。**
-
-### 【重要】`default-process-coding-system` を束縛して起動する
-
-`my-japanese.el` がグローバルの cdr を cp932 にしているため、束縛せずに
-起動すると**標準入力の日本語が壊れる**。この経路は引数ではなく標準入力で
-本文を渡すので、`(utf-8-unix . utf-8-unix)` でよい。
-「引数は cp932」の話（別節）とは逆になる点に注意。
-
-### 割り込んでもセッションは死なない
-
-`{"type":"control_request","request":{"subtype":"interrupt"}}` を送ると
-`control_response` が返り、続けて `result` が
-`terminal_reason=aborted_streaming` / `is_error=true` で来る。
-**プロセスは生きており、次のターンもそのまま送れる**（実測）。
-
-`result` が `is_error` のときに EOF を送るとプロセスの終了コードは 1 になるが、
-異常終了ではない。sentinel で騒がないこと。
-
-### `system/init` はターンごとに来る
-
-起動直後ではなく**最初のメッセージを送ったあとに来る。しかも毎ターン来る**。
-バッファに挿すと会話の途中に何度も見出しが混ざるので、`header-line-format`
-に出している。
-
-### イベントは `assistant` だけ見れば表示できる
-
-`--include-partial-messages` を付けると `stream_event` でトークン単位に
-刻まれて来るが、`assistant` イベントがブロック確定ごとに丸ごと来るので、
-逐次表示が要らないうちは `stream_event` を捨ててよい。
-
-### 検証はプローブで安く
-
-`--model haiku --tools ""` にする。Opus だと 1 往復で $0.83 かかった
-（大半はシステムプロンプトのキャッシュ作成）。
-`my:claude-log` を t にすると生の JSON Lines が残るので、
-上流のイベント種別が変わったときに気づける。
-
-## はてなブログへ投稿する (`my-htnblog.el`)
-
-毎日 1 記事、カテゴリー・タイトル・本文 1 行目が決まっているので、
-`M-x htnblog` でそれをプリセットしたバッファを開き、本文を書いて `C-c C-c`
-すると公開される。外部コマンドは要らない。
-
-| キー | |
-|---|---|
-| `M-x htnblog` | 記事を書くバッファを開く（`C-u` で書きかけを捨ててひな形を入れ直す） |
-| `C-c C-c` | 確認して投稿。成功したらバッファを閉じ、記事 URL を kill-ring に入れる |
-| `C-c C-k` | 書きかけを捨てて閉じる |
-
-区切り（`--- 前日分 ---`）から下には最新の公開記事が参考として入る（後述）。
-読み取り専用で、投稿には含まれない。
-
-ヘッダの書式は [htnblog コマンド](https://github.com/hymkor/htnblog-go) の
-`new` と同じにしてある。あちらで書いた下書きをそのまま貼っても通る。
-`Category` は複数行書ける。`Draft: yes` を足すと公開せず下書きになる。
-
-````
-```header
-Category: 体調管理
-Title: 9月7日(月)の記録
-```
-
-* 9月7日(月)
-````
-
-### API は薄い。Basic 認証 1 本で足りる
-
-WSSE も OAuth も要らない（htnblog-go の `post.go` も `SetBasicAuth` 1 行）。
-認証情報は htnblog コマンドと同じ `~/.htnblog` から読む
-（`userid` / `endpointurl` / `apikey`）。投稿は `<endpointurl>/entry` へ
-Atom の entry を POST するだけ。
-
-**`app:draft` を `no` にすれば最初から公開状態で投稿できる。**
-htnblog コマンドの `new` → `publish` が 2 手なのは、あちらの `new` が
-下書き固定だからで、API の制約ではない。
-
-HTTP は組み込みの url.el。子プロセスを起こさないので、この設定の持病である
-「Windows の `call-process` が遅い」とは無関係。
-
-### 踏みやすい 3 点
-
-- **`url-request-data` は unibyte にする。** `encode-coding-string` を通さないと
-  日本語が化ける。`default-process-coding-system` の話（別節）と同じ構図だが、
-  こちらはプロセスを通らないので `encode-coding-string` で明示するしかない
-- **CDATA に `]]>` が現れたら分割する**（`]]]]><![CDATA[>`）。本文は
-  ユーザーが自由に書くので必ず起こりうる。実測で `]]>` 単体・連続とも往復した
-- **曜日は `format-time-string` の `%a` に頼らない。** `system-time-locale` 次第で
-  英語になる。`my:htnblog--day-names` に自前で持つ（`decoded-time-weekday` は
-  0 = 日曜）
-
-`apikey` を残さないため、`url-debug` を nil に束縛し、応答バッファは
-`unwind-protect` で必ず kill する。失敗した応答だけ `*htnblog-error*` に出す
-（本文に認証情報は含まれない）。
-
-### 実測（2026-09-07）
-
-| | |
-|---|---|
-| `GET <endpointurl>/entry`（記事一覧） | **0.31 秒** / 18465 バイト / entry 10 件 |
-| `Draft: yes` で 1 本 POST | 成功。サーバ側で `app:draft` が `yes`、`rel=alternate` から記事 URL が取れた |
-
-`M-x htnblog` から `C-c C-c` までの経路（ヘッダ解析 → 確認 → POST →
-URL を kill-ring → バッファ kill）を batch で通してある。**`y-or-n-p` だけは
-batch では stdin を待つので `cl-letf` でスタブする。**
-
-なお既存の記事はタイトルが揺れていた（`9月7日の記録` / `9月05日(土)の記録`）。
-手で打っている限り避けられないので、ひな形を固定する動機はここにある。
-
-### 前日分（最新の公開記事）を参考に貼る
-
-`my:htnblog-show-previous`（既定 t）が非 nil なら、ひな形の後ろに区切り
-（`my:htnblog-previous-separator`、既定 `--- 前日分 ---`）を置いて最新の
-公開記事を貼る。読み取り専用で、**投稿には含まれない**。
-
-#### 取得は非同期にする
-
-同期にすると `M-x htnblog` が散発的に固まる。GUI 実測:
-
-| | |
-|---|---|
-| GET 1 回目 | **15.39 秒** |
-| GET 2〜4 回目 | 0.11〜0.14 秒 |
-| DNS 解決 / TCP 接続 / TLS 接続 | 0.01 / 0.02 / 0.06 秒 |
-| url の接続を捨ててから GET | 0.16 秒 |
-
-**Emacs 側ではない。** 再接続すら 0.16 秒なので、15 秒はサーバ応答の揺らぎ。
-同期で待つ限り防げないので `url-retrieve` に変えた。バッファは即座に開き
-（GUI 実測 **0.014 秒**）、記事は 0.15 秒ほど遅れて入る。
-
-書いている最中に届くので、`buffer-undo-list` を `t` に束縛し、挿入前後で
-`buffer-modified-p` を保つ。`point` は `save-excursion` で動かさない。
-
-#### 投稿に混ざらない仕掛けは 2 重
-
-- **境目はテキストプロパティ `my:htnblog-previous` で決める**
-  （`my:htnblog--body-end`）。区切りの文字列だけに頼ると、行頭に 1 文字
-  入っただけで `^区切り` の一致が外れ、**前日分が丸ごと本文に混ざる**
-- **read-only で手入力を防ぐ。** ただし挿入と削除で挙動が違う
-
-| | |
-|---|---|
-| `delete-char` / `kill-line` / `delete-region` | プロパティだけで防げる |
-| `self-insert-command` | **stickiness 次第。素では防げない** |
-
-`front-sticky '(read-only)` が要る。逆に **`rear-nonsticky` は付けてはいけない**
-（read-only な文字の直後への挿入が継承されず素通りする）。ただし
-**区切りの前の改行 1 つは領域の外に置く**こと。カーソルの初期位置＝領域の
-先頭になると、front-sticky のせいで**本文が書けなくなる**（実際に踏んだ）。
-
-自分で貼るときは `inhibit-read-only` を束縛する。防ぎたいのは手入力だけ。
-
-#### 【重要】`defvar-local` の世代カウンタは `permanent-local` にする
-
-`C-u` で入れ直したとき、古いリクエストの応答を捨てるために世代を持たせて
-いるが、**`define-derived-mode` は `kill-all-local-variables` を通る**ので、
-`permanent-local` を付けないとグローバル値に戻る。世代が常に 1 になり、
-古い応答まで一致して二重に貼り、2 回目の挿入が read-only に当たって
-`error in process filter: Text is read-only` で落ちる。
-
-保険として `my:htnblog--insert-previous` 自身も、既に貼ってあれば何もしない。
-
-#### libxml には切り替えない
-
-`libxml-parse-xml-region` は速い（0.001 秒）が、**名前空間の prefix を落とす**。
-`app:control` が `control` になるので、`xml-get-children` の呼び出しが
-静かに nil を返すようになる。`xml-parse-region` は prefix を保ち、18 KB の
-feed でも **0.002 秒**なので、切り替える理由が無い。
-
-| | `xml-parse-region` | `libxml-parse-xml-region` |
-|---|---|---|
-| 速度（18 KB） | 0.002 秒 | 0.001 秒 |
-| `app:control` | **取れる** | **nil**（`control` になる） |
-| CDATA | 分割されたぶんが別ノードで返る（`my:htnblog--node-text` で連結） | 同じ |
-
-## 対話 TUI を Emacs で動かす (`ptyd/` + `my-pty.el`)
-
-Windows の Emacs には PTY が無く `make-process` は常にパイプになるので、
-対話 TUI が動かない。`ptyd`（Go）が疑似コンソールを持って子プロセスを
-動かし、VT バイト列を stdio で Emacs に流す。表示は term.el に任せる。
-
-```
-Emacs ──stdin (JSON Lines)──> ptyd ──ConPTY──> 子プロセス
-      <──stdout (生の VT)──        <─────────
-      <──stderr (診断の行)──
-```
-
-| | |
-|---|---|
-| `M-x my:pty-build` | `ptyd.exe` を作る（`gitd` と同じく各マシンで） |
-| `M-x my:pty-run` | 任意のコマンドを端末で動かす（汎用） |
-| `M-x my:claude-term` | claude の TUI を開く |
-
-**バイナリが無ければ `user-error` になるだけ**で、他の設定には影響しない。
-
-stdin だけ JSON にしてあるのは、キー入力のほかに画面サイズを送る必要が
-あるため。stdout を生のままにしてあるのは、そちらが本流で量が多く、
-base64 と JSON のエスケープを挟む意味が無いから。
-
-### 表示は eat (`my:pty-backend`、既定 `eat`)
-
-term.el では通常の TUI がまともに映らなかった。代替画面 (`ESC[?1049`) も
-同期出力も持たず、私用パラメータ付きの CSI (`ESC[>4;2m`) を SGR と
-誤解釈する。`--ax-screen-reader` に逃がせば崩れないが、平板で読みにくい。
-
-`eat`（NonGNU ELPA、純 elisp）に差し替えた。**通常モードの TUI が
-そのまま出る。** term.el は `my:pty-backend` を `term` にすれば残っている。
-
-| | term.el | eat |
-|---|---|---|
-| 代替画面 `?1049` | ✗（`?47` のみ） | ○ |
-| bracketed paste `?2004` | ✗ | ○ |
-| マウス `?1000`〜`?1006` | ✗ | ○ |
-| `ESC[>4;2m` | **SGR 0;2 と誤解釈** | 私用パラメータとして別扱い |
-| UTF-8 の復号 | `locale-coding-system` 決め打ち | 自前 |
-| アプリへの書き込み | `process-send-string`（advice が要る） | **`input-function` パラメータ** |
-
-最後の行が効いた。eat は端末→アプリの書き込みを `input-function` から
-出すので、**term.el のときに必要だった advice が丸ごと不要**になる。
-
-プロセスの符号化も逆になる。**eat は復号済みの文字列**を受け取る
-（パーサが文字を比較する）が、**term.el は生バイト**を要求して復号を
-自分でやる。`:coding` を切り替えている。
-
-### 【重要】起動時のサイズはメジャーモードを立ててから測る
-
-`eat-mode` も `term-mode` も `kill-all-local-variables` を通るので、
-**先にヘッダ行や `truncate-lines` を設定しても消える**。実際に消えていた。
-
-順序は「モードを立てる → ヘッダ行と `truncate-lines` → サイズを測る →
-端末を作る」。行数は `window-body-height` ではなく
-`(floor (window-screen-lines))` で採る（ヘッダ行と端数行を勘定に入れる）。
-`pop-to-buffer` で別のウィンドウに移ることがあるので、そのあとにも
-`my:pty--sync-size` を呼ぶ。
-
-**ヘッダ行を立てるのはサイズを測る前。** あとから足すと使える行数が 1 減り、
-疑似コンソールと Emacs の行数が食い違って、以後の描画が 1 行ずつずれる。
-
-### 【重要】端末を開いている間は ambiguous 幅を 1 に切り替える
-
-**これを入れないとロゴが横に伸び、表の罫線が揃わない。**
-
-claude も conhost も East Asian Ambiguous を **幅 1** として桁を組むが、
-`site-lisp/eaw.el` を入れた Emacs はそれらを幅 2 で描く。実測:
-
-| 文字 | この設定 | `emacs -Q` + 日本語環境 |
-|---|---|---|
-| `█` U+2588（マスコット） | **2** | 1 |
-| `▀` U+2580 | **2** | 1 |
-| `─` U+2500（罫線） | **2** | 1 |
-| `│` U+2502 | **2** | 1 |
-| `·` U+00B7 | **2** | 1 |
-| `★` U+2605 | **2** | 1 |
-| `○` U+25CB | 2 | 2（組み込みでも幅 2） |
-
-同じ画面を WezTerm で出すと正しく揃うので、**ずれているのは Emacs 側だけ**
-だと切り分けられる。
-
-`char-width-table` はグローバルで**バッファ単位に変えられない**ため、
-`my:pty-narrow-ambiguous`（既定 t）が「最初の端末を開いたら全体を幅 1 に
-切り替え、最後の端末を閉じたら戻す」形にしている。切り替えたときは
-`message` で知らせる。復帰はプロセスの sentinel とバッファの
-`kill-buffer-hook` の両方から呼ぶ。
-
-他のバッファの桁揃えも端末を開いている間だけ変わる。それが困るときは
-`my:pty-narrow-ambiguous` を nil にする（端末の見た目は崩れる）。
-
-**`my:pty-narrow-ambiguous` は defcustom なので `M-x` では出てこない。**
-開いている端末にその場で反映して見比べたいので、
-`M-x my:pty-toggle-ambiguous-width` を用意してある。崩れの原因が eaw か
-どうかは、これで切り替えて見比べるのがいちばん早い。
-
-### 【重要】端末バッファでは折り返さない (`truncate-lines` = t)
-
-**折り返すと 1 桁ずれただけで以後の行が全部ずれる。**
-
-`my:pty-narrow-ambiguous` を nil にしたときや、幅の解釈が食い違う文字が
-残っているときの保険。折り返すとレイアウトが崩れるが、`truncate-lines`
-なら右端が切れるだけで格子は保たれる。
-
-### `⏵` が `[]` になるのはフォントの問題
-
-`glyphless-char-display` の extra slot 0 を eat が `empty-box` にしている
-（`eat--setup-glyphless-chars`）。**幅の問題ではない**（U+23F5 は幅 1）。
-そのコードポイントのグリフを持つフォントが無いだけ。豆腐ではなく
-eat が意図して出している空の箱。
-
-### 【重要】幅表だけでは足りない。フォントも切り替える
-
-`char-width` を 1 にしても、**フォントがその文字を 2 桁ぶんの幅で描けば
-見た目はずれる。** GUI では `string-pixel-width` が `char-width` ではなく
-フォントの送り幅を返すことからも分かる。`M-x my:pty-toggle-ambiguous-width`
-で画面が変わらなかったのはこれが理由。
-
-原因は `my-appearance.el` の
-
-```elisp
-(set-fontset-font nil 'japanese-jisx0208 jp-fontspec)  ; jp-fontspec = HackGen
-```
-
-`─` (U+2500) は **JIS X 0208 の罫線素片**なので、この行で HackGen に
-割り当てられ、全角 16px で描かれる。
-
-実測（`:height` 116、半角 8px / 全角 16px の設定）:
-
-| フォント | `a` | `あ` | `─` | `①` | `★` | |
-|---|---|---|---|---|---|---|
-| HackGen（通常） | 8 | 16 | **16** | **16** | 16 | 全部ずれる |
-| HackGen Console NF | 8 | 16 | 8 | **16** | 16 | 丸数字が残る |
-| **Consolas** | 8 | 16 | 8 | **8** | 16 | **最良** |
-| HackGen35 Console NF | 8 | 16 | 11 | 9 | — | 3:5 設計で合わない |
-| Cascadia Mono | 9 | 16 | 9 | 9 | — | 半角が 9px |
-
-**`my:pty-console-font` の既定は nil（切り替えない）。** 切り替えると
-`char-width-table` と同じく **Emacs 全体**のフォントが変わり、編集中の
-バッファまで巻き込む。端末の見た目を優先したいときだけ Consolas にする。 Consolas は日本語を
-持たないが、`あ` はフォントセットのフォールバックで全角のまま描かれる
-（実測で 16px）。`my-appearance.el` のコメントにある「Consolas だと
-丸付き数字が半角幅になってしまっている」は、通常の編集では困る挙動だが
-**端末では逆にそれが正しい**（claude は `①` を 1 桁として桁を組む）。
-
-**`★` (U+2605) と `※` (U+203B) は手元のどのフォントでも全角。**
-これらを含む行だけは揃わない（未解決）。
-
-端末を開いているあいだだけ差し替え、幅表と同じ寿命で、最後の端末を
-閉じたら戻す。
-
-#### 【重要】`set-fontset-font` はこの設定では効かない
-
-`nil`（選択フレーム）にも `t`（既定）にも入れ、`clear-face-cache` と
-`redraw-display` まで呼んでも、GUI の実測で `font-at` は元のフォントを
-返し続け `string-pixel-width` も 16 のままだった。丸数字のレンジだけ
-別フォントに回そうとしても同じだった。
-
-**実際に効く経路は `set-face-attribute 'default nil :family`**
-（`my-appearance.el` の `emacs-font-setting` と同じ）。こちらに変えたら
-1 回で通った。
-
-**したがって端末用に選べるフォントは 1 つだけで、レンジごとの割り当ては
-できない。** だから `★` を諦めてでも `①` が直る Consolas を選んでいる。
-
-```
-▐ U+2590 width=1 pixel=8 font=HackGen Console NF
-```
-
-`:height` は触らないこと。サイズが変わると桁が全部ずれる。
-
-確かめ方（`*claude-term*` で）:
-
-```elisp
-(with-current-buffer "*claude-term*"
-  (save-excursion
-    (goto-char (point-min))
-    (re-search-forward "[─▐█①]" nil t)
-    (goto-char (1- (point)))
-    (let* ((c (char-after)) (f (font-at (point))))
-      (list c (char-width c) (string-pixel-width (string c))
-            (and f (font-get f :family))))))
-```
-
-`font=` が切り替え先になっていること、`pixel` が 8 であることを見る。
-
-**Nerd Font のアイコン領域（#xe000-#xf8ff）は触らない。**
-`my-appearance.el` がそこを別のフォントに回しており、上書きすると
-アイコンが豆腐になる。
-
-### 桁が合っているかの確かめ方
-
-見た目が崩れていても、**バッファの中で桁が合っているかは別**。切り分けは
-`eat--t-invisible-space` を除いた「見える文字列」の `string-width` を測る。
-eat は全角文字の前に invisible な詰め物を入れるので、素の
-`buffer-substring` の長さで測ると必ずずれて見える。
-
-既知の表を `powershell -File` で流し込んで実測した結果（端末が生きている
-間に測ること。終了すると幅表が戻る）:
-
-| 流したもの | 期待 | 実測 |
-|---|---|---|
-| `ABCDEFGHIJKLMNOPQRST\|` | 21 | 21 |
-| `あいうえおかきくけこ\|` | 21 | 21（filler 10） |
-| `────────────────────\|` | 21 | 21 |
-| `┌────┬────┐\|` | 12 | 12 |
-
-claude 自身が組んだ表でも、罫線行と内容行が同じ幅になることを確認した。
-
-```
-幅= 21 |  │ cd   │ abcd     │|
-幅= 21 |  ├──────┼──────────┤|
-幅= 21 |  │ ef   │ あいう   │|
-```
-
-**つまり ptyd → conhost → eat → バッファは正しい。** 生の VT にも余計な
-空白は入っていない（conhost は素通し）。それでも画面が崩れて見えるなら、
-残るのは**フォントの描画**。`char-width` が 1 でも、フォールバックの
-フォントがその文字を 1 桁ぶんの幅で描くとは限らない。CLAUDE.md の
-eaw の節にある「1098 文字はプロポーショナルなフォールバックで描かれ、
-`char-width` をどちらにしても桁は揃わない」と同じ話。
-
-GUI での確かめ方:
-
-```elisp
-;; 半角 1 桁のピクセル幅と、罫線 1 文字のピクセル幅を比べる
-(list (string-pixel-width "a") (string-pixel-width "─")
-      (string-pixel-width "○") (string-pixel-width "あ"))
-```
-
-`a` が 8 なら、`char-width` 1 の文字は 8、2 の文字は 16 になっているのが
-正しい。そうなっていない文字はフォールバックで描かれている。
-
-### 【重要】eaw.el の文字幅表で eat が無限ループする
-
-`site-lisp/eaw.el` が East Asian Ambiguous を幅 2 にしていると、
-**eat が claude の TUI 出力の処理から戻ってこない**。実測（同じ 2385 文字を
-流し込む）:
-
-| | |
-|---|---|
-| `emacs -Q` | 完了 |
-| `emacs -Q` + `(eaw-fullwidth)` | **戻ってこない** |
-| 設定全体 | **戻ってこない** |
-| 幅表を戻して流す | 完了 |
-
-`my:pty--narrow-width-table` が `char-width-table` の複製を作り、
-`east-asian-ambiguous` の文字を幅 1 に戻す。それを
-`eat-term-process-output` と `eat-term-redisplay` の間だけ `let` で束縛する。
-
-**そもそも桁を数えているのは conhost** であり、Windows のコンソールは
-ambiguous を幅 1 として扱う。Emacs 側だけ幅 2 で数えると、ループしなかった
-としても桁がずれる。端末の中では conhost に合わせるのが正しい。
-バッファの外（通常の編集）には影響しない。
-
-### 【重要】`setf (eat-term-parameter …)` は使えない
-
-このリポジトリはバイトコンパイルしない方針なので、`setf` の展開は
-**my-pty.el を読み込んだ時点**で起きる。そのとき eat はまだロードされて
-おらず、gv のセッタが無いため `void-function \(setf eat-term-parameter\)`
-になる。素の関数 `eat-term-set-parameter` を使う。
-
-### 【重要】プリミティブへの advice は native-compile されたコードに効かない
-
-term.el はキーを `process-send-string` で送るので、最初はそれを advice で
-包んで JSON に変換しようとした。**まったく効かなかった。**
-
-`term.eln`（native-compile 済み）は**プリミティブを直接呼ぶ**ので、
-symbol の function cell に張った advice を素通りする。実際、生の
-`echo …
-` がそのまま ptyd に届いて
-`bad line: invalid character 'e'` になった。
-
-包むなら **Lisp の関数**にする。そちらは symbol 経由で呼ばれる。
-term.el が書き込む入口は 4 か所しかない。
-
-| 関数 | いつ通るか |
-|---|---|
-| `term-send-raw-string` | char モードのキー入力（ほぼ全部） |
-| `term-send-string` | 貼り付けなど |
-| `term-send-eof` | `C-d` 相当 |
-| `term-emulate-terminal` の中 | `ESC[6n`（CPR）への応答。claude は送ってこない（実測 0 回） |
-
-前の 3 つを `:around` で包んでいる。使っているセッションが無くなったら外す。
-
-`my-gitd.el` が `magit-process-file` を、`my-lsp.el` が `eglot-uri-to-path` を
-包んでいるのは、どちらも Lisp の関数なので問題ない。
-
-### 以下は `term` バックエンド（退避先）の話
-
-### 【重要】`locale-coding-system` をバッファローカルに上書きする
-
-term.el は復号に `locale-coding-system` を決め打ちしている（31.1 で 5 箇所）。
-日本語 Windows では cp932 なので、UTF-8 を吐く TUI の罫線が壊れ、
-`args-out-of-range` で落ちる。`my:pty-run` が
-`(setq-local locale-coding-system 'utf-8-unix)` を入れている。
-
-### term.el が読めない CSI は ptyd 側で落とす
-
-term.el はプライベートな CSI の目印として `?` しか見ていないため、
-`ESC[>4;2m`（modifyOtherKeys）を `>` ごと数値化して SGR 0;2、つまり
-「全属性リセット + faint」として実行してしまう。
-
-`ptyd -strip-unsupported-csi` が `ESC[<` `ESC[>` `ESC[=` を落とす。
-**`ESC[?` は落とさない**（term.el が正しく扱う）。実測:
-
-| | バイト数 | `ESC[>` | `ESC[<` | `ESC[?` |
-|---|---|---|---|---|
-| strip なし | 852 | 7 | 3 | 22 |
-| strip あり | 801 | 0 | 0 | 22 |
-
-途中で切れたシーケンスは ptyd 側で持ち越す。ConPTY からの読み取りは
-任意の位置で切れるので、1 回の Write に収まっている保証が無い。
-
-### 端末経由だと信頼ダイアログが出る
-
-`-p`（案 A）は仕様として信頼ダイアログを飛ばすが、**`my:claude-term` では
-本来のダイアログが出る**。ここで `y` を押せば、Emacs 起動時の小文字
-ドライブレターのキーで `hasTrustDialogAccepted` が立つので、
-案 A 側の「permissions.allow が無視される」警告も消える。
-
-### リサイズ
-
-`window-size-change-functions` でウィンドウの桁数・行数を見て、
-`term-reset-size` と `ResizePseudoConsole` の両方を更新する。
-実測で `ESC[8;24;80t` が返り、その幅で再描画された。
-
-## プラットフォーム固有の注意事項
-
-- メインは **Windows 11**、パッケージ管理に **Scoop**（`USERPROFILE/scoop/shims` を `exec-path` に追加）
-- **`HOME` はユーザー環境変数として `C:\Users\<user>` に設定してある。**
-  未設定だと Windows の Emacs は `%APPDATA%` を `~` とみなすため、
-  Explorer やスタートメニューから起動したときに `init.el` が見つからない。
-  **設定側で `(setenv "HOME" ...)` してはいけない。** `init.el` が読まれる
-  時点で `.emacs.d` の探索は終わっているので手遅れであり（`early-init.el`
-  でも同じ）、`user-emacs-directory` は展開前の `"~/.emacs.d/"` という文字列の
-  ままで Windows の Emacs は `expand-file-name` のたびに `HOME` を読み直すため、
-  途中で差し替えると `recentf` / `custom.el` / `straight` の保存先が
-  実際に動いている設定とは別のディレクトリになる
-- Windows のシェルは Git 付属の `bash.exe`（存在するときだけ設定）、エンコーディングは cp932/UTF-8 混在
-- Windows IME 統合には `tr-ime` + `w32-ime`（どちらも straight で導入）。
-  2026-08 時点で tr-ime 0.5.0（2022-06）、w32-ime は 2020-11 のコミットが
-  それぞれ upstream の最新で、これより新しい版は無い。導入手順
-  （`tr-ime-advanced-install` → `default-input-method` → `w32-ime-initialize`）も
-  README の推奨どおり
-- **モードラインの IME 表示は `w32-ime-input-method-title` で設定する。**
-  `w32-ime-mode-line-state-indicator` は w32-ime が自前で `mode-line-format` の
-  先頭に差し込むための変数で、`mode-line-format` をまるごと差し替える
-  doom-modeline とは併用できない。doom-modeline の `input-method` セグメントは
-  `current-input-method-title` を見ており、w32-ime はそこに
-  `w32-ime-input-method-title`（既定 nil）を入れる
-- `M-\`` と `M-kanji` を `ignore` にしているのは意図的。その組み合わせは
-  tr-ime / Windows 側が IME のトグルとして処理するので、Emacs 側では
-  何もしないのが正しい。Emacs から切り替えるのは `C-\` と 漢字キー
-- macOS / Linux では `exec-path-from-shell` を使用
-- OS 判定は `(eq system-type 'windows-nt)` / `'darwin` / `'gnu/linux`。
-  ウィンドウシステム判定は `window-system` の `'w32` / `'ns` / `'x` / `'pgtk`
-
-### `~/Projects` のジャンクションと `directory-abbrev-alist`（2026-09-09）
-
-`bookmarks` を git 管理下に置いて mac / Linux と共有するための仕込み。
-`C:\Users\masao\Projects` を `C:\Projects` へのジャンクションにしてあり、
-`my-platform.el` が `directory-abbrev-alist` に 1 件足している。
-
-**移植可能な省略形は `~` ただ 1 つ。** `bookmark-buffer-file-name`
-（`bookmark.el:1212`）は保存時に必ず `abbreviate-file-name` を通しており、
-コメントも「home はマシンごとに違うが `~/` なら届く」と書いている。
-逆に言うと、home の外にある `c:/Projects/...` は**そのままでは共有できない**。
-
-役割は 2 つに分かれる。**片方だけでは成立しない。**
-
-| | 担当 |
-|---|---|
-| ジャンクション / symlink | `~/Projects` を実在させる = **読む側**（展開） |
-| `directory-abbrev-alist` | `c:/Projects/...` と書かせない = **書く側**（省略） |
-
-`abbreviate-file-name` だけがこの変数を見る。**`expand-file-name` は見ない**
-ので、alist は一方向にしか効かない。
-
-TO に `~` を書いてはいけない（`files.el:59`）が、`~` を含む結果は得られる。
-`abbreviate-file-name` が **alist を適用してから `~` 置換する**
-（`files.el:2316` → 2329）ので、TO には home 配下の絶対パスを書けばよい。
-
-#### 【重要】FROM の末尾のスラッシュを省かない
-
-`directory-abbrev-apply`（`files.el:87`）は FROM を素の正規表現として使い、
-マッチ部分を TO で置き換えるだけ。境界を見ないので、実測でこうなる。
-
-| FROM | `c:/Projects/ESC-Web/` | `c:/ProjectsOld/foo/` |
-|---|---|---|
-| `\`c:/Projects` | `~/Projects/ESC-Web/` | **`~/ProjectsOld/foo/`** |
-| **`\`c:/Projects/`** | `~/Projects/ESC-Web/` | **`c:/ProjectsOld/foo/`** |
-
-**存在しないパスができるのにエラーは出ない。** `abbreviated-home-dir` は
-`directory-abbrev-make-regexp`（`files.el:71`）が `\(/\|\'\)` の境界を
-付けるが、**手書きのエントリには付かない**。
-
-末尾スラッシュ形の唯一の取りこぼしは、末尾スラッシュ無しの `c:/Projects`
-そのもの（変換されない）。
-
-**大文字のドライブレターは FROM が小文字でも当たる。**
-`abbreviate-file-name` が `case-fold-search` を
-`(file-name-case-insensitive-p filename)` に束縛しており（`files.el:2313`）、
-Windows では `t` になるため。ドライブレターの大小に悩まされる他の箇所
-（gopls の診断、Emacs 起動時の cwd）とは違い、ここだけは自動で吸収される。
-
-#### 効果範囲は bookmark より広い
-
-docstring は「新しく訪れたファイルバッファの `default-directory` を設定する
-ときに置換が行われる」と書いており、`abbreviate-file-name` を通る経路すべて
-（bookmark / recentf / 表示）に効く。パスを文字列で突き合わせている箇所
-（`my:claude--same-directory-p`、gitd が `expand-file-name` を要求する件）は
-どれも展開してから比べているので壊れないはずだが、**未検証**。
-
-#### 他マシンでは alist は要らない
-
-必要なのは `~/Projects` を実在させること（実ディレクトリか symlink）だけ。
-**`~/Projects` が無いマシンでは、共有したブックマークは開けない。**
-
-### 【重要】この設定では `file-equal-p` が使えない（2026-09-08 に発見）
-
-`my-platform.el` が Windows で `w32-get-true-file-attributes` を `nil` に
-している（`file-attributes` を速くするための設定）。すると **inode が
-常に 0 で返る**。`file-equal-p` は inode とボリューム ID の組で比べるので、
-**同じドライブにあるファイル / ディレクトリはすべて「同じ」と判定される。**
-
-実測（`-l early-init.el -l init.el` の batch）:
-
-| | inode | |
-|---|---|---|
-| `emacs -Q` | 実際の値（`58828270132591113` など） | `file-equal-p` は正しく効く |
-| **この設定** | **`0`**（どのディレクトリでも同じ） | **別物どうしが `t` になる** |
-
-```elisp
-(file-attribute-file-identifier (file-attributes "…/b-project/"))  ; => (0 2431202897)
-(file-equal-p "…/b-project/" "…/y/src/")                           ; => t
-```
-
-**`emacs -Q` では再現しない**ので、`-Q` で書いたコードを持ち込むと
-静かに壊れる。実際、`my-claude.el` で別プロジェクトの `C-c a a` が
-同じセッションに解決された（`my:claude--same-directory-p` を作って回避）。
-
-パスの同一判定は**文字列で**行う。`expand-file-name` +
-`file-name-as-directory` で揃え、`file-name-case-insensitive-p` が真なら
-`string-equal-ignore-case`。stat を打たないので速くもある。
-
-なお `my-dired.el` の `_assets/` 整合性チェックが使っている
-`file-truename` + `downcase` はこの問題を踏まない（truename は
-inode を見ない）。
-
-## テーマ
-
-Emacs 31.1 同梱の **modus-themes 5.2.0** を `load-theme` で使う。
-`:straight` は付けない（組み込み優先。`org` / `transient` と同じ扱い）。
-
-かつて straight に 2021 年の 1.7.0 が入っていて、そちらが読まれていた。
-v2 世代の API（`modus-themes-load-themes` / `modus-themes-load-vivendi` /
-`modus-themes-region`）は 5.x には存在しないので、書き換えが要る。
-
-| 旧 (v1/v2) | 新 (v4/v5) |
-|---|---|
-| `(modus-themes-load-themes)` + `(modus-themes-load-vivendi)` | `(load-theme 'modus-vivendi :no-confirm)` |
-| `modus-themes-region '(bg-only …)` | `modus-themes-common-palette-overrides '((fg-region unspecified))` |
-| `modus-themes-region '(… no-extend)` | 廃止（移行先なし） |
-
-色の調整はパレットの上書きで行う。パレット名は
-`etc/themes/modus-themes.el` の `modus-vivendi-palette` を見る。
-`:custom` は `:config` より先に走るので、上書きは `load-theme` に間に合う。
-
-**`:no-require t` が必須。** `modus-themes` は `etc/themes/` にあり `load-path` に
-載っていないため `(require 'modus-themes)` は失敗する。use-package は require に
-失敗すると `:config` ごと飛ばすので、これが無いと `load-theme` が呼ばれない。
-
-## 補完 (corfu)
-
-### `C-x C-r` は recentf とブックマークの両方から選ぶ（2026-09-09）
-
-`consult-recent-file` の代わりに `my:consult-recent-file-or-bookmark`
-（`my-completion.el`）を割り当ててある。`consult--multi` で 2 つのソースを
-束ねているので、`consult-narrow-key`（`<`）に続けて `f` でファイル、
-`m` でブックマークだけに絞れる。バッファも混ぜたいなら `C-x b`
-（`consult-buffer`）にどちらも既に入っている。
-
-#### 【重要】`consult-source-recent-file` は開いているファイルを落とす
-
-組み込みのソースは `:items` の中で `consult--buffer-file-hash` を引き、
-**既にバッファで開いているファイルを一覧から除外する**
-（`consult.el:5076`）。`consult-buffer` ではそれらが Buffer ソースの側に
-出るので正しいが、**ファイルを開く入口でこれをやると、開いているものだけ
-選べなくなる**。
-
-そのため recentf 側は組み込みを使わず、`recentf-list` をそのまま出す
-`my:consult--source-recent-file` を定義してある（`consult-recent-file` と
-同じ中身）。ブックマーク側は除外ロジックが無いので
-`consult-source-bookmark` をそのまま使う。
-
-実測（同じ瞬間に両方の `:items` を呼んで数えた）:
-
-| | 件数 |
-|---|---|
-| `recentf-list` をそのまま | **195** |
-| `consult-source-recent-file`（組み込み） | **194** |
-| そのとき開いていたファイル | 1 |
-
-**差が「いま開いている数」なので、開いていなければ気づけない。**
-
-`:state` は `consult--file-state` / `consult--bookmark-state`
-（`consult--define-state` が作る）で、プレビューと確定時の
-`consult--*-action` を兼ねる。`:action` は要らない。
-**`consult--multi` は autoload されていない**ので、コマンドの側で
-`(require 'consult)` すること。
-
-### text-mode の ispell 補完は切ってある（2026-09-07）
-
-`text-mode` は `text-mode-ispell-word-completion`（既定 `completion-at-point`、
-Emacs 30 で新設）を見て `ispell-completion-at-point` を capf に足す
-（`text-mode.el:155`）。ところが `ispell-alternate-dictionary` の既定値は
-`/usr/dict/words` などを `file-readable-p` で探す `cond` なので、**Windows では
-必ず nil** になり、`ispell-lookup-words` が問答無用で `error` を投げる
-（`ispell.el:2620`）。
-
-corfu は capf を `corfu--protect`（`handler-bind` + `ignore-errors`）で包んで
-いるため、`corfu--debug` がそれを拾って `*Messages*` に backtrace を流す。
-
-```
-Corfu detected an error:
-  ...
-  ispell-lookup-words("調査")
-  ispell-completion-at-point()
-  corfu--capf-wrapper(ispell-completion-at-point 1)
-  corfu-auto--complete-deferred((#<window 66 on *claude-input(...)*> ...))
-```
-
-**発火するのは日本語を打っているとき。** capf は前から試され、`cape-dabbrev`
-などが候補を出せなかったときだけ最後尾の ispell に到達する。バッファ内に既出で
-ない語を打つたびに出るので際限なく溜まる。実測（`*claude-input*` で日本語を
-書いていたセッション。61 件が全部これ）:
-
-| | |
-|---|---|
-| 補完候補が失われるか | **失われない** |
-| `*Messages*` の占有 | 1000 行中 **約 915 行（91%）** |
-| エラー 1 回のコスト | **38.4 ms**（`corfu--protect` 経由） |
-| エコーエリア | 赤字で `Corfu detected an error: Press C-h e to see the stack trace` |
-
-候補が失われないのは、ローカル値が `(t ispell-completion-at-point)` で
-**グローバル値を表す `t` が先、ispell が最後尾**だから（`add-hook` の depth 10
-でもグローバル値の位置より後ろになる）。他の capf が全滅したときにしか到達
-しないので、そこでエラーが飛んでも失われる候補は無い。壊れるのはログと
-エコーエリアと 38 ms だけだが、`message-log-max` が 1000 なので**他の
-メッセージがほぼ全部押し流される**のが実害。
-
-`my-text.el` で `text-mode-ispell-word-completion` を nil にして capf ごと
-外してある。`C-M-i` は変わらない（`:set` 関数が `ispell-complete-word` を
-`text-mode-map` に張るのは「非 nil かつ `completion-at-point` 以外」のときだけ。
-実測でも `complete-symbol` のまま）。効き先は `text-mode` 派生の全部
-（`markdown-mode` / `gfm-mode` / `my:claude-mode` / `org-mode`）。
-
-**変数を変えても、既に text-mode 派生になっているバッファには効かない。**
-`add-hook` はモードを立てた時点で済んでいるため。その場で直すなら
-
-```elisp
-(remove-hook 'completion-at-point-functions #'ispell-completion-at-point t)
-```
-
-### capf のトラブルは「どこで打ち切られたか」を見る
-
-corfu は `run-hook-wrapped` で capf を前から回し、最初に候補を返したところで
-止まる。したがって:
-
-- **後ろの capf でエラーが出ても、前で候補が出ていれば表示は正常**。
-  「補完は効いているのにエラーが出る」ときはこれを疑う
-- 逆に**前の capf がエラーを投げると、後ろの候補ごと失われる**。
-  `corfu--protect` は `ignore-errors` で丸ごと握るため、その回の補完が消える
-
-再現と切り分けは corfu と同じ経路を通すのが確実（`completion-at-point` を
-対話的に呼ぶと `corfu--capf-wrapper` を経由しないので条件が変わる）。
-
-```elisp
-(corfu--protect
- (lambda ()
-   (run-hook-wrapped 'completion-at-point-functions #'corfu--capf-wrapper 1)))
-```
-
-戻り値の `car` が採用された capf の関数名。候補は
-`(alist-get 'corfu--candidates (plist-get (cddddr result) :corfu--state))`。
-
-## editorconfig（2026-09-14）
-
-Emacs 30 で本体に入ったので **`:straight` は付けない**（`org` / `transient` と
-同じ扱い）。`my-editor.el` で `editorconfig-mode` を有効にしてある。
-
-### 効くのは `.editorconfig` があるディレクトリだけ
-
-**上へ辿って探す**ので、`.editorconfig` の置き場所がそのまま効き先になる。
-`root = true` があればそこで打ち切る。実測（`editorconfig-core-get-properties-hash`）:
-
-| ファイル | プロパティ |
-|---|---|
-| `RINSETSU/AdjacentAreaTool/AdjacentAreaTool/Controls/ControlBase.cs` | **180** |
-| `RINSETSU/AdjacentAreaTool/AdjacentAreaTool.Tests/**/*.cs` | **180** |
-| `RINSETSU/AdjacentAreaTool/AdjacentAreaTool.sln` | 0（`[*]` に該当しても core が無い） |
-| `~/.emacs.d/user-lisp/*.el` | 0 |
-
-**置き場所がプロジェクト直下だと兄弟プロジェクトに届かない。** 当初
-`AdjacentAreaTool/AdjacentAreaTool/` にあり、`.cs` 140 個のうち 77 個しか
-対象になっていなかった。2026-09-14 にソリューション直下
-（`AdjacentAreaTool/`）へ移して 3 プロジェクトとも対象になっている。
-
-手元にある他の `.editorconfig`（有効にすると一緒に効く）は
-`straight/repos/php-mode` に 3 個、LSP の `node_modules` に 4 個、
-`~/Projects` 側は `node_modules` 多数と `gh/marktext` / `pmap-web`。
-**他所のリポジトリのものを尊重する形になる**ので、それでよいかは方針の問題。
-
-### Emacs 30 以降はフックを 2 つ足すだけ
-
-| フック | 役割 |
-|---|---|
-| `hack-dir-local-get-variables-functions` | **ディレクトリローカル変数として**適用する。`add-hook` の末尾に足すので **`.dir-locals.el` のほうが優先** |
-| `auto-coding-functions` | `end_of_line` / `charset` |
-
-29 以前の `find-file-noselect` への advice はこの経路では使わない。
-dir-local はメジャーモードのフックより**後**に適用されるので、
-`my:*-mode-setup` が `setq` したものには勝つ。
-
-読むのは**コアプロパティだけ**。`.NET` の `dotnet_*` / `csharp_*`（Roslyn 用。
-あのファイルでは 276 行中ほとんど）は読み飛ばされる。`unset` の値は捨てられる。
-
-変数は普通の dir-local として通るので `safe-local-variable` の対象になるが、
-効くもの（`tab-width` `indent-tabs-mode` `csharp-ts-indent-offset`
-`require-final-newline`）はすべて安全と宣言済みで、確認は出ない（実測）。
-
-### 【重要】`indent_size` は csharp-ts-mode には届かない（対処済み）
-
-Emacs 31 では **`csharp-ts-mode` が `csharp-mode` の派生**
-（`derived-mode-all-parents` は `(csharp-ts-mode csharp-mode prog-mode)`）なので、
-`editorconfig-indentation-alist` の `(csharp-mode c-basic-offset)` に当たり、
-**ts 版が見ない `c-basic-offset`** に入って何も変わらない。
-
-Emacs 31 は `editorconfig-indent-size-vars` を**モード側がバッファローカルに
-設定する**前提で、`js.el`（`js-indent-level`）と `c-ts-mode.el`
-（`c-ts-indent-offset`）はやっているが `csharp-mode.el` はまだ。
-`my:csharp-ts-mode-setup` で 1 行足してある。
-
-| `csharp-ts-mode` で | 設定される変数 |
-|---|---|
-| そのまま | `c-basic-offset` = 4 |
-| `(setq-local editorconfig-indent-size-vars '(csharp-ts-indent-offset))` | **`csharp-ts-indent-offset` = 4** |
-
-GUI で実ファイルを開いた実測:
-
-| | `ControlBase.cs`（対象） | `CsvOutputPathTests.cs`（対象外） |
-|---|---|---|
-| `tab-width` | **4**（バッファローカル） | 8（既定） |
-| `csharp-ts-indent-offset` | **4**（バッファローカル） | 4（グローバル値のまま） |
-| `c-basic-offset` | `set-from-style`（**触られない**） | 同左 |
-| `require-final-newline` | nil | nil |
-| 文字コード | `utf-8-unix` | `utf-8-unix` |
-
-**「設定されたか」はバッファローカルかどうかで見ること。** 値だけ見ると
-どちらも 4 で区別が付かない。
-
-### 【重要】`end_of_line` は BOM 付きファイルには効かない
-
-`editorconfig--get-coding-system` は `auto-coding-functions` に載るが、
-`find-auto-coding` は**先に `auto-coding-regexp-alist`（BOM の判定）を見て
-そこで決まればそちらを採る**。VS が書くファイルは BOM 付きなので、
-`end_of_line = lf` と書いてあっても改行はディスクの実態のまま。
-
-逆に **BOM 無しで CRLF のファイルは `^M` がバッファに残る。**
-`undecided-unix` で復号するため CR が文字として見えるようになる。
-壊れてはいない（`buffer-modified-p` は nil、保存しても同じバイト列に戻る）が、
-`[*] end_of_line = lf` と実ファイルが食い違っていることが目に見える形になる。
-
-GUI 実測（`RINSETSU/AdjacentAreaTool` の `.editorconfig` は `[*]` に
-`end_of_line = lf`）:
-
-| ファイル | ディスク | BOM | バッファの coding | `^M` |
-|---|---|---|---|---|
-| `AdjacentAreaTool.sln` | CRLF | あり | `utf-8-with-signature-dos` | 0 |
-| `AdjacentAreaTool/AdjacentAreaTool.csproj` | LF | あり | `utf-8-with-signature-unix` | 0 |
-| **`AdjacentAreaTool.Tests/…Tests.csproj`** | **CRLF** | **無し** | **`utf-8-unix`** | **37** |
-| `Controls/ControlBase.cs` | LF | 無し | `utf-8-unix` | 0 |
-
-### 範囲を絞る defcustom は同梱版には無い
-
-MELPA 版にあった `editorconfig-exclude-regexps` / `-exclude-modes` は本体に
-入るときに落ちた。残る defcustom は `editorconfig-indentation-alist` /
-`editorconfig-trim-whitespaces-mode` / `editorconfig-mode-hook` の 3 つだけ。
-パスで絞りたいなら `editorconfig-mode` を使わず、
-`hack-dir-local-get-variables-functions` に自前のラッパを載せることになる。
-
-### コスト
-
-| | |
-|---|---|
-| ロード（`:demand t`） | **9〜25 ms**（ファイルキャッシュが冷えていると 80 ms） |
-| `.editorconfig` を引く（該当あり / 無し） | **0.13 ms / 0.087 ms** |
-
-ハンドルのキャッシュがあるので、ファイルを開くたびのコストは無視できる。
-
-**`:custom` に `editorconfig-mode` を書いてはいけない。**
-`customize-set-variable` はパッケージ未ロードだと変数に `t` を入れるだけで
-モード関数を呼ばない（corfu で踏んだのと同じ罠）。`:demand t` + `:config`。
-
-## org のアーカイブ先の `#YM`
-
-アーカイブ先の指定に `#YM` と書くと `YYYY-MM` に展開される。
-
-```org
-#+ARCHIVE: %s_#YM_archive::* From %s
-```
-
-→ `note.org_2026-08_archive` に `* From note.org` 見出しで格納される。
-ファイル名部分でも見出し部分でも使える。
-
-実装は `org-archive--compute-location` への `:filter-args` advice
-（`my-text.el`）。旧実装は `org-extract-archive-file` への `:filter-return`
-だったが、この関数は org 9.8 で削除された。後継の
-`org-archive--compute-location` は戻り値が `(FILE . HEADING)` の cons なので
-`:filter-return` は使えず、**入口を `:filter-args` で押さえる**形にしてある。
-引数は `::` で区切る前の生の文字列なので戻り値の形に依存しない。
-
-`org-archive-subtree` は
-`(or (org-entry-get nil "ARCHIVE" 'inherit) org-archive-location)` を
-この関数に渡すので、`#+ARCHIVE:` / `ARCHIVE` プロパティ / 変数のどれで
-指定しても効く（`org-archive-all-*` からの呼び出しも同様）。
-
-## org で範囲を畳む（`#+FOLD_REGION:`）
-
-org ファイルの冒頭に `#+FOLD_REGION: 過去分` と書いておくと、バッファ内の
-
-```org
--- 過去分(begin)
-  ...
--- 過去分(end)
-```
-
-に挟まれた部分を畳んで隠す（`my-text.el`）。名前を変えて何行でも書ける。
-
-| | |
-|---|---|
-| `C-c C-x h` | 範囲の開閉（`my:org-fold-region-toggle`） |
-| `M-x my:org-fold-region-hide-all` / `-show-all` | すべて畳む / 開く |
-
-`C-c C-x -` ではなく `h` なのは、前者を `org-timer-item` が持っているため。
-
-| 変数 | 既定 |
-|---|---|
-| `my:org-fold-region-begin-format` | `"^[ \t]*--[ \t]*%s(begin)[ \t]*$"` |
-| `my:org-fold-region-end-format` | `"^[ \t]*--[ \t]*%s(end)[ \t]*$"` |
-| `my:org-fold-region-hide-on-open` | `t`（開いた時点で畳む） |
-
-`%s` に名前が `regexp-quote` されて入るので、マーカーの書式ごと変えられる。
-候補が複数あるときは point 位置の範囲を優先し、決まらなければ選ばせる。
-
-### narrowing ではなく invisible overlay を使う
-
-`narrow-to-region` は「その範囲**だけ**を見せる」ものなので、隠したい範囲が
-バッファの末尾か先頭にあるときしか使えない。overlay なら中間にあっても
-複数あっても効く。
-
-org 自身の折りたたみ（TAB / `#+STARTUP:`）は `org-fold` の spec で動いており、
-こちらは独自の invisibility spec なので干渉しない（`org-fold-show-all` を
-呼んでも畳まれたままであることを実測）。
-
-隠すのは**開始行の行末から終了行の行末まで**。開始行は残るので、そこに
-ellipsis の `...` が出る。バッファの中身は変わらないので保存内容にも影響しない
-（実測で `buffer-size` も `buffer-modified-p` も変化なし）。
-
-### 【重要】isearch は overlay を残したまま `invisible` を nil にする
-
-`isearch-invisible` の既定は `open` なので、畳んだ中に検索が入ると isearch は
-その範囲を一時的に開く。このとき **overlay は消えず、`invisible` プロパティ
-だけが nil になる**。
-
-そのため「overlay があるか」で畳まれているかを判定してはいけない。実際に踏んだ:
-overlay の有無で見ていたため、isearch が開いたあと `my:org-fold-region-hide` が
-「既にある」と判断して何もせず、**そのバッファでは二度と畳めなくなった**。
-
-- `my:org-fold-region--hidden-p` が `invisible` プロパティで判定する
-- `hide` は既存 overlay を捨てて作り直す（マーカー行を書き換えたときに
-  追随する役目も兼ねる）
-- `isearch-open-invisible-temporary` を自前で持たせて、一時開放の戻し方を
-  一意にする。持たない overlay に対しては isearch が `invisible` を自分で
-  退避・復元するが、復元は isearch の終わり方に左右される
-
-実測（一時開放を模して `invisible` を nil にしてから操作）:
-
-| | 修正前 | 修正後 |
-|---|---|---|
-| その状態から `hide-all` / `toggle` | **畳まれない** | **畳まれる** |
-| 恒久的に開いた（overlay 削除）あと `hide-all` | 畳まれる | 畳まれる |
-
-### 検証での注意
-
-**`#+FOLD_REGION` は "OLD" を含む。** `case-fold-search` は org バッファでは t
-なので、プローブに `(search-forward "old")` と書くとキーワード行にマッチして
-「畳まれていない」と誤診する。実際に 1 度誤診した。
-
-`org-mode-hook` 経由で畳むので、`ec.sh -l` でモジュールを読み直しただけでは
-`setup` は走らない（`:hook` は use-package ブロックの評価で張られる）。
-プローブ側で
-`(let ((org-mode-hook (cons #'my:org-fold-region-setup org-mode-hook))) (org-mode))`
-と束縛して測ること。
-
-## org でクリップボードの画像を貼る（`M-v`）
-
-org バッファで `M-v` を押すと、クリップボードの画像を
-`<buffer-file-name>_assets/`（例: `note.org_assets/`）に保存し、
-リンクを挿入してその場でプレビューする（`my:org-yank-image`）。
-
-Emacs 30 で MS-Windows も `yank-media` に対応し、org 9.7 以降が
-`image/.*` のハンドラを登録しているので、自前で書くのは保存先と
-プレビューだけでよい。**外部プロセスは要らない**。
-
-これで用が足りるため、`powershell.exe` から `ms-screenclip:` を起動して
-範囲選択させていた `my:org-screenshot` は削除した（Win+Shift+S で撮ってから
-`M-v` で貼れば同じことができる）。`etc/screenclip.ps1` はその名残。
-
-| 変数 | 設定値 |
-|---|---|
-| `org-yank-image-save-method` | `my:org-image-save-directory`。関数を渡せるのは org 9.8 から |
-| `org-yank-image-file-name-function` | `my:org-yank-image-filename` |
-
-- ディレクトリは `org--image-yank-media-handler` が `make-directory` で作るので、
-  設定側は名前を返すだけでよい
-- リンクが相対パスになるのは `org-link-file-path-type` が既定の `adaptive` で、
-  保存先がバッファの下位ディレクトリだから
-- ドラッグ&ドロップ（`org--dnd-*`）の保存先も同じ変数を見るので一緒に変わる
-- 既定の `org-yank-image-autogen-filename` は **マイクロ秒がファイル名に残らない**。
-  `clipboard-…T…%6N` とドットで繋ぐため、`file-name-with-extension` が
-  それを拡張子とみなして落とす。結果として秒単位の名前になり、同じ秒に
-  2 回貼ると 1 枚目が上書きされる。ハイフンで繋ぐ関数に差し替えてある
-- `M-v`（`scroll-down-command`）は org バッファでだけ潰れる。スクロールは
-  `C-z`（`my-keybind.el`）が使える。`cua-mode` も `M-v` を
-  `delete-selection-repeat-replace-region` に割り当てるが、それが載る
-  `cua--cua-keys-keymap` は `cua-enable-cua-keys` が nil なら有効にならない。
-  **batch では有効に見える**（`cua--select-keymaps` は `pre-command-hook` で
-  走るため、`cua-mode` を有効にした時点の値のまま止まる）ので、
-  `key-binding` を batch で確認するときは `(cua--select-keymaps)` を先に呼ぶこと
-
-クリップボードに画像が載っているかは batch でも確認できる:
-
-```sh
-emacs --batch --eval '(message "%S" (gui-get-selection (quote CLIPBOARD) (quote TARGETS)))'
-```
-
-### 保存時の `_assets/` 整合性チェック
-
-org バッファを保存すると（`after-save-hook`）、`_assets/` があるときだけ
-バッファ内のリンクと突き合わせる（`my:org-assets-check-on-save`）。
-
-| 状態 | 動作 |
-|---|---|
-| `_assets/` にあるがリンクされていない | `map-y-or-n-p` で 1 つずつ確認してごみ箱へ（`y`/`n`/`!`/`q`） |
-| リンクはあるが `_assets/` に無い | 保存は成功させ、`message` で警告 |
-
-消す側の判断を誤るとファイルが失われるので、安全側に倒してある。
-
-- **必ず `org-with-wide-buffer` で見る。** ナローイングされたバッファで
-  `org-element-parse-buffer` を呼ぶと見えている範囲しか解析されず、
-  範囲外からリンクされているファイルを消してしまう
-- リンク判定は `org-element` だけに頼らず、**ファイル名がバッファ内に文字列と
-  して現れるかも見る**（`my:org-assets--mentioned-p`）。`org-element` は
-  コメント行や例示ブロックの中のリンクを拾わないため、それだけだと
-  「コメントアウトして退避してある画像」を消してしまう
-- 削除は `(delete-file f t)` でごみ箱へ送る。誤って消しても戻せるように
-- パスの比較は `file-truename` で正規化し、`file-name-case-insensitive-p` が
-  真なら `downcase` する（Windows / macOS）
-- `directory-files` の MATCH に文字列先頭アンカー（バックスラッシュ +
-  バッククォート）入りの正規表現は書かない。エスケープを
-  1 つ落としても静かに「1 件も一致しない」になり、**全リンクが「リンク先が
-  無い」と誤判定される**。述語で絞るほうが壊れにくい
-
-`org-save-all-org-buffers` は 1 時間ごとのタイマーからも呼ばれる。そのまま
-だとタイマーが `y-or-n-p` を出して作業を止めるので、`:around` advice で
-`my:org-assets-inhibit-check` を束縛し、その間はチェックごと飛ばす。
-手で `M-x org-save-all-org-buffers` したときも同じく黙って保存する。
-
-## dired で外部アプリを起動する
-
-Excel ブック（`.xls` / `.xlsx` / `.xlsm`）は Emacs で読んでも意味が無いので、
-バッファに読み込まず OS のファイル関連付けに渡す。
-
-| | |
-|---|---|
-| 判定 | `my:dired-external-open-regexp` / `my:dired-external-open-p`（`my-dired.el`） |
-| 起動 | `my:open-file-externally`（`my-core.el`）。Windows は `w32-shell-execute`、macOS は `open(1)`、他は `xdg-open` |
-
-拡張子を足したいときは `my:dired-external-open-regexp` に加える。dired と
-サイドバーで同じ述語を共有しているので両方に効く。
-
-dired 側は `RET` / `f` / `e` を差し替える（3 つとも同じ `dired-find-file`）。
-`o`（other-window）と `v`（view）は素のままにしてある。
-
-### サイドバーは `dired-find-file` を通らない
-
-`dired-sidebar` の `RET` は `dired-sidebar-find-file` なので、`dired-mode-map`
-の差し替えでは効かない。しかも入口が 3 つある。
-
-| 入口 | コマンド |
-|---|---|
-| `RET` / `C-m` | `dired-sidebar-find-file` |
-| `C-o` | `dired-sidebar-find-file-alt` → `call-interactively` で上を呼ぶ |
-| `mouse-2` | `dired-sidebar-mouse-subtree-cycle-or-find-file` → DIR 引数付きで上を呼ぶ |
-
-3 つまとめて押さえるため、キーではなく `dired-sidebar-find-file` への
-`:around` advice にしてある。
-
-**`orig` を呼ぶ前に判定すること。** `dired-sidebar-find-file` はファイルに
-対して `get-mru-window` / `next-window` で表示先を選び、空いていなければ
-`split-window` までする。外部に投げるだけのファイルでウィンドウ分割を
-起こしてはいけない。
-
-これは「別の開き方」ではなくウィンドウ管理のラッパで、サイドバーが
-dedicated window であることに由来する。ディレクトリならサイドバーの中で
-ルートを差し替え（`dired-sidebar-with-no-dedication` + `find-alternate-file`）、
-ファイルなら隣のウィンドウを選んでから `find-file` する。
-
-### 【重要】`dired-x` は `dired-mode-map` を無条件で書き換える
-
-`dired-x.el` はロードされた瞬間に、トップレベルの裸の `define-key` で
-`dired-mode-map` を書き換える。`defcustom` による切り替えは無い。
-
-```elisp
-(define-key dired-mode-map "F" 'dired-do-find-marked-files)
-(define-key dired-mode-map "V" 'dired-do-run-mail)
-(define-key dired-mode-map "\M-!" 'dired-smart-shell-command)
-(define-key dired-mode-map "\M-(" 'dired-mark-sexp)
-(define-key dired-mode-map "\C-x\M-o" 'dired-omit-mode)
-```
-
-`use-package dired` の `:bind` は dired のロード時に張られるので、あとから
-`dired-x` が読まれると **`V` の `dired-vc-status` が奪われる**。
-
-`dired-x` は明示的に require したつもりが無くても読まれる。入口は 2 つあり、
-**どちらも `F8` を通る**。
-
-- `dired-sidebar` の `:config` の `(require 'dired-x)`（`dired-omit-mode` のため）
-- サイドバーの `a`（`dired-omit-mode` は `dired-x` で唯一の autoload）
-
-つまり「**`F8` を一度でも押すと、そのセッションでは以後 `V` が効かなくなる**」
-という壊れ方をしていた。2026-08-30 に neotree を dired-sidebar に置き換えた
-ときからの回帰で、2026-09 に気づいた。
-
-`:defer t` + `:config` の `use-package dired-x` で張り直している。
-`eval-after-load` はファイルのロード完了後に走るので、`dired-x` 自身の
-`define-key` に必ず勝つ。**`:bind` では駄目**で、`dired-x` のロードとは
-無関係に張られてしまい上書きを取り返せない。
-
-`dired-mode-map` に置いたキーが効かないときは、**まず `dired-x` を疑う**こと。
-奪われるのは上の 5 つと `*(` / `*O` / `*.`。
-
-## dired から exceldiff / MarkText を起動する（2026-09-06）
-
-yazi に入れてある操作を dired からもできるようにしたもの。1 文字キーは
-dired と dired-x が使い切っているので、`C-c w`（git 相対パス）と同じく
-`C-c` 側に置く。yazi の `X` プレフィクスに合わせて exceldiff は `x` で束ねた。
-
-| キー | hydra（`.`） | |
-|---|---|---|
-| `C-c x v` | `x` | point の Excel をコミット済みリビジョンと比較（`C-u` でリビジョン指定） |
-| `C-c x d` | `X` | マークした 2 つの Excel を比較（`C-u` で A/B 入れ替え） |
-| `C-c m` | `O` | point の markdown を MarkText で開く |
-
-サイドバー（`F8`）のキーマップは `dired-mode-map` を親に持つのでそのまま効く。
-
-### exceldiff は必ず非同期で起動する
-
-[exceldiff](https://github.com/ponkore/exceldiff) は `-o` を省略すると差分
-ブックを一時ファイルに書いて **Excel で開き、閉じられるまで戻らない**
-（`cmd/common.go` の `diffFiles` → `viewer.OpenAndWait`）。`call-process` に
-すると Excel を閉じるまで Emacs が固まる。yazi のプラグインが
-`block = true` を避けているのと同じ理由で、`start-process` を使う。
-
-- 出力バッファは実行ごとに作る。前の差分ブックを開いたままだと前のプロセスが
-  生きているので、1 つのバッファを使い回せない。**成功したら sentinel が
-  捨てる**ので溜まらない。失敗したときだけ `display-buffer` で見せる
-- `set-process-query-on-exit-flag` は nil。差分ブックは既に Excel が握っていて
-  exceldiff とは独立なので、Emacs 終了時に殺しても失われるのは `%TEMP%` の
-  後始末だけ
-- 対象は `.xlsx` / `.xlsm` のみ。excelize が旧形式を読めないため
-  **`.xls` は入れない**（`my:dired-external-open-regexp` が `.xls` を含むのとは別物）
-- git / svn の判別は `exceldiff vcs` 側がやるが、あちらは非同期でエラーが出力
-  バッファ越しにしか見えないので、`locate-dominating-file` で先に弾く
-  （git は起動しない。`my:dired-copy-git-relative-filename-as-kill` と同じ方針）
-- 実行ファイルは `executable-find` で見つける。無ければ `user-error`
-
-引数のエンコーディングは何も束縛しない。`default-process-coding-system` の
-cdr が Windows では既に cp932 なので、`start-process` の引数もそのまま正しい
-（`call-process` と同じ経路。CLAUDE.md の「`call-process` の引数は cp932 で
-エンコードすること」）。GUI 実測で `見積書_①テスト.xlsx` を渡すと、
-exceldiff のエラーメッセージに**同じ綴りで出てくる**ことを確認した。
-
-### markdown は `markdown-open` と同じ経路を使う
-
-`my:markdown-open-external`（`my-text.el`）に `&optional FILE` を足しただけで、
-`C-c C-c o`（`markdown-open`）とまったく同じ関数を通る。`markdown-open` は
-`markdown-open-command` を**引数無しで funcall** するので `&optional` で足りる。
-
-FILE を渡した場合は `save-buffer` しない（呼び出し側がそのバッファを持っている
-とは限らない）。代わりに dired 側で、そのファイルを開いてあるバッファに未保存の
-変更があれば保存するか聞く。**外部エディタはディスク上の中身を読むので、
-聞かないと古い内容が表示されるのに dired からは気づけない。**
-
-## 【重要】dired で名前を短くリネームできない（2026-09-09 に対処）
-
-`R`（`dired-do-rename`）で `2026-09-04-進捗報告.org` を
-`2026-09-進捗報告.org` に縮めようとしても、**元の名前に戻される**。
-
-`vertico-preselect` の既定は `directory` で、ファイル名の部分を打っている間は
-先頭の候補が選択状態になる。`RET`（`vertico-directory-enter` →
-`vertico-exit`）は**確定の前にその候補を挿入する**。縮めた入力は元の名前の
-接頭辞なので候補は元の名前 1 件だけが残り、それが挿入されて「同じ名前への
-リネーム」になる。
-
-**エラーにならないので気づきにくい。** 同名のリネームは黙って通り、
-dired が更新されてファイル名だけが変わらない（実測）。ディレクトリを
-またぐときなど、経路によっては `file-already-exists` になる。
-
-`M-RET`（`vertico-exit-input`）と `C-u RET` は元から通る。毎回押さずに
-済むよう、`my-dired.el` が `dired-do-create-files` の読み取り中だけ `RET` を
-差し替える（`my:dired-vertico-enter-or-input`）。**候補がディレクトリなら
-従来どおり潜り、それ以外は入力をそのまま確定する。**
-
-`vertico-preselect` を `prompt` にするだけでは駄目。GUI 実測
-（`R` に続けてキーを送り、実際にできたファイルを見る）:
-
-| 入力 / キー | 修正前 | `vertico-preselect` = prompt | 差し替え（現状） |
-|---|---|---|---|
-| `2026-09-進捗報告.org` / `RET` | **変わらない** | 縮まる | **縮まる** |
-| `s` / `RET RET` | `sub/` へ移動 | **`s` という名前になる** | **`sub/` へ移動** |
-| `su` / `TAB RET` | `sub/` へ移動 | — | `sub/` へ移動 |
-
-- 差し込みは `dired-do-create-files` の 1 箇所でよい
-  （`R` / `C` / `S` / `H` の 4 つとも通る）
-- **`minibuffer-with-setup-hook` には `:append` で足すこと。** vertico は
-  `minibuffer-setup-hook` で `vertico-map` を composed keymap の先頭に置くので、
-  先に走らせるとこちらが後ろに回って `RET` を奪えない
-- `vertico-preselect` は `prompt` にすると `TAB`（`vertico-insert`）も効かなく
-  なる（`vertico--index` が -1 のとき何もしない）。差し替えなら候補は
-  選択されたままなので `TAB` で採れる
-- 検証は `execute-kbd-macro` で `R RET` を送る。ミニバッファの読み取りが要るので
-  `ec.sh -n`（`inhibit-interaction` を外す）が要る。テスト用ディレクトリは
-  **毎回ユニークな名前で作ること**。dired バッファを kill した直後は
-  w32notify の watch が握っていて `Permission denied` で消せないことがある
-
-## dired の自動更新（2026-09-04）
-
-外部でファイルが増減したら dired の一覧も追随する。`dired-mode-hook` から
-`auto-revert-mode` を**バッファローカルに**有効にしている
-（`my:dired-auto-revert-setup`、`my-dired.el`）。
-
-### 【重要】`global-auto-revert-non-file-buffers` は使わない
-
-あれは `buffer-stale-function` を持つ非ファイルバッファを**一律に**対象に
-するので、効き先が dired の外へ広がる。magit の更新は `my-magit-watch` と
-`my-gitd` で自前に組んであり、そこに autorevert を並走させたくない。
-
-実測では magit のバッファは `buffer-stale-function` が既定
-（`buffer-stale--default-function`）のままで、`auto-revert--global-add-current-buffer`
-は独自の stale 関数を要求する（`autorevert.el:561`）ため、あの変数を t に
-しても magit は採用されない。**それでも範囲は広げない**（`buffer-menu` は
-`auto-revert-interval` = 1 秒ごとに revert されるし、将来 magit 側が
-`buffer-stale-function` を持てば黙って挙動が変わる）。
-
-### ポーリングではない
-
-dired 側は受け入れ準備が済んでいる（`dired.el:2906`）。
-
-```elisp
-(setq-local buffer-stale-function #'dired-buffer-stale-p)
-(setq-local buffer-auto-revert-by-notification t)
-```
-
-`auto-revert-handler` は watch がある間、通知で `auto-revert-notify-modified-p`
-が立たない限り `dired-buffer-stale-p` すら呼ばない（`autorevert.el:830`）。
-`auto-revert-interval` が 1 でも毎秒 `ls` が走るわけではない。
-
-### 拾えるもの・拾えないもの
-
-**メインディレクトリの `created` / `renamed` / `deleted` だけ**が対象
-（`autorevert.el:758`）。
-
-| | |
-|---|---|
-| ファイルの追加・削除・改名 | **拾う** |
-| ファイルの中身・サイズ・更新日時の変化 | 拾わない（**サイズ欄は古いまま**） |
-| `i` で挿入したサブディレクトリの中の変化 | 拾わない |
-| w32notify がバッファ溢れで落としたイベント | 拾えない |
-
-保険として `dired-auto-revert-buffer` を `dired-directory-changed-p` にして
-ある。これは auto-revert とは別物で、**既に開いてある dired バッファを訪ね
-直したとき**に、変わっていれば revert する。通知に依存しない経路。
-
-### 壊れないことの根拠
-
-- `dired-revert` は**マーク・隠しサブディレクトリ・point とウィンドウ位置を
-  復元する**（`dired.el:2232`）
-- wdired 中は `buffer-read-only` が nil になり `dired-buffer-stale-p` が nil を
-  返すので、編集中に潰されない
-- `auto-revert-verbose` は dired だけ `setq-local` で nil にしてある。
-  ファイルバッファ側のメッセージは残る
-- `dired-sidebar` も dired バッファなので一緒に効くが、**あちらは
-  auto-revert 前提の作り**になっている。`revert-buffer-function` をラップして
-  窓の位置を保ち、`auto-revert-verbose` を自分で nil にし、
-  `dired-sidebar-delay-auto-revert-updates`（既定 t）で 1.5 秒のアイドル待ちに
-  間引く
-- `diff-hl-dired-mode` が `dired-after-readin-hook` に載っている（`my-vc.el`）
-  ので、自動更新のたびに vc 経由の git 呼び出しが増える。watch は非再帰で
-  `.git/` の中の変化は届かないため、git の書き込みで更新が誘発される
-  ループにはならない（この再入が別の問題を起こす。後述）
-
-GUI プローブでの実測:
-
-| | |
-|---|---|
-| 外部で作ったファイルが出る / 消したファイルが消える | **両方 t** |
-| マークの維持 | **t**（`*` 1 個が残った） |
-| magit バッファの `auto-revert-mode` / `auto-revert--global-mode` | **どちらも nil** |
-| `magit-refresh-buffer` | 従来どおり成功 |
-
-### 【重要】diff-hl-dired が再入する（2026-09-05 に対処）
-
-自動更新を入れてから
-
-```
-Buffer " *diff-hl-dired* tmp status" has a running process; kill it? (yes or no)
-```
-
-が頻繁に出るようになった。出所は `process-kill-buffer-query-function`
-（`subr.el`）で、`kill-buffer` した先に status が `run` のプロセスが
-ぶら下がっていると聞いてくる。そのバッファを作って kill しているのは
-diff-hl-dired だけ。
-
-| | |
-|---|---|
-| `diff-hl-dired.el:101` | 前のチェーンが生きていれば `kill-process` して**一時バッファ 1 個を使い回す** |
-| `diff-hl-dired.el:143` | チェーンが終わったら `kill-buffer` する |
-
-vc-git の `dir-status-files` は `update-index` → `diff-index` →
-`ls-files-missing` → … → `ls-files-ignored` と**プロセスを 6 回前後リレー**する
-（`vc-git.el` の `vc-git-after-dir-status-stage`）。Windows は spawn 1 回が
-55 ms 前後なので 1 チェーンで 0.5〜1 秒かかり、**auto-revert で
-`dired-after-readin-hook` が再び走るには十分な長さ**になる。
-
-再入したとき `kill-process` で前のチェーンを止められるのは「そのプロセスが
-まだ生きている」ときだけ。**プロセスは終了済みで sentinel がまだ走っていない
-瞬間**に再入すると `kill-process` は何もせず、旧チェーンが後から再開して
-新チェーンと同じバッファで交錯する（タイマーと sentinel はどちらも
-コマンドループの同じ場所で回るので、どちらが先かは保証されない）。
-先に終わった側が `kill-buffer` を呼び、そこには相手のプロセスが走っている、
-というのがあのプロンプト。**両チェーンが同じバッファを `erase-buffer` し合う
-ので、プロンプトを別にしても dired のマーカーが欠けたり古いままになる。**
-
-`my-vc.el` で 2 つ入れてある。
-
-1. 一時バッファで `kill-buffer-query-functions` を nil にする。中身は
-   読み取り専用の git なので、途中で殺して困るものは無い
-2. `diff-hl-dired-update` に `:around`（`my:diff-hl-dired-update-guard`）。
-   **走っているチェーンが無ければ従来どおり即実行**、走っていれば呼ばずに
-   0.5 秒間隔で終了を待って 1 回だけ呼ぶ。待っている間に来た分は畳まれる。
-   5 秒（`my:diff-hl-dired-max-wait`）で待ちを打ち切る保険付き
-   （一時バッファが残ったときに更新が永久に止まらないように）
-
-「走っているか」の判定は**一時バッファの生死**で足りる（チェーンの最後に
-kill されるので、生きていること自体が印になる）。
-
-batch プローブでの実測（`user-lisp/` を `dired-noselect` し、チェーンが
-走っている最中に `diff-hl-dired-update` を呼ぶ）:
-
-| | 対処後 | 対処前 |
-|---|---|---|
-| 一時バッファの `kill-buffer-query-functions` | **nil** | `(process-kill-buffer-query-function)` |
-| 再入後にプロセスが同一か | **t**（新チェーンを始めない） | **nil**（殺して差し替え） |
-| 待ちタイマー | t | nil |
-| `run` のまま `kill-buffer` | **t**（黙って通る） | **`inhibited-interaction`** |
-
-畳んだ更新が失われないことも確認した。開いた直後に 3 連続で呼ぶと
-タイマー 1 本にまとまり、8 秒後にはチェーン完了・一時バッファ無し・
-マーカーは変更済みの 2 ファイルに付いている。
-
-**`inhibit-interaction` を立てずに測ってはいけない。** batch の `yes-or-no-p`
-は stdin を待つので、対処前の `kill-buffer` でプローブが固まる
-（最初の 1 回で実際に固まった。それはそれで「本当に聞いてくる」ことの
-証明にはなる）。
-
-## PDF をバッファ内でプレビューする（2026-09-09）
-
-組み込みの `doc-view-mode` で見る。**設定は 1 行も要らない**が、外部の変換
-ツールが 1 つ要る（tree-sitter の文法や LSP サーバと同じ、マシンごとの手動
-セットアップ）。
-
-```
-scoop install mupdf     # extras / 1.28.0。mutool.exe が入る
-```
-
-`.pdf` は既定の `auto-mode-alist` が `doc-view-mode-maybe` に送るので、
-dired の `RET` でそのまま開く（`my:dired-external-open-regexp` は
-`xls` 系だけなので邪魔しない）。
-
-### 【重要】poppler は入っていても使われない
-
-**`doc-view` が PDF → 画像に使えるのは Ghostscript か MuPDF だけ**
-（`doc-view.el:203` の `doc-view-pdf->png-converter-function`）。
-このマシンには scoop で poppler が入っていて `pdftoppm` / `pdftocairo` が
-あるが、**doc-view はそれらを画像変換には使わない**。poppler で使われるのは
-`pdftotext`（`C-c C-t` のテキスト表示）だけ。
-
-導入前の状態（実測）:
-
-| | |
-|---|---|
-| `(doc-view-mode-p 'pdf)` | **nil** |
-| `doc-view-ghostscript-program` | **nil**（`gswin64c` も `gswin32c` も無い） |
-| `doc-view-pdfdraw-program` | `"mudraw"`（見つからないときの既定） |
-
-この状態で PDF を開くと変換されず、`doc-view-fallback-mode` に落ちる。
-**「PDF が読めない」ときは、まず変換ツールの有無を疑うこと。**
-
-### mupdf を選んだ理由
-
-`doc-view-pdfdraw-program` の既定は `mutool` → `pdfdraw` → `mudraw` の順に
-探す（`doc-view.el:188`）ので、`mutool` を置くだけで
-`doc-view-pdf->png-converter-function` も自動で mupdf 側になる。
-**Ghostscript でも動くが doc-view は mupdf を優先する。**
-
-さらに Emacs 31.1 は **mupdf のときだけ PNG ではなく SVG で出す**
-（`doc-view.el:2262`、`doc-view-mupdf-use-svg`）。拡大しても崩れない。
-
-### 実測（サンプルは日本語ファイル名の PDF）
-
-| | |
-|---|---|
-| `(doc-view-mode-p 'pdf)` | `c:/Users/masao/scoop/shims/mutool.exe` |
-| `major-mode` | `doc-view-mode` |
-| `doc-view-mupdf-use-svg` | **t** |
-| 生成物 | `page-1.svg`（`doc-view--image-file-pattern` = `page-%s.svg`） |
-
-**日本語ファイル名でも通る。** `default-process-coding-system` の cdr が
-cp932 なので、`call-process` の引数が正しく渡る（別節）。
-
-### 入れた直後は再起動が要る
-
-`doc-view-pdfdraw-program` と `doc-view-pdf->png-converter-function` は
-**`doc-view.el` のロード時に `executable-find` で決まる defcustom** なので、
-doc-view を既に読んでいるセッションでは古い値のまま。再起動するか、
-その場で 2 つを `setq` する。
-
-### 他のマシンでは
-
-`mutool` か `gs` を入れるだけ。既定のロジックが拾うので設定は要らない。
-
-## markdown のプレビューと外部エディタ
-
-似ているが**別経路**の 2 つがある。
-
-| | コマンド | 経路 |
-|---|---|---|
-| ブラウザで HTML を見る | `markdown-preview`（`C-c C-c p`、hydra の `v`） | `markdown-command`（pandoc）で HTML に変換 → `*markdown-output*` → `browse-url-of-buffer` が一時ファイルに書き出して OS 既定ブラウザで開く |
-| 外部エディタで開く | `markdown-open`（`C-c C-c o`、hydra の `O`） | `save-buffer` してから `call-process` で `markdown-open-command` に**元の `.md` のパスを渡す**だけ。pandoc も browse-url も通らない |
-
-`.md` そのものを渡したい相手（MarkText、Typora）は後者。**新しいコマンドを
-作る必要は無い。**
-
-`markdown-open-command` は MarkText を先頭に置いてある。
-
-```elisp
-(or (executable-find "marktext") ...Typora のパス候補...)
-;; => "c:/Users/masao/.local/bin/marktext.cmd"
-```
-
-- `executable-find` は Windows では `exec-suffixes`（`.exe` `.com` `.bat`
-  `.cmd` `.btm`）を補うので、拡張子なしの `"marktext"` で `.cmd` が見つかる。
-  `~/.local/bin` は `exec-path` に入っている
-- `marktext.cmd` は `start` で起動して即座に戻るため、`markdown-open` の
-  同期 `call-process` でも Emacs は固まらない。**戻らないラッパを
-  `markdown-open-command` にすると固まる**
-- 以前は Typora のインストールパスを `seq-find` で探すだけだったが、この
-  マシンに Typora は無いので結果は `nil` で、`markdown-open` は
-  `Variable markdown-open-command must be set` で常に失敗していた
-
-### 【重要】`call-process` の引数は cp932 でエンコードすること
-
-`my-japanese.el` は Windows で `default-process-coding-system` を
-`(utf-8 . utf-8)` にしている。**`call-process` の引数はこの cdr で
-エンコードされる**が、Emacs のプロセス起動は ANSI API なので、送った
-UTF-8 のバイト列が受け取り側で cp932 として解釈される。
-結果、**日本語を含むパスは存在しないファイル名になる**。
-
-実測（`KOB00100_チェック仕様・メッセージ一覧.md`、GUI・実設定）:
-
-| `default-process-coding-system` | cmd の `if exist %1` |
-|---|---|
-| `(utf-8 . utf-8)`（設定のまま） | **MISSING** |
-| `(utf-8 . cp932)` | EXIST |
-| `emacs -Q`（既定） | EXIST |
-
-**この壊れ方は何の手がかりも残さない。** MarkText は受け取ったパスを
-`isMarkdownFile`（存在チェックを含む）で黙って捨て、ログにも書かずに
-`startUpAction`（`blank`）へフォールバックする。`start` 経由なので終了
-コードも必ず 0。つまり「**MarkText は起動するが空白**」だけが見える。
-
-そのため `markdown-open-command` には**文字列ではなく関数**
-（`my:markdown-open-external`）を渡している。文字列だと `markdown-open`
-自身が `call-process` するので、束縛する隙が無い。関数の中で
-`grep`（`my-utils.el`）や `org-pandoc`（`my-text.el`）と同じく cdr だけ
-`locale-coding-system` に戻している。
-
-なお Windows の `my:open-file-externally`（`my-core.el`）は
-`w32-shell-execute`（ワイド API）なのでこの問題は無い。
-
-2026-09-04 に `default-process-coding-system` そのものを
-`(utf-8 . cp932)` に直したので、`M-x compile` / `shell-command` /
-ripgrep など `user-lisp/` の外を通る経路も含めて一掃してある（次節）。
-`my:markdown-open-external` の束縛は冗長になったが、macOS / Linux では
-`locale-coding-system` が utf-8 で no-op になるため、そのまま残してある。
-
-### `prefer-coding-system` が `default-process-coding-system` を上書きする
-
-**`(setq default-process-coding-system '(utf-8 . utf-8))` は GUI では
-2015 年からずっと無意味だった。**
-
-`my-japanese.el` の `*encoding` 相当のブロックでこれを設定しても、後続の
-w32 ブロックにある `(prefer-coding-system 'utf-8-unix)` が
+`my-japanese.el` の w32 ブロックにある `(prefer-coding-system 'utf-8-unix)` が
 `set-default-coding-systems` 経由で `default-process-coding-system` を
-`(CODING . CODING)` に書き戻す。実測:
+`(CODING . CODING)` に書き戻す。**cdr を変えたいなら、それより後で入れ直す。**
 
 ```elisp
 (setq default-process-coding-system '(utf-8 . cp932))  ; => (utf-8 . cp932)
 (prefer-coding-system 'utf-8-unix)                     ; => (utf-8 . utf-8)
 ```
 
-`default-file-name-coding-system` が `set-file-name-coding-system 'cp932` で
-打ち消されているのとまったく同じ構図で、こちらは打ち消しが無かった。
-そのため **cdr を変えるには `prefer-coding-system` より後で入れ直す**
-必要がある。
-
-なお w32 ブロックは `:if (eq window-system 'w32)` なので **batch では走らない**。
+w32 ブロックは `:if (eq window-system 'w32)` なので **batch では走らない**。
 batch での最終値は前段の `setq` が決める。両方に置いてあるのはそのため。
 
-### `(utf-8 . cp932)` に変えたときの影響（2026-09-04 に GUI で実測）
+### 【重要】検証で `call-process` から git にブランチを作らせない
 
-| 観点 | 変更前 `(utf-8 . utf-8)` | 変更後 `(utf-8 . cp932)` |
-|---|---|---|
-| 引数（日本語パス）を `if exist` で確認 | **MISSING** | **EXIST** |
-| 出力の復号（日本語のコミット件名） | OK | OK |
-| 標準入力（`call-process-region` → `git hash-object`） | utf-8 | **cp932 に変わる** |
-| pandoc（`markdown-preview`） | OK | OK |
-| `shell-command-on-region`（往復） | OK | OK |
-| magit | OK | OK |
-| `markdown-open`（MarkText） | NG | OK |
+日本語のブランチ名を `call-process` の引数で渡すと**引数の側で化ける**
+（3 通り試して全部同じ結果）。読み取り側は正しいのに壊れて見えるので、
+検証では `.git/HEAD` を直接書くこと。
 
-cdr は**引数と標準入力の両方**を兼ねるので、標準入力に UTF-8 を要求する
-相手には `process-coding-system-alist` で個別に指定する。現状は pandoc
-（`markdown-preview` と `org-pandoc` がバッファを `call-process-region` で
-流し込む）だけ。
+---
 
-magit は `magit-process-git-arguments` が引数を自分で cp932 に
-`encode-coding-string` し（unibyte 文字列になるので二重エンコードは
-起きない）、標準入力も `magit-run-git-with-input` が自分で utf-8 に
-`encode-coding-region` するので、どちらの設定でも影響を受けない
-（magit issue #3250）。**magit だけが壊れていなかったのはこれが理由。**
+## use-package と straight
 
-### シェル経由の経路は `process-coding-system-alist` が優先される
+**パッケージ管理は straight.el に一本化**している（`package.el` は
+`early-init.el` で無効化済み）。設定の記述は **Emacs 同梱の use-package**。
 
-`M-x grep` と `my:ripgrep-regexp` は `compilation-start` 経由で
-`shell-file-name`（Git の `bash.exe`）に `-c "コマンド行"` を渡す。
-ここは **`default-process-coding-system` を直しても効かない。**
-`my-shell.el` の
+- 新しいパッケージは該当モジュール内で `(use-package NAME :straight t ...)`
+- 組み込みライブラリには `:straight` / `:ensure` を付けない
+- Emacs 同梱のものを使いたい場合は `init.el` で
+  `(straight-use-package '(NAME :type built-in))` を宣言する（`org` / `transient`）。
+  これをしないと依存解決で straight が古い版をビルドして `load-path` に載せる
+- `straight/repos/org` と `straight/build/org` があっても `load-path` には載らない
+  （`:type built-in` のため）。recipe cache には残るので `straight-prune-build` では
+  消えず、手で消す
 
-```elisp
-(modify-coding-system-alist 'process ".*sh\\.exe" 'utf-8)
-```
+### 【重要】`init.el` で調整している 3 点
 
-が `process-coding-system-alist` に載り、そちらが優先されて car / cdr とも
-utf-8 に固定されるため。実測（`検索対象キーワード` を bash に渡して
-`od` で見る）:
+素の use-package のままでは挙動が変わる。**外すと静かに壊れる。**
 
-| | 届いたバイト |
+| 設定 | 外すとどうなるか |
 |---|---|
-| 期待（UTF-8） | `e6 a4 9c e7 b4 a2 …` |
-| そのまま | `e8 ae 80 e6 87 83 ef bd b4 …`（UTF-8 を cp932 と解釈した化け） |
-| `coding-system-for-write` = cp932 | **一致** |
-| alist を `(utf-8 . cp932)` に差し替え | **一致** |
+| `use-package-hook-name-suffix` = `nil` | `:hook (foo-mode-hook . f)` が `foo-mode-hook-hook` に登録される |
+| `use-package-use-theme` = `nil` | `:custom` が擬似テーマ経由になり、`custom.el` の `user` テーマに負ける |
+| `:straight` を `:unless` の直後へ移動 | `:straight` は `use-package-keywords` の先頭に push されるため `:if` より先に処理され、**`:if` が偽でも `straight-use-package` が走る**（Windows で `exec-path-from-shell`、Linux で `w32-ime` / `tr-ime` まで clone / build しにいく） |
 
-**alist は書き換えていない。** cdr はコマンド行と標準入力を兼ねるので、
-alist を `(utf-8 . cp932)` にすると `M-!` / `M-|`
-（`shell-command-on-region`）や `M-x shell` の標準入力まで cp932 になる。
-代わりに、**標準入力を使わない grep / ripgrep の側だけ**
-`coding-system-for-write` を `locale-coding-system` に束縛した
-（`my:grep-with-cp932` と `my:ripgrep-with-cp932`）。`coding-system-for-write`
-は alist より強い。非 Windows では `locale-coding-system` が utf-8 なので
-no-op になる。
+### 遅延キーワードが無いブロックには `:defer t` を足す
 
-実測（`grep検証/日本語ファイル.md` に日本語の行を置いて検索）:
+use-package は遅延キーワード（`:commands` `:bind` `:hook` `:mode` `:after` など）が
+1 つも無いと `(require)` を出す。インストールするだけのブロックには `:defer t` を。
 
-| | 変更前 | 変更後 |
-|---|---|---|
-| `M-x grep` で日本語を検索 | **一致なし** | **ヒット** |
-| dired から `my:ripgrep-regexp` | **exit code 1** | **ヒット** |
-| `M-|`（`shell-command-on-region`）の往復 | OK | OK |
+`:defer t` を付けると `:config` は `(with-eval-after-load '<name>)` に包まれる。
+**そのパッケージを誰もロードしないなら `:config` は永久に走らない**ので、
+「ロードせずに実行したい設定」は `:init` に置くこと。
 
-**日本語の検索語で「一致なし」になったら、まずこれを疑うこと。**
-grep も rg もエラーを出さず、ただ 0 件を返す。
+### 【重要】名前は実在する feature にする。疑似パッケージは `emacs`
 
-#### 【重要】束縛はコマンドではなく `ripgrep-regexp` に張る
+`:hook` / `:bind` / `:mode` などがあると `:config` は
+`(eval-after-load '<パッケージ名>)` に包まれる。**名前が実在する feature で
+ないと `:config` も `:bind` も永久に適用されない。**
 
-当初 `my:ripgrep-regexp`（dired の `G`）が本家 `ripgrep-regexp` を
-**コピーして**その中でだけ束縛していたため、本家を呼ぶ経路が漏れていた。
+- 実在する feature 名を使う（例: `sql-mode` ではなく `sql`）
+- OS 別のまとまりなど**疑似パッケージには `emacs` を使う**。`(require 'emacs)` は
+  no-op、`(with-eval-after-load 'emacs ...)` は即実行されるので安全
 
-| 入口 | 通る関数 | 2026-09-04 まで |
-|---|---|---|
-| dired の `G` | `my:ripgrep-regexp`（コピー） | 束縛あり → **ヒット** |
-| `C-c p s`（`my:projectile-search-dwim`） | `projectile-ripgrep` → **本家** `ripgrep-regexp` | 束縛なし → **0 件** |
-| `M-x ripgrep-regexp` | 同上 | 同上 |
+### 【重要】`:custom` にマイナーモードの変数を書く場合
 
-`ripgrep-regexp` に `:around` advice（`my:ripgrep-with-cp932`）を張る形に
-変え、`my:ripgrep-regexp` は `(dired-current-directory)` を渡すだけの薄い
-ラッパにした。`ripgrep-regexp` は autoload なので、定義前に advice を
-張っておけば `ripgrep.el` のロード時に引き継がれる（実測で確認）。
+`customize-set-variable` は `(get VAR 'custom-set)` が未設定のとき `set-default` に
+フォールバックするため、**パッケージが未ロードだと変数に `t` が入るだけで
+モード関数が呼ばれない**。`:demand t` でロードした上で `:config` から明示的に呼ぶ。
 
-**この検証は batch ではできない。** PowerShell 7 から `--batch` で起動すると
-`locale-coding-system` が **`cp65001`**（コンソールのコードページ）になり、
-束縛が no-op になって修正前後の区別がつかない（4 通り試して全部 0 件になった）。
-GUI では `cp932` で、ANSI コードページと一致する。gitd の
-`my:gitd-ansi-coding` が `locale-coding-system` を避けているのと同じ話。
+実例: `(corfu :custom (global-corfu-mode t))` では corfu が読まれず補完が出なかった。
+`editorconfig-mode` も同じ。
 
-GUI プローブでの実測（`~/.emacs.d` で `プロキシ` を検索）:
+ただし autoloads に `custom-autoload` が入っている変数（`cua-mode`、
+`global-whitespace-mode`、`yas-global-mode` など）は動く。
+**動いていることが正しさの証拠にならない**点に注意。
 
-| | |
+### `:custom-face` は使わない（テーマに負ける）
+
+| 方法 | modus-vivendi が同じ face を定義しているとき |
 |---|---|
-| 修正後 `ripgrep-regexp` / `projectile-ripgrep` / `my:ripgrep-regexp` | **3 つともヒット** |
-| advice を外した `projectile-ripgrep` | **0 件**（報告された症状を再現） |
+| `custom-set-faces` | `theme-face` に `user` が積まれ **自分の指定が勝つ** |
+| use-package の `:custom-face` | **テーマが勝ち、指定が消える** |
+| `face-spec-set` に spec-type `user` を明示 | 同上、**消える** |
 
-## 【重要】モードのフックの `setq` はグローバル値を潰すことがある（2026-09-14）
+`:init` から `custom-set-faces` を直接呼ぶ形にしてある（`diff-hl` /
+`highlight-indent-guides` / `doom-modeline` の 3 箇所）。
 
-`markdown-mode` / `gfm-mode` のフック（`my:setup-markdown-mode`）に
-`(setq line-move-visual nil)` と書いてあったため、**`.md` を一度でも開くと
-そのセッションの全バッファで `C-n` / `C-p` が論理行移動になっていた**。
-`docs/_archived/archive-init.org` にも同じ行があるので Org 時代からの持ち越し。
+### `require` できないものには `:no-require t`
 
-原因は `line-move-visual` が**自動バッファローカルでない**こと。この場合
-フックの中の `setq` は `default-value` をそのまま書き換える。同じ関数の
-隣にある `truncate-lines` は `make-variable-buffer-local` 済みなので `setq` でも
-バッファローカルになる。**見た目が同じ 2 行なのに効き先が違う。**
+use-package は **`require` に失敗すると `:config` ごと実行しない**。
+`modus-themes` は `etc/themes/` にあり `load-path` に載っていないため
+`(require 'modus-themes)` は失敗する。`:no-require t` が無いと `load-theme` が
+呼ばれず、テーマが一切適用されない。
 
-判定は `local-variable-if-set-p`（実測）:
+→ leaf からの移行時の対応表: [docs/refactoring/leaf-to-use-package.md](docs/refactoring/leaf-to-use-package.md)
+
+→ 棚卸し・掃除・更新の手順: [docs/packages/straight-maintenance.md](docs/packages/straight-maintenance.md)
+
+---
+
+## `user-lisp/` の扱い
+
+Emacs 31.1 の `user-lisp/` は、既定では `package-activate-all` の直後・
+`init.el` の読み込み**前**に `prepare-user-lisp` が走る。その時点では straight の
+ブートストラップが済んでおらず `use-package` も未初期化なので、モジュールが
+壊れた `.elc` にコンパイルされる。そのため:
+
+- `early-init.el` で `user-lisp-auto-scrape` を `nil` にして自動実行を止める
+- `init.el` で straight と use-package を用意したあと `(prepare-user-lisp t)` を
+  明示的に呼ぶ。**第 1 引数 JUST-ACTIVATE が `t` = バイトコンパイルしない**
+
+**バイトコンパイルしないのは決定事項。** 速くならず、`load-prefer-newer` が既定
+nil であることと `C-M-x` で評価しながら書く運用が噛み合わなくなる。
+→ 実測: [docs/refactoring/no-bytecompile.md](docs/refactoring/no-bytecompile.md)
+
+モジュールを追加した場合は `init.el` の `require` 列に加える。
+
+---
+
+## `setq` と `setq-local`
+
+### 【重要】モードのフックの `setq` はグローバル値を潰すことがある
+
+`line-move-visual` は**自動バッファローカルでない**ため、フックの中の `setq` は
+`default-value` を書き換える。**`.md` を一度でも開くと、そのセッションの全バッファで
+`C-n` / `C-p` が論理行移動になっていた**（2026-09-14 に発見・削除）。
+
+判定は `local-variable-if-set-p`。
 
 | 変数 | `local-variable-if-set-p` | フック内の `setq` の効き先 |
 |---|---|---|
@@ -3893,161 +307,563 @@ GUI プローブでの実測（`~/.emacs.d` で `プロキシ` を検索）:
 **バッファ単位に効かせたいなら必ず `setq-local` と書く。** `setq` でよいのは
 本当にグローバルに効かせたいときだけ。
 
-**この壊れ方は値を見ても気づけない。** そのバッファでは望みどおりの値に
-なっているので、フックも変数も正しく見える。おかしいのは**別のバッファ**で、
-しかも `.md` を開くまでは正常なので、原因と症状が時間的にも場所的にも離れる。
-`mark-holidays-in-calendar`（存在しない変数への `customize-set-variable` が
-黙って通る）と同種の「エラーが出ないまま静かに外れる」経路。
+**この壊れ方は値を見ても気づけない。** そのバッファでは望みどおりの値になって
+いるので、フックも変数も正しく見える。おかしいのは**別のバッファ**で、しかも
+`.md` を開くまでは正常なので、原因と症状が時間的にも場所的にも離れる。
 
-### 折り返しを考慮した `C-n` / `C-p` は `line-move-visual`（既定 t）
+### 【重要】存在しない変数への `customize-set-variable` は黙って通る
 
-既定が `t` なので、上の 1 行は **Emacs の既定を全体で打ち消すだけ**のもの
-だった。削除して既定に戻してある。
+`mark-holidays-in-calendar` は Emacs 23 で `calendar-mark-holidays-flag` に
+改名され obsolete alias も無い。`customize-set-variable` は defcustom でない変数にも
+`set-default` するので、**警告も出ないまま同名の変数が 1 つ増えるだけ**だった。
+同じことが `cape-dabbrev-min-length`（cape から変数自体が消えた）でも起きていた。
 
-GUI 実測（ウィンドウ幅 144、折り返した長い行の途中「固」の上で `C-n`。
-実際にウィンドウへ出して測ること）:
+**見分け方は `(get 'VAR 'custom-type)` が nil かどうか。**
+`boundp` は自分で作ってしまった変数にも t を返すので判定に使えない。
 
-| `line-move-visual` | 移動前 | 移動後 |
-|---|---|---|
-| `nil` | 3 行目 69 桁 | **4 行目**（= 次の論理行） |
-| **`t`** | 3 行目 69 桁 | **3 行目 208 桁**（= 折り返した下の段） |
+---
 
-- 桁はピクセル単位（`temporary-goal-column`）で保持されるので、全角混じりでも
-  真下の文字に落ちる
-- `C-a` / `C-e` / `C-k` まで視覚行単位にしたいときは `visual-line-mode`
-- 論理行で動きたいときは `next-logical-line` / `previous-logical-line`
-- **検証は GUI で、バッファをウィンドウに出して行う。** `next-line` は
-  `line-move-visual` が非 nil のとき `vertical-motion` を使うので、
-  表示されていないバッファでは折り返しが再現できない
+## `custom.el` とテーマの優先順位
 
-### `C-e` はウィンドウの右端で止まる（`my:end-of-visual-line`、2026-09-14）
+読み込み順は **`custom.el` → `user-lisp/` の各モジュール**。同じ変数を両方で
+設定すると **`user-lisp/` 側が勝つ**。`custom.el` に書いても効かないので、
+設定は `user-lisp/` に置くこと。
 
-`C-n` / `C-p` が視覚行単位なのに `C-e` だけ論理行の末尾（折り返した何段も下）へ
-飛ぶのが噛み合わないので、`my-editor.el` で `C-a` の隣に置いた。
-`visual-line-mode` は入れない（`word-wrap` や `C-k` まで変わる）。
+`custom.el` に残してあるのは 4 変数だけ（`safe-local-variable-values` /
+`warning-suppress-log-types` / `warning-suppress-types` / `yas-new-snippet-default`）と、
+`rst-level-1`〜`6` の 6 面。
 
-**`truncate-lines` が t でも右端で止まる。** `end-of-visual-line` は
-`(vertical-motion (cons (window-width) 0))` だけなので、折り返さないバッファでも
-x = ウィンドウ幅で止まる。「折り返していなければ `move-end-of-line` と同じ」は
-**誤り**。GUI 実測（ウィンドウ幅 144、603 桁の行の先頭から `C-e`）:
+**face がテーマに勝つかどうかはロード順で決まる。** テーマより先に定義済みの face
+（`font-lock-*` など）はテーマが勝ち、`custom.el` に書いても効かない。テーマより後に
+ロードされるパッケージの face は `custom.el` 側が勝つ（`rst.el` がこれ）。
+確実に当てたいときは `load-theme` のあとに設定する。
 
-| 行 | `truncate-lines` | `move-end-of-line` | **`my:end-of-visual-line`** |
-|---|---|---|---|
-| 603 桁 | nil | 5 段目 603 桁 | **1 段目 143 桁** |
-| 603 桁 | **t** | 603 桁 | **143 桁** |
-| `abcEND` | nil / t | 6 桁 | **6 桁**（`eolp` が t） |
+`customize` を使うと `custom.el` に書き戻されるので、モジュール側と重複して
+いないか時々確認する。`custom.el` の `custom-set-variables` から変数名を集め、
+`user-lisp/` の `use-package` を `macroexpand-1` して出てくる
+`customize-set-variable` と突き合わせればよい。
 
-つまり**幅に収まる行では従来どおり**で、違いが出るのは幅を超える行だけ。
-その代わり**長い行の論理的な末尾へは `C-e` では行けなくなる**（右端に着いた
-状態でもう一度押しても同じ x なので動かない）。`M-x end-of-line` か、
-折り返していれば `C-n` `C-e` で行く。行末まで消すのは `C-k`
-（`kill-line` は `line-move-visual` を見ないので論理行の末尾まで消す。
-右端から `C-k` を押すとその行の残り全部が消えることを実測）。
+---
 
-#### 【重要】素の `end-of-visual-line` は折り返し位置で次の行の先頭に着く
+## Windows 固有
 
-`word-wrap` が nil（桁で折り返す）のバッファでは、`end-of-visual-line` の
-着地点が**次の視覚行の先頭**になる。point としては行末なのに、**ブロック
-カーソルは次の行の 1 桁目に描かれる**ので「右端に行っていない」ように見える。
-`*claude(PROJ)*` も `word-wrap` は nil なのでこれを踏む。
+### 【重要】この設定では `file-equal-p` が使えない
 
-GUI 実測（幅 144、空白区切りの長い 1 行の先頭から `C-e`。位置は
-`posn-at-point` = 実際に描かれる桁）:
+`my-platform.el` が `w32-get-true-file-attributes` を `nil` にしている
+（`file-attributes` を速くするため）。すると **inode が常に 0 で返る**。
+`file-equal-p` は inode とボリューム ID の組で比べるので、**同じドライブにある
+ファイル / ディレクトリはすべて「同じ」と判定される。**
 
-| `word-wrap` | point | `char-after` | 描画位置 |
-|---|---|---|---|
-| **nil**（素） | 145 | `2` | **row 1 col 0**（次の行の頭） |
-| **nil**（`my:end-of-visual-line`） | 144 | `d` | **row 0 col 143**（右端の文字の上） |
-| t（素・修正後とも） | 140 | 空白 | row 0 col 139（折り返しの空白の上） |
+```elisp
+(file-attribute-file-identifier (file-attributes "…/b-project/"))  ; => (0 2431202897)
+(file-equal-p "…/b-project/" "…/y/src/")                           ; => t
+```
 
-`word-wrap` が t なら折り返しに使った空白が row 0 の末尾にあり、素のままでも
-同じ行に着くので**引き戻してはいけない**。判定は空白の有無ではなく
-**「視覚行の先頭に着いたか」**（`beginning-of-visual-line` が動かない）で行う。
+**`emacs -Q` では再現しない。** 実際に `my-claude.el` で別プロジェクトの `C-c a a` が
+同じセッションに解決された。
 
-**`truncate-lines` が t のときは次の視覚行が無いので、この判定にかからない。**
-素のままだと画面の 1 つ外側（col 144）に着く。そちらは「行末でなければ
-1 文字戻す」で別に扱う。ただし**横スクロールは避けられない**。右端の文字に
-載せても `hscroll-margin`（既定 5）と `hscroll-step`（既定 0 = 中央寄せ）で
-`window-hscroll` が 0 → 71 になる（実測）。論理行末まで飛ぶよりはまし、という程度。
+パスの同一判定は**文字列で**行う。`expand-file-name` + `file-name-as-directory` で
+揃え、`file-name-case-insensitive-p` が真なら `string-equal-ignore-case`。
+stat を打たないので速くもある。
 
-**桁は自分で数えないこと。** `display-line-numbers-mode` が有効だと行番号の
-ぶん実際に使える幅が減る（実測: `current-column` は 139 なのに描画は col 143）。
-`window-width` から引き算するのではなく、`end-of-visual-line` が着いた場所で
-判断する。
+`file-truename` は inode を見ないのでこの問題を踏まない（`my-dired.el` の
+`_assets/` 整合性チェックが使っている）。
 
-修正後の実測（7 通り。いずれも 1 段目のまま、2 回続けて押しても動かない）:
+### 【重要】ドライブレターの大小が食い違う
 
-| | 着地 | 描画桁 |
-|---|---|---|
-| 折り返し（`word-wrap` nil） | `x` の上 | 143 |
-| 折り返し（`word-wrap` t） | 空白の上 | 139 |
-| `truncate-lines` t | `x` の上 | 143（hscroll 71） |
-| `display-line-numbers` | `x` の上 | 143（`current-column` は 139） |
-| 全角（`日本語` の繰り返し） | `語` の上 | 142 |
-| 幅に収まる行 | 行末（`eolp` が t） | 6 |
-| 畳んだ org の見出し | 1 行目 14 桁 | — |
+Emacs は**子プロセスの作業ディレクトリのドライブレターを小文字にする**。
+`default-directory` を大文字にしても変わらない（`make-process` が
+`directory-file-name` と同じ経路で組み立てるため）。**Lisp 側に逃げ道は無い。**
 
-#### 【重要】素の `end-of-visual-line` は畳んだ領域を飛び越える
-
-org の畳んだ見出しでは改行ごと不可視になり、見出しと配下が **1 視覚行**になる。
-そのため見出しの末尾ではなく**サブツリーの末尾**に着き、そこで打つと畳まれた
-中身に紛れ込む。GUI 実測（`* 見出し :tag:` + 本文 2 行を `org-cycle` で畳んだ）:
-
-| | 着地 |
+| 式 | 値 |
 |---|---|
-| `org-end-of-line`（org の既定） | 1 行目 14 桁 `* 見出し :tag:` |
-| **素の `end-of-visual-line`** | **3 行目 13 桁 `本文の 2 行目`** |
-| **`my:end-of-visual-line`** | **1 行目 14 桁** |
+| `(expand-file-name "C:/Users/masao/.emacs.d/")` | `C:/...`（明示した大文字は保つ） |
+| `(expand-file-name "~/.emacs.d/")` | **`c:/...`** |
+| `(directory-file-name "C:/Users/masao/.emacs.d/")` | **`c:/...`** |
 
-**org の remap は当てにできない。** org は `move-end-of-line` を
-`org-end-of-line` に remap して避けているが（`C-e` を直接は束縛していない）、
-`C-e` を別のコマンドに張り替えると remap は経由しない。`C-a` を
-`my:goto-line-beginning-or-indent` にしている時点で同じことが起きている
-（あちらは後ろへ行かないので害が無いだけ）。
+逆に gopls は `publishDiagnostics` の uri を大文字で返す。どちらも「文字列 `equal`
+で突き合わせるところ」で静かに外れる。
 
-不可視テキストが無ければ視覚行が論理行を越えることはないので、
-**論理行の末尾を越えたときだけ引き戻す**のが `my:end-of-visual-line`。
-outline / hs-minor-mode / `my:org-fold-region` にも同じ理屈で効く。
+- claude: `cmd.exe /d /c cd /d <PATH> && ...` を挟んで大文字に正規化する
+  → [docs/claude/my-claude.md](docs/claude/my-claude.md)
+- gopls: `eglot-uri-to-path` に `:filter-return` advice で小文字へ揃える
+  → [docs/lsp/eglot-and-flymake.md](docs/lsp/eglot-and-flymake.md)
+- `directory-abbrev-alist` は `abbreviate-file-name` が `case-fold-search` を
+  `(file-name-case-insensitive-p filename)` に束縛するので、**ここだけは自動で吸収される**
 
-## カレンダーで日本の祝日を出す (`my-utils.el`)
+### `call-process` が遅い（未解決）
 
-**日本の祝日は Emacs 本体に入っていない。** 31.1 の `lisp/calendar/` を
-`japan` で grep しても 1 件も出ない。`calendar-holidays` の既定値 39 件は
-アメリカ・キリスト教・ユダヤ・イスラム・バハイ・中国の祝日で、日本のものは
-1 つも無い。したがって外部パッケージが要る。
+同じ `cmd.exe` を起動するのに PowerShell が約 20 ms、Emacs の `call-process` は
+**59〜76 ms**。約 40 ms が Emacs 側のプロセス生成経路のコスト。
+`gitd/` はこれを迂回するだけで、直してはいない。
 
-**`japanese-holidays`（emacs-jp）が事実上唯一の選択肢で、これで足りる。**
-upstream は 2020-12-29 で止まっている（2026-09 に fetch して確認。behind=0）が、
-**祝日法が 2021 年以降変わっていないため現行法に完全対応している**。
-2026 年の 18 件が内閣府の一覧と一致することを実測した。
+そのため **Windows では「子プロセスを起こさずに済ませられないか」を先に考える。**
+実例: git のブランチ名は `.git/HEAD` を読めば取れる（`call-process git` の 55.6 ms に
+対し 0.061 ms で **1300 倍**）。
 
-| | |
+### `w32notify` はイベントを落とす
+
+1000 ファイル作成に対しイベントは **4095 件**しか届かなかった
+（`ReadDirectoryChangesW` のバッファ溢れ。1 万件が期待値）。
+**イベントの完全性に依存した設計にはできない。**
+
+### `HOME` は環境変数で設定する。設定側で `setenv` しない
+
+`init.el` が読まれる時点で `.emacs.d` の探索は終わっているので手遅れ
+（`early-init.el` でも同じ）。しかも `user-emacs-directory` は展開前の
+`"~/.emacs.d/"` という文字列のままで、Windows の Emacs は `expand-file-name` の
+たびに `HOME` を読み直すため、途中で差し替えると `recentf` / `custom.el` /
+`straight` の保存先が実際に動いている設定とは別のディレクトリになる。
+
+### IME
+
+`M-\`` と `M-kanji` を `ignore` にしているのは**意図的**。その組み合わせは
+tr-ime / Windows 側が IME のトグルとして処理するので、Emacs 側では何もしないのが
+正しい。Emacs から切り替えるのは `C-\` と 漢字キー。
+
+**モードラインの IME 表示は `w32-ime-input-method-title` で設定する。**
+`w32-ime-mode-line-state-indicator` は w32-ime が自前で `mode-line-format` の先頭に
+差し込むための変数で、`mode-line-format` をまるごと差し替える doom-modeline とは
+併用できない。
+
+### OS 判定
+
+`(eq system-type 'windows-nt)` / `'darwin` / `'gnu/linux`。
+ウィンドウシステムは `window-system` の `'w32` / `'ns` / `'x` / `'pgtk`。
+
+---
+
+## lexical-binding
+
+`early-init.el` / `init.el` / `user-lisp/` すべて `t`。新しいモジュールも `t` で書く。
+
+バイトコンパイルしない方針なので、lexical 化の検証は**一時ディレクトリにコピーして
+コンパイルし `*Compile-Log*` を読む**。GUI 起動して全パッケージがロードされた状態で
+やらないと、パッケージ由来のマクロが未定義で偽の警告が大量に出る。
+
+`reference to free variable` / `assignment to free variable` の大半は
+「そのパッケージがコンパイル時に未ロード」というだけで実害はない。注意すべきは
+`Unused lexical variable` と、呼び出し元の `let` 束縛を読んでいたクロージャ。
+
+---
+
+# 2. 決定事項（再提案禁止）
+
+調べ直した結果として**そうしないことに決めた**もの。理由は各リンク先にある。
+**同じ提案を繰り返さないこと。**
+
+| 決定 | いつ | 理由（要約） |
+|---|---|---|
+| **`user-lisp/` / `site-lisp/` をバイトコンパイルしない** | 2026-09-05 | `.elc` あり 0.993 s / なし 0.995 s。**得るものが 0 ms** で、失うものは具体的にある → [docs](docs/refactoring/no-bytecompile.md) |
+| **`site-lisp/eaw.el` を残す** | | 組み込みの `cjk-ambiguous-chars-are-wide` では **1496 文字足りない**。桁揃えが成立する 398 文字のうち **84% で eaw のほうが実描画と一致** |
+| **`site-lisp/cp5022x.el` を残し、MELPA 版に乗り換えない** | 2026-09-09 | Emacs 同梱の `cp51932.el` は**翻訳テーブルだけ**で `define-coding-system` が無い。MELPA 版は**バイト単位で同一**（upstream は 2012 年で停止、fork 3 つも中身同じ）。乗り換えると lexical-binding cookie を失って警告が増えるだけ |
+| **外部の `go-mode` を入れない** | | `go-ts-mode.el` の autoload と競合し、**tree-sitter 版に一生切り替わらない**。保険が要るなら `treesit-enabled-modes` に `go-ts-mode` を入れる → [docs](docs/languages/go.md) |
+| **`global-auto-revert-non-file-buffers` は使わない** | 2026-09-04 | 効き先が dired の外へ広がる。magit の更新は自前に組んであり並走させたくない。`dired-mode-hook` からバッファローカルに `auto-revert-mode` |
+| **magit の遅さに Defender 除外 / `core.fsmonitor` / git ラッパ回避は効かない** | 2026-09 | 原因は git ではなく Emacs のプロセス生成。3 つとも試して有意差なし |
+| **`magit-status-sections-hook` を削らない** | 2026-09 | 16 → 6 で 1669 → 1001 ms。表示を犠牲にする割に効かない |
+| **段階 2c（監視を常駐プロセスへ）は見送り** | 2026-09 | 速度目標はキャッシュと並列化で達成済み。移す価値は macOS / Linux 対応と溢れ検知にある |
+| **elpaca へは移行しない（straight のまま）** | 2026-08 | 設定本体が use-package なら `:straight` の 1 行を差し替えるだけで済む |
+| **`:custom-face` は使わない** | | テーマに負ける（§1「use-package と straight」） |
+| **`window-configuration` は退避しない**（my-claude） | | 最大化トグルの復帰先も `C-c a l` も同じ関数を呼ぶだけなので、どこから何度押しても同じ形に落ち着く |
+| **画像の送信で「プレースホルダが消えている」と警告しない**（my-claude） | | 貼り直しは「消す → 貼る」の 2 手なので、正常な操作のたびに必ず出ていた |
+| **golangci-lint を flymake に載せない** | | 1 回が重く `flymake-no-changes-timeout`（1.0 秒）で回す用途に向かない。`C-c C-l` で `compile` |
+| **`elisp-flymake-byte-compile-load-path` に `user-lisp/` を足さない** | 2026-09-09 | 偽診断が別の偽診断に入れ替わるだけで、所要 0.51 → 1.10 秒、`recentf` / `history` を毎回書き戻す副作用が増える → [docs](docs/lsp/eglot-and-flymake.md) |
+| **`libxml-parse-xml-region` に切り替えない**（my-htnblog） | | 名前空間の prefix を落とすので `app:control` が取れなくなる。速度差は 0.001 秒 |
+| **`my:pty-console-font` の既定は nil（フォントを切り替えない）** | | 切り替えると `char-width-table` と同じく **Emacs 全体**のフォントが変わり、編集中のバッファまで巻き込む |
+
+---
+
+# 3. モジュール別の注意
+
+各モジュールについて、**書く前に知っておかないと壊すこと**だけ。
+設計と実測は `docs/` にある。
+
+## `my-core` — tree-sitter の差し替え
+
+→ [docs/languages/tree-sitter.md](docs/languages/tree-sitter.md)
+
+- **`my:treesit-remap` は必ずトップレベルで呼ぶ。** `:config` は
+  `(eval-after-load '<パッケージ名>)` に包まれるので、そこで差し替えても
+  「その回に開いたバッファ」には間に合わない。さらに差し替えが効くと従来のモードは
+  もうロードされないため、**`:config` は二度と実行されない**
+- **`*-ts-mode` は従来モードのフックを継承しない。** `:hook` は
+  `((foo-mode-hook foo-ts-mode-hook) . func)` の形で両方に張る
+- **フォントロックやインデントの設定はモードごとに別物。** `csharp-mode` は
+  cc-mode 派生（`c-set-offset`）、`csharp-ts-mode` は tree-sitter 派生
+  （`csharp-ts-mode-indent-offset`）。セットアップ関数を分けること
+- **`.tsx` の `auto-mode-alist` 登録は web-mode のブロックより後に置く**
+  （`:mode` が先頭に積むので、前に置くと web-mode に負ける）
+- `my-core.el` は `treesit-language-source-alist` を `setq` で丸ごと上書きする。
+  **`go-ts-mode.el` が `add-to-list` する go / gomod / gowork を、commit ハッシュまで
+  一致させて書いておくこと。** 1 文字でも違うと `equal` 判定をすり抜けて二重登録になり
+  2 回ビルドされる
+
+## `my-japanese` — eaw / cp5022x
+
+→ [docs/japanese/eaw-and-cp5022x.md](docs/japanese/eaw-and-cp5022x.md)
+
+どちらも組み込みでは足りないので残す（§2）。
+
+- **ambiguous 幅の計測は必ず GUI で行う。** batch では `initial-window-system` が nil の
+  ため `use-cjk-char-width-table` が幅 1 に倒す分岐に入り、組み込みのカバー範囲を
+  過小評価する（2170 ではなく 1424 に見える）
+- `my-japanese.el` が `(define-coding-system-alias 'euc-jp 'cp51932)` と
+  `set-coding-system-priority` で cp5022x を使っている
+- **Emacs 本体に取り込まれたかは `(featurep 'cp5022x)` では分からない**
+  （site-lisp 側が必ず先に provide する）。`emacs -Q` で見ること
+
+```sh
+emacs -Q --batch --eval '(message "%S %S" (coding-system-p (quote cp51932)) (coding-system-p (quote cp50220)))'
+# 31.1 では nil nil
+```
+
+## `my-appearance` — フォント・テーマ・モードライン
+
+→ [docs/appearance/fonts-theme-modeline.md](docs/appearance/fonts-theme-modeline.md)
+
+### フォント名を決め打ちしない
+
+`my:nerd-font-family` が `font-get-glyphs` で**実際のグリフ有無を見て選ぶ**。
+名前で決め打ちすると、Nerd Fonts v2 のフォント（`HackGenNerd` など）を掴んで
+アイコンが全滅する。Material Design アイコン（第 15 面 `U+F0001`〜）と
+seti 上位（`U+E6AD`）を持つのは `Symbols Nerd Font Mono` だけ。
+
+### 日本語フォントの全角/半角ピッチはサイズで 1px ずれる
+
+HackGen は「全角＝半角×2」で設計されているが、Windows 実測:
+
+| `:height` | 半角 | 全角 | |
+|---|---|---|---|
+| 110 / 113 / 116 | 8 | 16 | 一致 |
+| **120 / 124** | 8 | **17** | **ずれる** |
+| 128 / 130 | 9 | 18 | 一致 |
+
+11.6（= 116）にしてある。**`face-font-rescale-alist` では直せない**
+（ASCII と日本語が同じフォントなので両方が同じ比率で縮む）。確認は
+`(string-pixel-width "あ")` と `(string-pixel-width "aa")` の比較で。
+
+### `set-fontset-font` はこの設定では効かない
+
+`nil` にも `t` にも入れ、`clear-face-cache` と `redraw-display` まで呼んでも
+`font-at` は元のフォントを返し続ける。**実際に効く経路は
+`set-face-attribute 'default nil :family`**（`emacs-font-setting` と同じ）。
+したがって**レンジごとの割り当てはできない**。
+
+**Nerd Font のアイコン領域（`#xe000`-`#xf8ff`）は触らない。**
+上書きするとアイコンが豆腐になる。
+
+### テーマ（modus-themes 5.2.0、Emacs 31.1 同梱）
+
+`:straight` は付けない（組み込み優先。`org` / `transient` と同じ扱い）。
+**`:no-require t` が必須**（§1）。色の調整は
+`modus-themes-common-palette-overrides` で行う。パレット名は
+`etc/themes/modus-themes.el` の `modus-vivendi-palette` を見る。
+`:custom` は `:config` より先に走るので上書きは `load-theme` に間に合う。
+
+v2 世代の API（`modus-themes-load-themes` / `-load-vivendi` / `modus-themes-region`）は
+5.x には存在しない。
+
+### doom-modeline
+
+- 背景色は**modus のパレット上書き**で指定する。Emacs 29 以降 `mode-line` とは別に
+  **`mode-line-active`** があり、テーマはそちらを塗るので `mode-line` だけ変えても効かない
+- 左端のバー（`doom-modeline-bar`）はテーマのアクセント色なので `custom-set-faces` で別途
+- **セグメント名はバージョンで変わる。** 4.x で `checker` は `check` に改名された。
+  古い名前が残っていると `doom-modeline--prepare-segments` が落ち、
+  **モードライン自体が有効にならない**。使える名前は
+  `doom-modeline-segments.el` の `doom-modeline-def-segment` を grep する
+- eglot セグメントが Emacs 31.1 で無くなった関数を呼ぶので差し替えてある（下記 `my-lsp`）
+
+## `my-completion` — vertico / consult / corfu
+
+→ [docs/editing/completion.md](docs/editing/completion.md)
+
+### 【重要】`consult-source-recent-file` は開いているファイルを落とす
+
+組み込みのソースは `:items` の中で `consult--buffer-file-hash` を引き、
+**既にバッファで開いているファイルを一覧から除外する**。`consult-buffer` では
+正しいが、**ファイルを開く入口でこれをやると、開いているものだけ選べなくなる。**
+
+`C-x C-r`（`my:consult-recent-file-or-bookmark`）は `recentf-list` をそのまま出す
+`my:consult--source-recent-file` を使う。**差が「いま開いている数」なので、
+開いていなければ気づけない**（実測で 195 対 194）。
+
+`consult--multi` は autoload されていないので、コマンドの側で `(require 'consult)`。
+
+### capf のトラブルは「どこで打ち切られたか」を見る
+
+corfu は `run-hook-wrapped` で capf を前から回し、最初に候補を返したところで止まる。
+
+- **後ろの capf でエラーが出ても、前で候補が出ていれば表示は正常。**
+  「補完は効いているのにエラーが出る」ときはこれ
+- 逆に**前の capf がエラーを投げると、後ろの候補ごと失われる**
+
+再現は corfu と同じ経路を通すのが確実（`completion-at-point` を対話的に呼ぶと
+`corfu--capf-wrapper` を経由しないので条件が変わる）。
+
+```elisp
+(corfu--protect
+ (lambda ()
+   (run-hook-wrapped 'completion-at-point-functions #'corfu--capf-wrapper 1)))
+```
+
+戻り値の `car` が採用された capf。
+
+### `text-mode` の ispell 補完は切ってある
+
+`ispell-alternate-dictionary` の既定値は `/usr/dict/words` などを探す `cond` なので
+**Windows では必ず nil** になり `ispell-lookup-words` が `error` を投げる。
+corfu がそれを拾って `*Messages*` に backtrace を流し、`message-log-max` が 1000 なので
+**他のメッセージがほぼ全部押し流される**（実測で 1000 行中 915 行がこれ）。
+
+`my-text.el` で `text-mode-ispell-word-completion` を nil にして capf ごと外してある。
+**変数を変えても、既に text-mode 派生になっているバッファには効かない**
+（`add-hook` はモードを立てた時点で済んでいる）。
+
+## `my-editor` — editorconfig / C-e
+
+→ [docs/editing/editorconfig.md](docs/editing/editorconfig.md) / [docs/editing/line-movement.md](docs/editing/line-movement.md)
+
+### editorconfig（Emacs 30 で本体入り。`:straight` は付けない）
+
+- **効くのは `.editorconfig` があるディレクトリだけ。** 上へ辿って探すので、
+  置き場所がそのまま効き先になる。プロジェクト直下に置くと兄弟プロジェクトに届かない
+- フックを 2 つ足すだけ（`hack-dir-local-get-variables-functions` /
+  `auto-coding-functions`）。**dir-local として通るので `.dir-locals.el` のほうが優先**、
+  メジャーモードのフックが `setq` したものには勝つ
+- **`indent_size` は `csharp-ts-mode` には届かない。** Emacs 31 では
+  `csharp-ts-mode` が `csharp-mode` の派生なので `editorconfig-indentation-alist` の
+  `(csharp-mode c-basic-offset)` に当たり、**ts 版が見ない変数**に入る。
+  `my:csharp-ts-mode-setup` で
+  `(setq-local editorconfig-indent-size-vars '(csharp-ts-indent-offset))` を足してある
+- **`end_of_line` は BOM 付きファイルには効かない**（`find-auto-coding` が先に
+  `auto-coding-regexp-alist` を見る）。逆に BOM 無し CRLF のファイルは `^M` が
+  バッファに残る（壊れてはいない）
+- 範囲を絞る defcustom（`editorconfig-exclude-regexps` / `-exclude-modes`）は
+  本体に入るときに落ちた
+- **`:custom` に `editorconfig-mode` を書いてはいけない**（§1）。`:demand t` + `:config`
+
+### `C-e`（`my:end-of-visual-line`）は 3 つの罠を踏んでいる
+
+素の `end-of-visual-line` をそのまま使うと壊れる。
+
+1. **`truncate-lines` が t でも右端で止まる。** `(vertical-motion (cons (window-width) 0))`
+   だけなので、折り返さないバッファでも x = ウィンドウ幅で止まる。
+   「折り返していなければ `move-end-of-line` と同じ」は**誤り**
+2. **`word-wrap` が nil のとき、折り返し位置で次の視覚行の先頭に着く。**
+   point としては行末なのに、ブロックカーソルは次の行の 1 桁目に描かれる。
+   判定は空白の有無ではなく**「視覚行の先頭に着いたか」**で行う
+3. **畳んだ領域を飛び越える。** org の畳んだ見出しでは改行ごと不可視になり
+   見出しと配下が 1 視覚行になるので、**サブツリーの末尾**に着く。
+   論理行の末尾を越えたときだけ引き戻す
+
+**org の remap は当てにできない。** org は `move-end-of-line` を `org-end-of-line` に
+remap して避けているが、`C-e` を別のコマンドに張り替えると remap を経由しない。
+
+**桁は自分で数えないこと。** `display-line-numbers-mode` が有効だと実際に使える幅が
+減る（`current-column` は 139 なのに描画は col 143）。
+
+## `my-dired`
+
+→ [docs/dired/dired-extensions.md](docs/dired/dired-extensions.md)
+
+### 【重要】`dired-x` は `dired-mode-map` を無条件で書き換える
+
+ロードされた瞬間にトップレベルの裸の `define-key` で `F` / `V` / `M-!` / `M-(` /
+`C-x M-o` を奪う。`defcustom` による切り替えは無い。`use-package dired` の `:bind` は
+dired のロード時に張られるので、あとから `dired-x` が読まれると負ける。
+
+`dired-x` は明示的に require したつもりが無くても読まれる（`dired-sidebar` の
+`:config` と、サイドバーの `a`）。つまり「**`F8` を一度でも押すと、そのセッションでは
+以後 `V` が効かなくなる**」という壊れ方をしていた。
+
+`:defer t` + `:config` の `use-package dired-x` で張り直してある。
+**`:bind` では駄目**（`dired-x` のロードとは無関係に張られて上書きを取り返せない）。
+
+**`dired-mode-map` に置いたキーが効かないときは、まず `dired-x` を疑う。**
+
+### サイドバーは `dired-find-file` を通らない
+
+`RET` / `C-o` / `mouse-2` の 3 つとも `dired-sidebar-find-file` を通るので、
+キーではなくそこに `:around` advice を張る。**`orig` を呼ぶ前に判定すること**
+（あの関数はファイルに対して `split-window` までする）。
+
+### `diff-hl-dired` の再入に注意
+
+vc-git の `dir-status-files` はプロセスを 6 回前後リレーし、Windows では 1 チェーン
+0.5〜1 秒かかる。auto-revert で再入すると**両チェーンが同じ一時バッファを
+`erase-buffer` し合う**。`my-vc.el` に 2 つ対処が入っている。
+
+## `my-text` — org / markdown
+
+→ [docs/text/org-extensions.md](docs/text/org-extensions.md) / [docs/text/markdown.md](docs/text/markdown.md)
+
+### 【重要】`org-element` だけに頼らない（`_assets/` の整合性チェック）
+
+- **必ず `org-with-wide-buffer` で見る。** ナローイングされたバッファで
+  `org-element-parse-buffer` を呼ぶと見えている範囲しか解析されず、範囲外から
+  リンクされているファイルを消してしまう
+- **ファイル名がバッファ内に文字列として現れるかも見る。** `org-element` は
+  コメント行や例示ブロックの中のリンクを拾わないので、それだけだと
+  「コメントアウトして退避してある画像」を消す
+- `directory-files` の MATCH に文字列先頭アンカー入りの正規表現を書かない。
+  エスケープを 1 つ落としても静かに「1 件も一致しない」になり、
+  **全リンクが「リンク先が無い」と誤判定される**
+
+### `markdown-preview` と `markdown-open` は別経路
+
+| | 経路 |
 |---|---|
-| 2026/5/6 | 振替休日（憲法記念日が日曜） |
-| **2026/9/22** | **国民の休日**（敬老の日 9/21 と秋分の日 9/23 に挟まれた日） |
-| 2027/3/22 | 振替休日（春分の日が日曜） |
-| 2050/3/20・9/23 | 春分・秋分（天文計算なので遠い将来も出る） |
+| `C-c C-c p`（ブラウザ） | pandoc で HTML 化 → `browse-url-of-buffer` |
+| `C-c C-c o`（外部エディタ） | `save-buffer` → `call-process` に**元の `.md` のパスを渡すだけ** |
 
-法改正があれば追随されないが、そのときは `holiday-other-holidays` に足せる。
+`.md` そのものを渡したい相手（MarkText / Typora）は後者。**新しいコマンドを
+作る必要は無い。** `markdown-open-command` は**文字列ではなく関数**
+（`my:markdown-open-external`）を渡している。文字列だと `markdown-open` 自身が
+`call-process` するので、文字コードを束縛する隙が無い。
 
-### 【重要】2 箇所とも設定しないと 1 つも出ない（2026-09-08 に発見）
+**この壊れ方は何の手がかりも残さない。** MarkText は受け取ったパスを黙って捨て、
+`start` 経由なので終了コードも必ず 0。「MarkText は起動するが空白」だけが見える。
 
-長いあいだ祝日が表示されていなかった。原因は 2 つあり、**どちらもエラーを
-出さない**。
+### `#+FOLD_REGION:` — isearch が overlay を残す
 
-1. **`mark-holidays-in-calendar` という変数は存在しない。**
-   Emacs 23 で `calendar-mark-holidays-flag` に改名され、obsolete alias も
-   残っていない。`customize-set-variable` は defcustom でない変数にも
-   `set-default` するので、**警告も出ないまま同名の変数が 1 つ増えるだけ**で、
-   本物のフラグは nil のままだった。
+`isearch-invisible` の既定は `open` なので、畳んだ中に検索が入ると isearch は範囲を
+一時的に開く。このとき **overlay は消えず `invisible` プロパティだけが nil になる**。
+**「overlay があるか」で判定してはいけない**（判定を誤って「そのバッファでは二度と
+畳めない」状態になった）。
 
-   **見分け方は `(get 'VAR 'custom-type)` が nil かどうか。** `boundp` は
-   自分で作ってしまった変数にも t を返すので判定に使えない。同じことが
-   2026-09-09 に `cape-dabbrev-min-length` でも起きていた（cape から変数
-   自体が無くなっていた。`my-completion.el` の `:custom` から削除済み）
-2. **`calendar-holidays` に `japanese-holidays` を設定する行が要る。**
-   パッケージを入れただけでは `japanese-holidays` という変数が定義されるだけで、
-   どこにも接続されない
+検証での注意: **`#+FOLD_REGION` は "OLD" を含む。** `case-fold-search` は org バッファで
+t なので、プローブに `(search-forward "old")` と書くとキーワード行にマッチして誤診する。
+
+### org のアーカイブ先 `#YM`
+
+`org-archive--compute-location` への `:filter-args` advice。旧実装が使っていた
+`org-extract-archive-file` は org 9.8 で削除された。後継は戻り値が `(FILE . HEADING)` の
+cons なので `:filter-return` は使えず、**入口を `:filter-args` で押さえる**形にしてある。
+
+## `my-lsp` — eglot / flymake
+
+→ [docs/lsp/eglot-and-flymake.md](docs/lsp/eglot-and-flymake.md)
+
+### 【重要】上流の非互換で eglot が黙って壊れる
+
+`eglot--maybe-activate-editing-mode` は `(eglot--managed-mode)` →
+`(eglot--signal-textDocument/didOpen)` の順に呼ぶ。**フックの中でエラーが出ると
+`didOpen` が送られない**。接続は成立してモードラインにも出るのに、サーバはバッファの
+存在を知らないため診断も補完も一切出ない、という分かりにくい壊れ方をする。
+
+実例: doom-modeline 4.3.0 の eglot セグメント（`my-appearance.el` で差し替え済み）。
+**同種の症状が出たら、まず `eglot--managed-mode-hook` の中身を疑う。**
+
+### 【重要】診断だけ出ないときはサーバが返す uri の綴りを疑う
+
+gopls は大文字のドライブレターで返す（§1「Windows 固有」）。
+`eglot-events-buffer-config` を一時的に有効にして `publishDiagnostics` の uri を見る
+（既定では `:size 0` で記録されない）。
+
+### elisp の flymake は「信頼されたバッファ」でしか動かない
+
+`trusted-content` の例外は `user-init-file`（`init.el`）だけ。`early-init.el` /
+`user-lisp/` / `site-lisp/` は `my-lsp.el` の `:custom` で登録してある。
+`~/.emacs.d/` を丸ごと信頼させると `straight/repos/` まで対象になるので広げない。
+
+**`*scratch*` の設定は `prog-mode-hook` に depth `-100` で載せる。**
+`flymake-mode` は有効化した時点でチェックを 1 回走らせるが、`run-mode-hooks` は
+**親のフックを子のフックより先に**回すので、`lisp-interaction-mode-hook` では
+間に合わない。`init.el` で `elisp-flymake-byte-compile` を外す処理も同じ理由で
+`prog-mode-hook` + depth `-100`。
+
+### php-mode は 1.28 で cc-mode 依存が外れた
+
+`c-set-style` / `c-basic-offset` は使えない。インデントは `php-mode-coding-style`。
+
+## `my-vc` / `my-gitd` / `my-magit-watch`
+
+→ [docs/magit/gitd-and-autorefresh.md](docs/magit/gitd-and-autorefresh.md)
+
+`gitd` を触るときに最低限知っておくこと。
+
+- **`magit-process-file` の `BUFFER` に整数（`0`）が来る。** `magit-run-gitk` が使う
+  「非同期・出力破棄」の意味。同期実行すると **gitk を閉じるまで Emacs が固まる**
+- **`default-directory` は必ず `expand-file-name` する。** Emacs は `~/...` に
+  略記することがあり、Rust の `current_dir` は `~` を展開しない
+- **キャッシュの無効化は「通知」ではなく「トークン」。** 通知を 1 つ落とすと
+  そのリポジトリが永久に古いままになるが、トークンなら Emacs 側だけで閉じる。
+  **監視が動いていなければキャッシュも先読みも行われない**（寿命の従属が最大の安全弁）
+- **読み取りだけの git もファイル変更イベントを出す**（`status --porcelain` ですら
+  `index.lock` を作る）。これを見落として自動更新が 1 回も走らなくなった
+- **`magit-refresh-buffer` を 1 回走らせるだけで毎回きっちり 7 件**のイベントが出る。
+  自分の書き込みか外部の変更かは**時刻では区別できない**ので、`.git/index` と
+  `.git/HEAD` の `(mtime . size)` で見る
+- **`check-ignore` に `magit-git-global-arguments` をそのまま使わない**
+  （`-z` と `--literal-pathspecs` の両方で fatal になる）。握り潰すと
+  「何も無視されない」= 安全側に倒れるため、**動いているように見えて 1 件も効かない**
+- **`.lock` の除外は `.git/` 配下に限る**（ワークツリーには `Cargo.lock` がある）
+- **抑止条件に `frame-focus-state` を入れてはいけない。** フォーカスが外れている間は
+  永久に偽なので、**その時点から二度と更新されなくなる**
+- テスト用リポジトリは `git init -b main`（このマシンは `init.defaultBranch = main`）
+
+## `my-claude`
+
+→ [docs/claude/my-claude.md](docs/claude/my-claude.md)
+
+1400 行あるので、触る前にそちらを読むこと。ここには入口だけ。
+
+- **会話バッファへの書き込みは必ず `my:claude--at-end` を通す。** 挿入位置
+  （`my:claude--output-end`。`point-max` ではない）・read-only 化・undo の 3 つを
+  引き受けている。`insert` を直接書くと**書きかけの入力を壊す**
+- **起動オプションは 4 つとも省略できない。** とくに
+  `--permission-prompt-tool stdio` が無いと**許可要求が黙って自動拒否される**
+  （ツールが動かないときの第一容疑者）
+- **`default-process-coding-system` を束縛して起動する**（stdin は utf-8）
+- **AskUserQuestion の答えは `deny` の `message` に載せる**のが唯一の回答経路
+- **許可の拒否に `updatedInput` を付けてはいけない。`message` は必須**
+- バッファ名にプロジェクト名が入るので、**「claude のバッファか」を名前で判定しない**
+  （`my:claude--buffer-p` はメジャーモードで見る）
+- **セッションの生死はプロセスとバッファの両方**で見る（`:buffer` が nil なので
+  会話バッファを kill してもプロセスは生き残る）
+
+## `my-pty`
+
+→ [docs/pty/my-pty.md](docs/pty/my-pty.md)
+
+- **`setf (eat-term-parameter …)` は使えない。** バイトコンパイルしない方針なので
+  `setf` の展開は my-pty.el の読み込み時に起きるが、そのとき eat は未ロードで
+  gv のセッタが無い。素の関数 `eat-term-set-parameter` を使う
+- **プリミティブへの advice は native-compile されたコードに効かない。**
+  `term.eln` はプリミティブを直接呼ぶので、symbol の function cell に張った advice を
+  素通りする。包むなら **Lisp の関数**にする
+- **起動時のサイズはメジャーモードを立ててから測る**（`eat-mode` は
+  `kill-all-local-variables` を通る）。ヘッダ行を立てるのもサイズを測る前
+- **eaw.el の幅表のままだと eat が無限ループする。** 端末の中では conhost に合わせて
+  ambiguous を幅 1 にする
+
+## `my-htnblog`
+
+→ [docs/htnblog/my-htnblog.md](docs/htnblog/my-htnblog.md)
+
+- **`url-request-data` は unibyte にする**（`encode-coding-string` を通さないと化ける）
+- **CDATA に `]]>` が現れたら分割する**（`]]]]><![CDATA[>`）。本文は自由に書くので
+  必ず起こりうる
+- **曜日は `format-time-string` の `%a` に頼らない**（`system-time-locale` 次第で英語）
+- **`defvar-local` の世代カウンタは `permanent-local` にする。**
+  `define-derived-mode` は `kill-all-local-variables` を通る
+
+## `my-utils` — カレンダーの祝日
+
+→ [docs/misc/calendar-holidays.md](docs/misc/calendar-holidays.md) / [docs/misc/pdf-preview.md](docs/misc/pdf-preview.md)
+
+**日本の祝日は Emacs 本体に入っていない。** 31.1 の `lisp/calendar/` を `japan` で
+grep しても 1 件も出ない。`japanese-holidays`（emacs-jp）が事実上唯一の選択肢で、
+upstream は 2020-12 で止まっているが**祝日法が 2021 年以降変わっていないため
+現行法に完全対応している**（2026 年の 18 件が内閣府の一覧と一致）。
+
+### 【重要】2 箇所とも設定しないと 1 つも出ない
+
+長いあいだ祝日が表示されていなかった。原因は 2 つあり**どちらもエラーを出さない**。
+
+1. `mark-holidays-in-calendar` という変数は**存在しない**（§1「`setq` と `setq-local`」）
+2. `calendar-holidays` に `japanese-holidays` を接続する行が要る
 
 ```elisp
 (customize-set-variable
@@ -4056,534 +872,98 @@ upstream は 2020-12-29 で止まっている（2026-09 に fetch して確認�
                             holiday-other-holidays))
 ```
 
-### `:custom` ではなく `:config` に置く
+**`:custom` ではなく `:config` に置く**（`:custom` は `require` より前に展開されるので
+値の式にある `japanese-holidays` が void になる）。あわせて `:after calendar` +
+`:demand t`。マークは `calendar-generate` の中で走るので、遅延ロードでは**初回の
+表示に間に合わない**。
 
-`:custom` は **`require` より前**に展開されるので、値の式にある
-`japanese-holidays` が void になる。`macroexpand-1` で確認した展開:
+## `my-platform` — `~/Projects` のジャンクション
 
-```elisp
-(eval-after-load 'calendar
-  (customize-set-variable 'japanese-holiday-weekend ...)   ; :custom
-  (require 'japanese-holidays)                             ; ここでロード
-  (require 'holidays)                                      ; :config
-  (customize-set-variable 'calendar-holidays japanese-holidays))
-```
+→ [docs/misc/projects-junction.md](docs/misc/projects-junction.md)
 
-あわせて `:after calendar` + `:demand t` にする。祝日のマーク
-（`calendar-mark-holidays`）は `calendar-generate` の中で走るので、
-`calendar-today-visible-hook` 経由の遅延ロードでは**初回の表示に間に合わない**。
-`holiday-local-holidays` / `holiday-other-holidays` は `holidays.el` の
-defcustom で、`calendar.el` はそれを autoload するだけなので `:config` で
-`(require 'holidays)` する。
+`bookmarks` を git 管理下に置いて mac / Linux と共有するための仕込み。
+**移植可能な省略形は `~` ただ 1 つ**なので、home の外にある `c:/Projects/...` は
+そのままでは共有できない。役割は 2 つに分かれ、**片方だけでは成立しない。**
 
-### 【重要】マークは overlay。テキストプロパティを見ても分からない
-
-`calendar-mark-visible-date` は face のとき
-`(overlay-put (make-overlay ...) 'face mark)` を使う（`calendar.el:2776`）。
-`font-lock-face` を見て「マークされていない」と誤診した。
-
-```elisp
-(overlays-in (1- (point)) (1+ (point)))   ; ← こちらで見る
-```
-
-`calendar-check-holidays` は overlay と無関係に正しい値を返すので、
-**「祝日として認識されているか」と「画面にマークが付いているか」は別々に
-確かめること。**
-
-### 実測（2026-09-08、init 経由で初回の `M-x calendar`）
-
-| | |
+| | 担当 |
 |---|---|
-| init を読んだ直後 | `calendar` も `japanese-holidays` も**未ロード**（起動を重くしない） |
-| 初回の `(calendar)` | japanese-holidays が自動でロードされ `calendar-holidays` が 19 件に |
-| 9/21 敬老の日 / 9/22 国民の休日 / 9/23 秋分の日 | いずれも `holiday` face の overlay |
-| 9/24（平日） | overlay 無し |
-| 土曜 | `japanese-holiday-saturday`（`japanese-holiday-weekend` が `(0 6)` なので日曜は `holiday`） |
+| ジャンクション / symlink | `~/Projects` を実在させる = **読む側**（展開） |
+| `directory-abbrev-alist` | `c:/Projects/...` と書かせない = **書く側**（省略） |
 
-**この検証は init 経由で、かつ calendar を一度も開いていない状態から
-行うこと。** 手で `customize-set-variable` してから開くと、遅延ロードの
-タイミングの問題を見逃す。batch で init を読むので、`recentf` と `history` は
-バックアップしてから実行し、終わったら戻す（`kill-emacs-hook` も空にする）。
+`abbreviate-file-name` だけがこの変数を見る。**`expand-file-name` は見ない**ので
+一方向にしか効かない。
 
-## magit の高速化 (`gitd/` + `my-gitd.el`)
+### 【重要】FROM の末尾のスラッシュを省かない
 
-magit のリフレッシュが遅い原因は **git ではなく Emacs のプロセス生成コスト**。
-`user-lisp/my-gitd.el` が `magit-process-file` に `:around` を張り、
-Rust の常駐プロセス（`gitd/`）に git の実行を肩代わりさせる。
+`directory-abbrev-apply` は FROM を素の正規表現として使い、境界を見ない。
 
-計画と実測は `docs/magit/magit-auto-refresh-plan.md` と `docs/magit/magit-gitd-2a-design.md`。
-
-### 遅さの原因（2026-09 実測）
-
-**同じ `cmd.exe` を起動するのに PowerShell が約 20 ms、Emacs の
-`call-process` は 59〜76 ms**（3 回反復して再現を確認）。約 40 ms が
-Emacs 側のプロセス生成経路のコストで、git にも Defender にも由来しない。
-
-| | |
-|---|---|
-| `magit-refresh-buffer` 1 回 | 1669 ms / **git 呼び出し 29 回** |
-| → 1 回あたり | 56〜58 ms |
-
-**時間は呼び出し回数に完全に線形。** リポジトリの規模にほぼ依存しない固定コスト。
-
-効かなかった対策（試して確認済み。もう一度試さないこと）:
-
-- Defender 除外 — git 固有のコストではないので効かない
-- `core.fsmonitor` — 走査時間は減るがプロセス生成コストは変わらない
-- `cmd/git.exe` ラッパの回避 — **magit は既に回避済み**。
-  `magit-git-executable` の defcustom が Windows では cygpath 経由で
-  `mingw64/libexec/git-core/git.exe` を解決する。PowerShell では 47→39 ms と
-  効くが、Emacs の 55 ms に埋もれて有意差なし
-- `magit-status-sections-hook` の削減 — 16→6 で 1669→1001 ms。表示を
-  犠牲にする割に効かない
-
-### 効果
-
-`magit-refresh-buffer` 1 回（`~/.emacs.d`、28 コマンド）:
-
-| | 時間 | Emacs からの git 起動 | デーモンでの git 起動 |
-|---|---|---|---|
-| デーモン無効 | 1503 / 1544 ms | 28 | — |
-| 段階 2a（素通し） | 683 / 672 ms | 0 | 28 |
-| **段階 2b（キャッシュ）** | **56 / 54 ms** | 0 | **0** |
-| 段階 2b（0.3 秒前に先読み） | 72 / 54 ms | 0 | 0 |
-| 段階 2b（直前に先読み = `g`） | 208 ms | 0 | 28（並列） |
-
-**1.7 秒が 50〜70 ms になった。** GUI の実地計測（外部でファイルを変更してから
-自動更新が終わるまで）でも 51〜81 ms。
-
-Rust の `Command` からの spawn は 28.9 ms（`git status -z --porcelain`）で
-Emacs の約半分。stdio の往復は **0.13 ms**、28 回でも 4 ms なので、
-残る 50 ms はほぼ magit 自身の Elisp（セクションの構築と描画）。
-**ここから先はデーモンでは縮まない。**
-
-### ビルド
-
-`tree-sitter/` の文法と同じ扱い。**ソースは git 管理下、`gitd/target/` は
-`.gitignore`** して各マシンで作る。
-
-```
-M-x my:gitd-build     ; cargo build --release
-M-x my:gitd-stats     ; 経由回数 / フォールバック数 / 累計短縮時間
-M-x my:gitd-restart   ; サーキットブレーカが落ちたときの復帰
-(setq my:gitd-verify t)  ; シャドウモード (下記)
-```
-
-**バイナリが無ければ `my:gitd-mode` は何もしない**ので、まだビルドしていない
-マシンでは自動的に従来動作になる。対象は Windows のみ。
-
-### 文字コードの地雷（3 つとも実際に踏んだ）
-
-`my:gitd--to-text` が処理する。**`args` / `cwd` / `program` / `env` の
-全部に適用すること。**
-
-1. **`process-environment` に JSON に載らない項目がある。**
-   `PSModulePath` が OneDrive の「ドキュメント」を ANSI の生バイトのまま
-   含んでおり `json-serialize` が `wrong-type-argument json-value-p` で落ちる。
-   **PowerShell から Emacs を起動したときだけ再現する**（bash 経由では出ない）
-2. **復号に `locale-coding-system` を使うと直らない。**
-   あれは**コンソールの**コードページで、PowerShell 7 では `cp65001`（UTF-8）。
-   環境変数ブロックは **ANSI コードページ**（`w32-ansi-code-page` = 932）で別物。
-   UTF-8 として復号すると生バイトが eight-bit 文字のまま残り、やはり載らない
-3. **引数も ANSI に encode されている。**
-   `magit-process-git-arguments` が意図的にやっている（Emacs の `call-process`
-   が ANSI API を使うため。magit issue #3250）。デーモン境界で復号し直す。
-   Rust はワイド API で起動するので、cp932 に無い文字ではむしろ改善になる
-
-### `magit-process-file` を横取りするときの注意
-
-同期読み取りは全部この関数を通るので差し込みは 1 箇所で足りる。ただし:
-
-- **`BUFFER` に整数（`0`）が来る。** `magit-run-gitk` が使う
-  「非同期・出力破棄」の意味。同期実行すると **gitk のウィンドウを閉じるまで
-  Emacs が固まる**。必ず弾くこと
-- `magit-run-gitk*` は `magit-gitk-executable`、`magit-patch-id` は
-  `shell-file-name` を渡してくる。`(equal program (magit-git-executable))` で弾く
-- 実際に来る `BUFFER` は `nil` / `(t nil)` / `(t "FILE")` / バッファ の 4 形態。
-  それ以外は素通し（default deny）
-- デコードは `(car (magit--process-coding-system))`（実測で `utf-8-unix`）。
-  **値を決め打ちせず必ずこの関数から取る**
-- `magit-run-git-with-input` は `call-process-region` を使うので通らない。
-  `magit-start-process`（非同期）も無関係
-
-### 安全側の作り
-
-- **タイムアウトを設けない。** 素の `process-file` にも無いので、挙動を
-  変えないことが最も安全。`jsonrpc-request` は `:timeout nil` でタイマーが
-  完全に無効になり、待ちは `accept-process-output` なので `C-g` で抜けられる
-- **フォールバック。** バイナリが無い / デーモンが死んだ / 形態が未知なら
-  黙って素の `process-file` に戻る。3 回続けて失敗したらそのセッションでは使わない
-- **二重実行の防止。** デーモンが応答前に死ぬと git が既に走ったかは分からない。
-  読み取り専用なら再実行してよいが、それ以外は再実行せずエラーを返す
-  （`git add` を 2 回走らせない）
-
-### 検証はシャドウモードで
-
-`(setq my:gitd-verify t)` にすると、読み取り専用コマンドを**デーモン経由と
-素の `process-file` の両方で実行してバイト単位で比較**する。差異は
-`*gitd verify*` に記録される。この設計で唯一こわいのは「静かに壊れる」ことなので、
-**壊れていないことを実使用で証明する**のがこの機能の役目。遅くなるので常用はしない。
-
-## デーモン側のキャッシュ（段階 2b）
-
-設計と実測は `docs/magit/magit-gitd-2b-design.md`。
-
-### 無効化を「通知」ではなく「トークン」でやる
-
-**古い答えを返すキャッシュは静かに壊れる。** magit が事実と違う内容を表示し、
-ユーザはそれに気づけない。そこで無効化通知は**作らなかった**。
-
-`git/run` には毎回 `repo`（監視中のリポジトリのルート）と `token`
-（そのリポジトリ状態の通し番号）を載せる。デーモンは
-`(repo, token, コマンド)` でキャッシュし、token が違えば問答無用でミスにする。
-
-こうすると正しさの条件が「Emacs が変化を漏れなく通知すること」から
-**「トークンが古い状態を指し続けないこと」**に変わる。前者は通知を 1 つ
-落とすとそのリポジトリが**永久に**古いままになるが、後者は Emacs 側だけで
-閉じており、`my-magit-watch` が既に持っている情報で満たせる。
-
-トークンを進めるのは 3 か所（`my-magit-watch.el`）:
-
-| いつ | 何のため |
-|---|---|
-| 分類を通ったイベント（`suspect` を除く） | 外部からの変更 |
-| `magit-pre-refresh-hook` | magit 自身の書き込みと、ユーザの `g` |
-| デーモン経由で書き込みコマンドが走ったとき | 上を待たずに進める |
-
-2 番目が要なのは、`magit-run-git-with-input`（`call-process-region`）と
-`magit-start-process`（非同期）が**デーモンを通らない**ため。magit は
-コマンドの後に必ず `magit-refresh` を呼ぶのでここで捕まる。
-**`g` が必ず本当のことを言う**のもこれで保証される。
-
-**監視が動いていなければ `repo` も `token` も付かず、キャッシュも先読みも
-行われない。** `M-x my:magit-watch-mode` で切れば段階 2a と同じ動作に戻る。
-キャッシュの寿命が監視の寿命に従属しているのが最大の安全弁。
-
-### 先読みは 2 本目のタイマーで頼む
-
-`my-magit-watch` のタイマーは 2 本ある。どちらもイベントごとに張り直す。
-
-```
-       イベント群 ......|
-                        |--0.1s--> repo/prewarm を送る
-                        |------------0.4s------> magit-refresh-buffer
-```
-
-差の 0.3 秒が先読みの持ち時間。デーモンは**直前のリフレッシュで実際に来た
-コマンド列を覚えていて**（magit の内部を知る必要がない）、それを 8 並列で
-走らせる。0.1 秒待つのは、1 ファイルの保存で w32notify が約 10 件の
-イベントを出すため（最初の 1 件で頼むと残り 9 件でトークンが進んで無駄になる）。
-
-同じコマンドが二重に起動しないよう single-flight にしてあるので、先読みが
-間に合わなくても損はしない。`g` を押した瞬間に頼んでも、magit の要求は
-走っている先読みに**合流**するので、直列 28 回ではなく並列 1 回ぶんで済む。
-
-### `update-index --refresh` は先読みの先頭で走らせる（prelude）
-
-`magit-status-refresh-buffer` は**先頭で** `update-index --refresh` を呼ぶ。
-これを飛ばして先読みすると、`diff-files` が「stat が古いだけ」のファイルを
-変更ありと報告し、その答えがキャッシュに残る。実測:
-
-```
-内容を変えずに書き直したあと
-  update-index --refresh 無し → diff-files が 3 ファイルを M と報告
-  update-index --refresh 後   → diff-files は何も報告しない
-```
-
-`git diff`（磁器）は自分で内容を比較するので影響を受けないが、
-magit の `magit-unstaged-files` は `diff-files` を使う。
-
-そこで `role: "prelude"` を作り、Emacs が明示したコマンドだけを先読みの
-先頭で直列に走らせる。対象は `update-index --refresh` **ただ 1 つ**。
-デーモンは相変わらず git の意味を知らない。
-
-### 【重要】読み取りだけの git もファイル変更イベントを出す
-
-これを見落として、最初の GUI 検証で**自動リフレッシュが 1 回も走らなかった**
-（先読み 63 回・リフレッシュ 0 回）。実測:
-
-| コマンド | イベント | 内訳 |
+| FROM | `c:/Projects/ESC-Web/` | `c:/ProjectsOld/foo/` |
 |---|---|---|
-| `update-index --refresh`（何もしない場合でも） | 3 | `.git` ×1 / `.git\index.lock` ×2 |
-| `status --porcelain` | 4 | `.git` ×2 / `.git\index.lock` ×2 |
-| `diff-files -z --name-only` | 1 | `.git` ×1 |
-| `rev-parse` / `for-each-ref` | 0 | — |
+| `\`c:/Projects` | `~/Projects/ESC-Web/` | **`~/ProjectsOld/foo/`** |
+| **`\`c:/Projects/`** | `~/Projects/ESC-Web/` | `c:/ProjectsOld/foo/` |
 
-`status` ですら index.lock を作る。だから先読み（28 コマンド）は必ず
-イベントを出し、それがデバウンスを張り直し、0.1 秒後にまた先読みが走る。
-**0.4 秒の静けさは永久に来ない。**
+**存在しないパスができるのにエラーは出ない。** `abbreviated-home-dir` は
+`directory-abbrev-make-regexp` が境界を付けるが、**手書きのエントリには付かない**。
 
-分類上これらはすべて `suspect` なので、そこを狙い撃ちして 3 つ直した。
+他マシンでは alist は要らない（`~/Projects` を実在させるだけ）。
+**`~/Projects` が無いマシンでは、共有したブックマークは開けない。**
 
-1. **`suspect` ではトークンを進めない**（進めると自分のリフレッシュや
-   先読みが自分のキャッシュを壊す）。代わりに `my:magit-watch--fire` が
-   フィンガープリントの不一致を見つけたときに進める
-2. **`suspect` では既に張ってあるタイマーを延長しない**
-3. 1 つの窓では先読みを 1 回だけ頼む。さらに**デーモン側でも、レシピが
-   全部キャッシュ済みなら先読みごと打ち切る**（無いと prelude だけが
-   毎回走ってイベントを出し続ける）
+## `my-lang-native` — Go
 
-### `magit-process-record-invocations` は素通しにする
+→ [docs/languages/go.md](docs/languages/go.md)
 
-magit の呼び出しログは `magit-process-file` の**本体**にあるので、
-`:around` で `orig` を呼ばずに済ませると記録されない。有効なときは
-ルーティングしないようにしてある。
+- **外部の `go-mode` を入れない**（§2）
+- **保存時は「import 整理 → 整形」の順**（逆にすると、あとから足された import 行が
+  整形されないまま残る）
+- **`eglot-code-actions` を対話的に呼んではいけない。** INTERACTIVE 非 nil だと
+  該当 0 件のとき `eglot--error` が飛び、`before-save-hook` の中なので
+  **import を整理する必要が無いファイルは保存できなくなる**
 
-同じ理由で **`magit-process-file` に後から足した advice も呼ばれない**。
-テストを書くときは `my:gitd-mode` を有効にした**後**に足すこと。
+---
 
-### `default-directory` は必ず `expand-file-name` する
-
-Emacs は file バッファの `default-directory` を `~/...` に略記することがある。
-`call-process` は内部で展開するが **Rust の `current_dir` は `~` を展開しない**。
-そのまま渡すと `ディレクトリ名が無効です (os error 267)` になる。
-段階 2a から入っていたバグで、magit のバッファからしか呼ばれていなかったので
-表に出ていなかった。
-
-### 次の段階
-
-**段階 2c で監視を常駐プロセスに移す**（今回は見送った）。速度の目標は
-キャッシュと並列化だけで達成できており、`check-ignore` は段階 1 で
-キャッシュ済みで定常状態では 0 回しか呼ばれないので、`ignore` crate に
-置き換えても速くはならない。移す価値があるのは別の 2 点:
-
-- macOS / Linux 対応（`subtree` 相当が inotify / kqueue に無い）
-- `ReadDirectoryChangesW` のバッファ溢れを**検知**できるようになる。
-  Win32 API は溢れを通知するが Emacs の `w32notify` はそれを渡さない。
-  検知できればトークンを強制的に進められ、「イベントが落ちるとキャッシュが
-  古いまま」という唯一の穴が塞がる
-
-## magit の自動更新 (`my-magit-watch.el`)
-
-ワークツリー / インデックス / HEAD の変化を検知して、表示中の magit バッファを
-`magit-refresh-buffer` する。Windows のみ、**既定で有効**。
-切るときは `M-x my:magit-watch-mode`、様子を見るときは `M-x my:magit-watch-stats`。
-
-段階 2a でリフレッシュが 0.6 秒になったので実用に耐えるようになった。
-**2a 無しではこれは入れられなかった**（1.7 秒の固まりが頻発する）。
-段階 2b のキャッシュで 50〜70 ms になっている。
-
-設計と実測は `docs/magit/magit-autorefresh-stage1-design.md`。
-gitd のキャッシュにトークンを供給する役目も負っている（前節）。
-
-### `w32notify-add-watch` を直接呼ぶこと
-
-`subtree` フラグを渡すと **1 個の watch で配下を再帰的に監視できる**
-（追加コスト 0.2 ms、watch 後に作ったディレクトリも届く）。
-
-**`filenotify.el` の `file-notify-add-watch` は `subtree` を渡さない**
-（`file-notify--add-watch-w32notify` が `file-name` / `directory-name` /
-`size` / `last-write-time` しか組み立てない）ので、汎用 API 経由では非再帰。
-
-### 【重要】batch では検証できない
-
-**w32notify のイベントはコマンドループ経由で配送されるため、`--batch` では
-1 件も届かない。** `accept-process-output` や `sit-for` を回しても駄目。
-最初 batch で測って全部 0 件になった。
-
-テストは GUI で書く。`emacs -Q -l probe.el` で結果をファイルに書いて
-`kill-emacs` する形にしてある。
-
-### 自励振動と二重リフレッシュ
-
-`magit-refresh-buffer` を 1 回走らせるだけで **毎回きっちり 7 件**の
-イベントが出る（`.git/index.lock` が 4 件、`.git` ディレクトリ自身が 3 件）。
-素直に繋ぐと「イベント → リフレッシュ → イベント」で回り続ける。
-さらに magit で stage すると `.git/index` が書かれるが、magit は自分で
-リフレッシュ済みなので監視側がもう 1 回走る。
-
-**時刻では区別できない。** イベントは遅れて届くので、magit 自身の書き込みか
-外部の変更かを到着時刻から判断することはできない。**内容で見る。**
-
-`.git/index` と `.git/HEAD` の `(mtime . size)` をフィンガープリントとし、
-**`magit-refresh-buffer-hook` で毎回取り直す**。このフックは
-**自分のリフレッシュでも magit 自身のリフレッシュでも走る**のが肝。
-
-| | |
-|---|---|
-| magit の stage | git が index を書く → magit がリフレッシュ → そこでスナップショット → あとから届くイベントは必ず一致 → **抑止** |
-| 外部の `git add` | スナップショットは前のまま → 一致しない → **リフレッシュ** |
-
-`stat` を 2 回するだけで git は呼ばない。
-
-### イベントは欠落する
-
-1000 ファイル作成に対しイベントは **4095 件**しか届かなかった
-（1 ファイル 10 件出るので 1 万件が期待値）。`ReadDirectoryChangesW` の
-バッファ溢れで避けられない。**イベントの完全性に依存した設計にはできない。**
-差分更新（「このファイルだけ再描画」）のような最適化はやらないこと。
-
-対策として分類に `suspect` を設けた。`.git` ディレクトリ自身や
-`.git/**/*.lock` は**それ自体は何も証明しないが「何かは起きた」合図**なので、
-拾ってフィンガープリントで判断する。決め手のイベントが落ちても
-粗い `.git` の mtime 更新は残りやすい。
-
-### `.gitignore` の判定
-
-監視は `.gitignore` を知らないので、`build/` に 200 ファイル作ると分類後でも
-1001 件残る。パスだけのフィルタでは落とせないので git に聞くしかないが、
-**イベントごとに聞いてはいけない**。3 段構えで濃縮している。
-
-1. コールバックでは**変化したディレクトリ**をハッシュに入れるだけ
-   （ビルドは数千ファイルを出すが**ディレクトリは数個**）
-2. デバウンス後に、未知のディレクトリだけを `check-ignore` へ**まとめて 1 回**
-3. 結果をキャッシュ。**定常状態では git を 1 回も呼ばない**
-
-実測: `build/out` に 100 ファイルを 3 回書いて、リフレッシュ 0 回、
-`check-ignore` は 1 回目だけ。合計 4126 イベントに対しリフレッシュは 7 回。
-
-#### `check-ignore` の呼び方（2 回はまった）
-
-**`magit-git-global-arguments` をそのまま使ってはいけない。**
-
-| 書き方 | 何が起きるか |
-|---|---|
-| `check-ignore -z -- PATH` | `fatal: -z only makes sense with --stdin` |
-| `--literal-pathspecs` 付き | `fatal: pathspec magic not supported by this command: 'literal'` |
-
-どちらも `ignore-errors` で握り潰すと **「何も無視されない」= 安全側に倒れる**ため、
-**動いているように見えて 1 件も効いていない**という形で表面化する。
-
-```elisp
-(let ((magit-git-global-arguments '("--no-pager" "-c" "core.quotePath=false")))
-  (magit-process-git t (list "check-ignore" "--" paths)))
-```
-
-`core.quotePath=false` は日本語パスが C 形式でクォートされて突き合わせに
-失敗するのを防ぐため。終了コードは 0（該当あり）/ 1（該当なし）/
-128 以上（エラー）で、128 以上は 1 度だけ `message` で知らせる。
-
-### 抑止条件に入れてよいもの・いけないもの
-
-**ユーザが操作をやめれば自然に解消するものだけ**を入れる
-（ミニバッファ・transient・isearch・キーボードマクロ・リージョン・
-`input-pending-p`）。
-
-**`frame-focus-state` を入れてはいけない。** フォーカスが外れている間は
-永久に偽のままなので待ち直しが終わらず、**フォーカスを失った時点から
-二度と更新されなくなる**（実測で 0.3 秒ごとに再アームし続けた）。
-背景の CPU は `my:magit-watch-visible-only` とレート制限で抑える。
-
-### `.lock` の除外は `.git/` 配下に限ること
-
-`index.lock` を落とすために `.lock` で除外したくなるが、ワークツリーには
-`Cargo.lock` や `flake.lock` といった**追跡対象のファイル**がある。
-
-### テストを書くときの注意
-
-このマシンは `init.defaultBranch = main`。テスト用リポジトリで
-`git checkout master` は失敗する。`-q` で握り潰すと「イベントが来ない」と
-誤診する（実際に 1 度誤診した）。`git init -b main` と明示すること。
-
-## モードライン (doom-modeline)
-
-背景色は **modus のパレット上書き**で指定する。Emacs 29 以降 `mode-line` とは
-別に `mode-line-active` があり、テーマはそちらを塗るため、`custom-face` で
-`mode-line` だけ変えても効かない。
-
-```elisp
-(modus-themes-common-palette-overrides
- '((bg-mode-line-active "medium blue")
-   (fg-mode-line-active "snow")
-   (border-mode-line-active "medium blue")))
-```
-
-左端のバー (`doom-modeline-bar`) だけはテーマのアクセント色なので
-`custom-set-faces` で別途揃える（`:custom-face` はテーマに負けるので使わない）。`mode-line-inactive` はテーマのまま（灰色）にして、
-どのウィンドウが選択中か分かるようにしてある。
-
-**セグメント名はバージョンで変わる。** 4.x で `checker` は `check` に改名された。
-古い名前が残っていると `doom-modeline--prepare-segments` が
-`"checker is not a defined segment"` で落ち、**モードライン自体が有効にならない**。
-利用できるセグメントは `doom-modeline-segments.el` の
-`doom-modeline-def-segment` を grep すれば分かる。
-
-## lexical-binding
-
-`early-init.el` / `init.el` / `user-lisp/` すべて `t`。新しいモジュールも `t` で書く。
-
-バイトコンパイルはしない方針（前述）なので、lexical 化の検証は
-**一時ディレクトリにコピーしてコンパイルし、`*Compile-Log*` を読む**
-という手順で行う。GUI 起動して全パッケージがロードされた状態でやらないと、
-パッケージ由来のマクロが未定義で偽の警告が大量に出る。
-
-`reference to free variable` / `assignment to free variable` の大半は
-「そのパッケージがコンパイル時に未ロード」というだけで実害はない
-（実行時には `defvar` 済みなので special 変数として扱われる）。
-注意すべきは `Unused lexical variable` と、
-呼び出し元の `let` 束縛を読んでいたクロージャがある場合。
-
-## 設定変更の反映方法
-
-1. `user-lisp/` 配下の該当モジュールを編集する
-2. Emacs を再起動する（起動時に自動でバイトコンパイルされる）か、
-   編集した式を `C-M-x` で評価する
-
-## 検証方法
-
-GUI 依存の設定（フォント、doom-modeline、IME）は batch では評価されないため、
-最終確認は GUI 起動で行うこと。batch での確認は以下：
-
-```sh
-emacs --batch --debug-init -l early-init.el -l init.el --eval '(message "OK")'
-```
-
-**注意**: batch 実行でも `recentf` と `history`（savehist）は書き換えられる。
-検証前にバックアップし、終了後に戻すこと。
-
-## 既知の課題（未対応）
+# 4. 既知の課題（未対応）
 
 新しく気づいたことはこの節に追記する。
 
 ### `my-gitd` 経由だと `C-g` で git が止まらない（2026-09、優先度低）
 
-素の `call-process` は `C-g` で子プロセスを kill するが、デーモン経由では
-git が走り切る。書き込みの途中で `C-g` すると「中断したのに実行されている」
-ことになる。対処するなら `$/cancel` 通知を足してデーモン側で子を kill する。
-
+素の `call-process` は `C-g` で子プロセスを kill するが、デーモン経由では git が
+走り切る。書き込みの途中で `C-g` すると「中断したのに実行されている」ことになる。
 半端に kill された `.git/index` より安全とも言えるので、優先度は低いと判断した。
 
 ### 自動更新では diff-hl が更新されない（2026-09、仕様）
 
-`my-magit-watch` は `magit-refresh-buffer`（そのバッファだけ）を呼んでおり、
+`my-magit-watch` は `magit-refresh-buffer`（そのバッファだけ）を呼ぶので、
 `magit-post-refresh-hook`（diff-hl がぶら下がっている）は走らない。
-自動更新のたびに全バッファの差分を取り直すのは重いのでこうしてある。
 fringe のマーカーを最新にしたいときは手で `g` を押す。
 
 ### 自動更新の `.gitignore` 判定はディレクトリ単位（2026-09、仕様）
 
-追跡対象のディレクトリの中にある無視されるファイル（`src/` の中の `*.log`
-など）は落とせず、リフレッシュが走る。`check-ignore` をファイル単位で
-呼べば正確になるが、ビルド中のカーディナリティが跳ね上がるので採らない。
+追跡対象のディレクトリの中にある無視されるファイル（`src/` の中の `*.log` など）は
+落とせず、リフレッシュが走る。`check-ignore` をファイル単位で呼べば正確になるが、
+ビルド中のカーディナリティが跳ね上がるので採らない。
 
 ### `my-gitd` の書き込み経路の検証は一部だけ（2026-09）
 
-シャドウモード（両方実行してバイト比較）は読み取り専用コマンドにしか使えない。
-書き込みを 2 回走らせるわけにはいかないため。
-
-GUI プローブで stage / unstage / commit は自動検証している（段階 2b で追加）。
-discard / rebase / merge / cherry-pick、コンフリクト中の操作、サブモジュールは
-まだ実際に操作して確かめるしかない。
+シャドウモード（`my:gitd-verify` = t で両方実行してバイト比較）は読み取り専用
+コマンドにしか使えない。stage / unstage / commit は GUI プローブで自動検証して
+いるが、discard / rebase / merge / cherry-pick、コンフリクト中の操作、
+サブモジュールはまだ実際に操作して確かめるしかない。
 
 ### イベントが落ちるとキャッシュが古いままになりうる（2026-09、優先度低）
 
-`w32notify` はバッファ溢れでイベントを落とす（段階 1 の実測で 1000 ファイルに
-対し 4095/10000）。落ちるとトークンが進まず、デーモンのキャッシュが古いままになる。
-
-保険は 2 つある。
-
-- 決め手のイベントが落ちても `.git` の粗い mtime 更新（`suspect`）は残りやすく、
-  そのときはフィンガープリントの不一致でトークンを進める
-- **`g` を押せば必ず進む**（`magit-pre-refresh-hook`）。ユーザ側の逃げ道が常にある
-
-根本的に塞ぐには、`ReadDirectoryChangesW` の溢れ通知を受け取る必要がある
-（Emacs の `w32notify` は渡してくれない）。段階 2c で監視を常駐プロセスに
-移すときの動機のひとつ。
+`w32notify` はバッファ溢れでイベントを落とす（§1「Windows 固有」）。保険は 2 つ。
+決め手のイベントが落ちても `.git` の粗い mtime 更新（`suspect`）は残りやすく、
+そのときはフィンガープリントの不一致でトークンを進める。そして**`g` を押せば
+必ず進む**。根本的に塞ぐには `ReadDirectoryChangesW` の溢れ通知を受け取る必要がある。
 
 ### Emacs の `call-process` が Windows で遅い（2026-09、未調査）
 
-同じ `cmd.exe` を起動するのに PowerShell が約 20 ms、Emacs は 59〜76 ms。
-原因は未調査。`my-gitd` はこれを迂回するだけで、直してはいない。
-magit 以外（`vc` / `grep` / `projectile`）にも効いているはずなので、
-原因が分かれば影響範囲は広い。ただし Emacs 本体の問題である可能性が高く、
-手元で解消できる見込みは薄いと考えている。
+原因は未調査。`my-gitd` はこれを迂回するだけで直してはいない。magit 以外
+（`vc` / `grep` / `projectile`）にも効いているはずなので、原因が分かれば影響範囲は
+広い。ただし Emacs 本体の問題である可能性が高く、手元で解消できる見込みは薄い。
+
+### `★` と `※` は端末で桁が揃わない（2026-09、未解決）
+
+U+2605 と U+203B は手元のどのフォントでも全角。`my-pty` でこれらを含む行だけは
+揃わない。→ [docs/pty/my-pty.md](docs/pty/my-pty.md)
