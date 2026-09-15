@@ -43,10 +43,12 @@ code in this repository.
 評価する。batch での素通し確認は次の 1 行。
 
 ```sh
-# Emacs は PATH に無い。フルパスで呼ぶこと
-C:/Apps/emacs/emacs-31.1/bin/emacs.exe --batch --debug-init \
-  -l early-init.el -l init.el --eval '(message "OK")'
+emacs --batch --debug-init -l early-init.el -l init.el --eval '(message "OK")'
 ```
+
+**`emacs` が PATH に無いマシンがある。** 実行ファイルの場所はマシンごとに違い、
+このリポジトリは Windows / macOS / Linux で共有しているので、**ここには書かない**。
+環境側（`CLAUDE_CONFIG_DIR` 配下のメモリ）に置いてある。
 
 **batch 実行でも `recentf` と `history`（savehist）は書き換えられる。**
 検証前にバックアップし、終了後に戻すこと。
