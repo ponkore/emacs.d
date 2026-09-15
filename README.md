@@ -76,7 +76,7 @@ git clone git@github.com:ponkore/emacs.d.git ~/.emacs.d
 |---|---|
 | `early-init.el` | `init.el` では手遅れになる設定だけ（GC 抑制、`package.el` 無効化、`user-lisp-auto-scrape` を nil、ちらつき回避） |
 | `init.el` | ブートストラップと読み込み順の宣言のみ |
-| `user-lisp/` | **設定本体。25 モジュール**（[下表](#user-lisp-のモジュール)） |
+| `user-lisp/` | **設定本体。26 モジュール**（[下表](#user-lisp-のモジュール)） |
 | `custom.el` | `customize` が自動生成する。手で書かない（[設計方針](#設計方針)） |
 | `site-lisp/` | パッケージマネージャで入手できないローカルベンダの Emacs Lisp |
 | `etc/` | 文字を目で選ぶための一覧（emoji / Nerd Font）と、その生成スクリプト |
@@ -113,6 +113,7 @@ git clone git@github.com:ponkore/emacs.d.git ~/.emacs.d
 | `my-keybind` | グローバルキーバインド |
 | `my-editor` | hydra、symbol-overlay、smartparens、whitespace、yasnippet、recentf、editorconfig ほか |
 | `my-dired` | dired、hydra-dired、dired-sidebar（`F8`）、dired-x の上書き対策、exceldiff / MarkText の起動 |
+| `my-dired-watch` | ファイルのサイズ・日時・属性の変化で dired の行を貼り替える。Windows のみ |
 | `my-text` | text-mode、org-mode、ox-pandoc、markdown、rst、adoc |
 | `my-lang-lisp` | Emacs Lisp、Clojure（cider）、Common Lisp（slime） |
 | `my-lang-python` | Python（python-ts-mode、pyvenv、py-isort、blacken） |
@@ -199,7 +200,8 @@ Go の `ptyd` が ConPTY を持って子プロセスを動かし、VT を stdio 
 ### dired の拡張
 
 Excel ブックは OS の関連付けに渡す、`C-c x` で exceldiff、`C-c m` で MarkText、
-サイドバー（`F8`）、外部の増減に追随する自動更新。
+サイドバー（`F8`）、外部の増減に追随する自動更新。**サイズ・日時・属性の変化**にも
+追従する（`my-dired-watch`。行が増減しないので、その行だけを貼り替える）。
 → [docs/dired/dired-extensions.md](docs/dired/dired-extensions.md)
 
 ### org / markdown

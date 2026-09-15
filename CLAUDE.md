@@ -464,6 +464,7 @@ tr-ime / Windows 側が IME のトグルとして処理するので、Emacs 側�
 | **magit の遅さに Defender 除外 / `core.fsmonitor` / git ラッパ回避は効かない** | 2026-09 | 原因は git ではなく Emacs のプロセス生成。3 つとも試して有意差なし |
 | **`magit-status-sections-hook` を削らない** | 2026-09 | 16 → 6 で 1669 → 1001 ms。表示を犠牲にする割に効かない |
 | **段階 2c（監視を常駐プロセスへ）は見送り** | 2026-09 | 速度目標はキャッシュと並列化で達成済み。移す価値は macOS / Linux 対応と溢れ検知にある |
+| **dired の追従を常駐プロセス（gitd 統合）にしない** | 2026-09-15 | コストは**全部 Emacs の中**にある。4862 件で 648 ms のうちデーモンが肩代わりできるのは stat の 98 ms だけで、残りは ls-lisp の整形・挿入・アイコン。**検知そのものも既に Emacs まで届いている**（autorevert が捨てているだけ）。統合すれば `my:gitd--disabled` と `PROTOCOL` を共有し、**git の失敗で dired が止まる** → [docs](docs/dired/dired-extensions.md) |
 | **elpaca へは移行しない（straight のまま）** | 2026-08 | 設定本体が use-package なら `:straight` の 1 行を差し替えるだけで済む |
 | **`:custom-face` は使わない** | | テーマに負ける（§1「use-package と straight」） |
 | **`window-configuration` は退避しない**（my-claude） | | 最大化トグルの復帰先も `C-c a l` も同じ関数を呼ぶだけなので、どこから何度押しても同じ形に落ち着く |
@@ -689,6 +690,38 @@ dired のロード時に張られるので、あとから `dired-x` が読まれ
 `RET` / `C-o` / `mouse-2` の 3 つとも `dired-sidebar-find-file` を通るので、
 キーではなくそこに `:around` advice を張る。**`orig` を呼ぶ前に判定すること**
 （あの関数はファイルに対して `split-window` までする）。
+
+### 【重要】`dired-readin` は mtime を一覧の**後**に記録する（消えた行が残る）
+
+`set-visited-file-modtime` を `dired-readin-insert` の後で呼ぶので、その間に
+ファイルが消えると「古い一覧 + 最新の mtime」になり、`dired-buffer-stale-p` が
+**以後永久に nil を返す**。vim の `writebackup`（`a.txt~` を作ってすぐ消す）で
+実際に踏んだ。`my:dired-readin-modtime-fix` が `:around` で mtime を読み込み前の
+値に差し替えてある。**この advice を外すと、消えたファイルの行が `g` を押すまで
+残る。**
+
+あわせて、**ディレクトリの mtime は遅れて更新される**。0.4 秒空ければ作成も
+削除も必ず反映されるが、通知の直後に測ると落ちることがある（実測）。
+
+### サイズ・日時の追従は `my-dired-watch`（別モジュール）
+
+autorevert が拾うのは**行が増減する変化だけ**（`created` / `renamed` /
+`deleted`）。中身・サイズ・日時・属性は `my-dired-watch` が別経路で拾い、
+**その行だけ `dired-relist-entry` で貼り替える**。
+
+- **貼り替えの間は `dired-after-readin-hook` を nil に束縛する。**
+  `nerd-icons-dired--refresh` はバッファ全体を舐め直すので、1 行しか変えて
+  いなくても 4862 件で 453 ms 払う（外すと 0.71 ms）
+- **そのぶんアイコンは自分で付け直す。** nerd-icons のアイコンは行の上の
+  overlay（`evaporate` が t）で、`delete-region` で消える
+- **`dired-relist-entry` を呼ぶ前に `buffer-read-only` を見る。**
+  あの関数は自分で `buffer-read-only` を nil に束縛するので、wdired 中でも
+  素通しで書き換えてしまう
+- **行が無ければ何もしない。** 無いと `dired-add-entry` が行を作るが、それは
+  新規ファイルの追加（autorevert の担当）で、しかもアイコンが付かない
+- **サブディレクトリの行は追従しない**（非再帰の `ReadDirectoryChangesW` は
+  配下の変化を親に報告しない。実測で 0 件）。`subtree` を足せば拾えるが、
+  ビルド中に毎秒数千件を呼び込むので取らない
 
 ### `diff-hl-dired` の再入に注意
 

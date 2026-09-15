@@ -302,6 +302,40 @@ vertico は `minibuffer-setup-hook' で `vertico-map' を composed keymap の
     ;; メッセージはそのまま残る。
     (setq-local auto-revert-verbose nil)
     (auto-revert-mode 1))
+
+  (defun my:dired-readin-modtime-fix (orig &rest args)
+    "`dired-readin' が記録する mtime を、一覧を**読む前**の値にする。
+
+【重要】これが無いと、消えたファイルの行が**永久に残る**。
+
+`dired-readin' (dired.el) は一覧を読み終えた**後**にディレクトリの mtime を
+取って `set-visited-file-modtime' する。
+
+    (erase-buffer)
+    (dired-readin-insert)                      ; ← 一覧を読む
+    (let ((attributes (file-attributes dirname)))
+      (set-visited-file-modtime ...))          ; ← mtime を取る
+
+この 2 つの間にファイルが消えると、バッファには古い一覧が入ったまま
+「消えた後」の mtime が記録される。`dired-buffer-stale-p' は
+`dired-directory-changed-p'、つまりこの mtime を比べるだけなので、
+**以後そのバッファは永久に「変わっていない」と判定される**。
+
+vim で踏みやすい。`writebackup' が `a.txt~' を作る → 通知で auto-revert が
+一覧を読み始める → その最中に vim が `a.txt~' を消す、で 3 段が重なる
+\(実際に `a.txt~' の行が残った)。
+
+読んでいる間に変化があれば「まだ古い」側に倒れるので、余分な revert が
+1 回走るだけで取りこぼしは無くなる。"
+    (let* ((dirname (expand-file-name
+                     (if (consp dired-directory) (car dired-directory) dired-directory)))
+           (attrs (file-attributes dirname))
+           ;; ディレクトリでないとき (ワイルドカード等) は触らない。
+           ;; dired-readin 側も (eq (car attributes) t) で同じ判定をしている
+           (before (and (eq (file-attribute-type attrs) t)
+                        (file-attribute-modification-time attrs))))
+      (prog1 (apply orig args)
+        (when before (set-visited-file-modtime before)))))
   :hook (dired-mode-hook . my:dired-auto-revert-setup)
   :bind
   (:map dired-mode-map
@@ -351,6 +385,8 @@ vertico は `minibuffer-setup-hook' で `vertico-map' を composed keymap の
   ;; R (rename) / C (copy) / S (symlink) / H (hardlink) は 4 つとも
   ;; dired-do-create-files を通るので、差し込みはここ 1 箇所で足りる。
   (advice-add 'dired-do-create-files :around #'my:dired-create-files-keymap)
+  ;; 消えたファイルの行が永久に残るレースを塞ぐ (上の defun を参照)。
+  (advice-add 'dired-readin :around #'my:dired-readin-modtime-fix)
   ;; my:dired-revert-buffer (g に割り当てていた revert-buffer + dired-k) は
   ;; 削除した。dired 既定の g (revert-buffer) で dired-after-readin-hook が
   ;; 走り dired-k-no-revert が呼ばれるので、明示的な呼び出しは二重起動になる。

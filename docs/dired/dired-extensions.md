@@ -2,7 +2,7 @@
 
 # dired の拡張
 
-外部アプリ起動 (Excel)、exceldiff / MarkText、短くリネームできない問題、自動更新と diff-hl-dired の再入。
+外部アプリ起動 (Excel)、exceldiff / MarkText、短くリネームできない問題、自動更新と diff-hl-dired の再入、中身の変化への追従 (my-dired-watch)、消えた行が残るレース。
 
 最終更新: 2026-09-15 ｜ [README.md](../../README.md) ｜ [CLAUDE.md](../../CLAUDE.md)
 
@@ -214,7 +214,7 @@ dired 側は受け入れ準備が済んでいる（`dired.el:2906`）。
 | | |
 |---|---|
 | ファイルの追加・削除・改名 | **拾う** |
-| ファイルの中身・サイズ・更新日時の変化 | 拾わない（**サイズ欄は古いまま**） |
+| ファイルの中身・サイズ・更新日時・属性の変化 | autorevert は拾わない。**`my-dired-watch` が別経路で拾う**（後述） |
 | `i` で挿入したサブディレクトリの中の変化 | 拾わない |
 | w32notify がバッファ溢れで落としたイベント | 拾えない |
 
@@ -314,3 +314,194 @@ batch プローブでの実測（`user-lisp/` を `dired-noselect` し、チェ�
 （最初の 1 回で実際に固まった。それはそれで「本当に聞いてくる」ことの
 証明にはなる）。
 
+
+---
+
+## 中身の変化への追従（`my-dired-watch`、2026-09-15）
+
+サイズ・更新日時・属性が変わったときにも行を最新にする。上の autorevert には
+手を入れず、**`modified` のイベントだけを自分で拾う別経路**として足してある。
+
+### 追従しなかった原因は「検知」ではない
+
+**イベントは前から Emacs のプロセスの中まで届いていた。** 門が 2 つあり、
+どちらも独立に閉じていた。
+
+| | |
+|---|---|
+| 門 1 | `auto-revert-notify-handler` は `buffer-file-name` を持たないバッファでは `created` / `renamed` / `deleted` しか通さない（`autorevert.el:757-759`）。**`changed` はそこに書かれてすらいない**。watch のフラグも `(if buffer-file-name '(change attribute-change) '(change))` なので、dired では属性を OS に問い合わせてすらいない（`autorevert.el:678-681`） |
+| 門 2 | `dired-buffer-stale-p` は `dired-directory-changed-p`、つまり**ディレクトリ自身の mtime** しか見ない（`dired.el:1324-1348`）。中のファイルに追記しても親の mtime は 1 ビットも動かない |
+
+GUI プローブでの実測（200 ファイルのディレクトリで `f005.txt` に追記）:
+
+```
+:events                    ((changed "f005.txt"))   ← 届いている
+:dir-mtime-before/after    完全に同一
+:dired-buffer-stale-p      nil
+:size-in-buffer            "... masao 1 ... f005.txt"   ← 実体は 21 バイト
+```
+
+門 1 も単独で確認した。`auto-revert-notify-modified-p` を nil に戻してから
+もう一度追記しても、autorevert の watch は生きている（descriptor 非 nil）のに
+フラグは**立たない**。
+
+### 【重要】全体 revert ではなく 1 行だけ貼り替える
+
+サイズ・日時・属性が変わっても**行は増減しない**。`dired-relist-entry` で
+その行だけ貼り替える。実測（`C:/Windows/System32/` = 4862 エントリ）:
+
+| | `dired-after-readin-hook` あり | 同 nil |
+|---|---|---|
+| `revert-buffer`（全体） | 648 ms | 237 ms |
+| `dired-relist-entry`（1 行） | 454 ms | **0.71 ms** |
+
+支配的なのは `nerd-icons-dired--refresh` で、**1 行しか変えていなくても
+バッファ全体を舐め直す**。アイコンはファイル名と種別だけで決まりサイズや
+日時では変わらないので、貼り替えの間だけフックを外す。
+
+マークと point が保たれ、スクロールが飛ばないのも全体 revert との違い
+（実測で別行の `*` と point の位置が残ることを確認）。
+
+### 【重要】アイコンは overlay なので自分で付け直す
+
+`nerd-icons-dired` のアイコンは行の上に張った overlay（`evaporate` が t、
+`nerd-icons-dired.el:71-80`）。`dired-relist-entry` は行を `delete-region`
+するので、**アイコンだけが消える**。フックを外している以上、付け直すのは
+`my:dired-watch--annotate` の仕事になる。あちらの内部関数
+（`nerd-icons-dired--add-overlay`）に触るのは承知の上で、代わりにフックを
+走らせると 453 ms 払うことになる。
+
+### 【重要】サブディレクトリの行は追従しない（仕様）
+
+`sub/` の中にファイルを作ると `sub` 自身の mtime は変わるが、**親の watch には
+イベントが 1 件も来ない**。実測:
+
+| 操作 | 親の watch に届いたイベント |
+|---|---|
+| `sub/` の中にファイルを作る | **0 件**（行は古いまま） |
+| 直下のファイルを書き換える | `(modified "f07.txt")` が 2 件 |
+
+非再帰の `ReadDirectoryChangesW` が配下の変化を親に報告しないため。拾うには
+`subtree` を足すしかなく、それはビルド出力のディレクトリを開いていると毎秒
+数千件を呼び込む。得るもの（ディレクトリ行の mtime）に対して代償が大きすぎる。
+`g` を押せば直る。
+
+### magit-watch より簡単になった点
+
+`my-magit-watch.el` で要った仕掛けは、どれも要らない。
+
+| magit-watch | dired |
+|---|---|
+| 自励振動対策（refresh が 7 件のイベントを出す） | **要らない。** dired の更新はファイルを書かない |
+| `.gitignore` の判定 | **要らない。** dired は無視しない。見えているものが変わったなら反映するのが正しい |
+| フィンガープリント | **要らない。** イベントがファイル名を持っている |
+| gitd のトークン | 無関係 |
+
+### 全体 revert に倒す条件
+
+- `-t`（時刻順）/ `-S`（サイズ順）で並べているとき。**`dired-add-entry` は
+  行を元の位置に戻すだけで並べ直さない**ので、1 行の貼り替えでは嘘になる。
+  判定の `dired-check-switches` には長い名前として `sort=time` を渡すこと。
+  `time` だと `--time-style=...` にも当たる（`-` が単語境界になるため）
+- 1 つの窓で `my:dired-watch-relist-limit`（既定 32）を超えたとき。多数の行が
+  変わったなら、貼り替えを繰り返すより 1 回読み直すほうが安い
+
+### 常駐プロセス（gitd 方式）にしなかった理由
+
+コストは**全部 Emacs の中**にある。648 ms のうちデーモンが肩代わりできるのは
+`directory-files-and-attributes` の 98 ms だけで、残りは ls-lisp の整形と挿入と
+アイコン。検知そのものも既に Emacs まで届いている。**CLAUDE.md §2 の
+「段階 2c（監視を常駐プロセスへ）は見送り」を覆す材料は出なかった。**
+
+### 実装上の注意
+
+- **wdired 中は絶対に触らない。** `dired-relist-entry` は自分で
+  `buffer-read-only` を nil に束縛してしまうので、**呼ぶ前にこちらで
+  `buffer-read-only` を見るしかない**（`dired-buffer-stale-p` と同じ判定）
+- **行が無ければ何もしない。** `dired-relist-entry` は行が無ければ
+  `dired-add-entry` で作ってしまうが、それは新規ファイルの追加であって
+  autorevert の担当。しかもフックを外しているのでアイコンが付かない
+- **`file-exists-p` を先に見る。** イベントとタイマーの間に消されたファイルで、
+  行を消したあと `insert-directory` が失敗する
+- `frame-focus-state` を抑止条件に入れない（CLAUDE.md。フォーカスを失った
+  時点から二度と更新されなくなる）
+
+---
+
+## 【重要】消えたファイルの行が永久に残る（`dired-readin` のレース、2026-09-15 に対処）
+
+別端末で `touch a.txt` → `vim a.txt` で 2 回書いたら、dired に **`a.txt~` と
+`a.txt` の 2 行**が出た。`ls -l` には `a.txt` しか無い。
+
+`a.txt~` は vim のバックアップ（`writebackup`、既定でオン）。2 回目の `:w` で
+旧版を `a.txt~` に退避 → 新しい `a.txt` を書く → `a.txt~` を消す、という順に
+動くので**数ミリ秒だけ存在して消える**。消えているのに行だけが残っていた。
+
+### 原因
+
+`dired-readin`（`dired.el:1568`）は一覧を読み終えた**後**にディレクトリの
+mtime を取って記録する。
+
+```elisp
+(erase-buffer)
+(dired-readin-insert)                       ; ← ここで一覧を読む
+...
+(let ((attributes (file-attributes dirname)))
+  (set-visited-file-modtime (file-attribute-modification-time attributes)))
+```
+
+**この 2 つの間にファイルが消えると、バッファには古い一覧が入ったまま
+「消えた後」の mtime が記録される。** `dired-buffer-stale-p` は
+`dired-directory-changed-p`（= この mtime の比較）しか見ないので、
+**そのバッファは以後永久に「変わっていない」と判定される**。`g` を押すまで
+行が残り続ける。
+
+vim で踏みやすいのは、3 段の書き込みと dired の一覧読み込みが重なるため。
+`a.txt~` の作成が通知で auto-revert を起こし、その読み込みの最中に vim が
+`a.txt~` を消す。
+
+### 決定的な再現
+
+`dired-readin-insert` の直後（= `set-visited-file-modtime` の直前）に
+ファイルを消す advice を当てて `revert-buffer` する。
+
+```
+:line-remains              t      ← 行は残る
+:file-exists               nil    ← 実体は無い
+:dired-directory-changed-p nil    ← 変わっていないことになる
+:recorded == :actual              ← 記録した mtime が最新
+```
+
+### 対処
+
+`my:dired-readin-modtime-fix`（`my-dired.el`）。`dired-readin` に `:around` で、
+記録する mtime を**一覧を読む前**の値に差し替える。読んでいる間に変化が
+あれば「まだ古い」側に倒れるので、**余分な revert が 1 回走るだけで
+取りこぼしが無くなる**。
+
+| 同じ再現プローブ | 対処前 | 対処後 |
+|---|---|---|
+| `dired-directory-changed-p` | nil | **t** |
+| `dired-buffer-stale-p` | nil | **t** |
+| そのまま置いたときの行 | **残り続ける** | **autorevert が消す**（実測） |
+
+### この件と `my-dired-watch` は無関係
+
+`my-dired-watch` は行の貼り替えしかせず `visited-file-modtime` に触れない
+（`dired-add-entry` は `set-visited-file-modtime` を呼ばない。`dired.el` で
+呼んでいるのは `dired-readin` の 1 箇所だけ）。**以前からある Emacs 側の
+レース**で、たまたま今回見つかった。
+
+### 副産物: ディレクトリの mtime は遅れて更新される
+
+調べる過程で、連続して測ると作成が mtime に反映されないことがあった。
+0.4 秒空けると作成も削除も必ず反映される（`w32-get-true-file-attributes` の
+値では変わらない）。
+
+| | 作成 | 中身の変更 | 削除 |
+|---|---|---|---|
+| 0.4 秒空けて測る | **反映される** | 反映されない（当然） | **反映される** |
+| 連続して測る | **落ちることがある** | — | 反映される |
+
+**「ディレクトリの mtime を見れば増減が分かる」は、間隔を空けて測ったときの
+話。** 通知の直後に測ると取りこぼす。
