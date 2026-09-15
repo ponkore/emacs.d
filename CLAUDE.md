@@ -464,6 +464,7 @@ tr-ime / Windows 側が IME のトグルとして処理するので、Emacs 側�
 | **magit の遅さに Defender 除外 / `core.fsmonitor` / git ラッパ回避は効かない** | 2026-09 | 原因は git ではなく Emacs のプロセス生成。3 つとも試して有意差なし |
 | **`magit-status-sections-hook` を削らない** | 2026-09 | 16 → 6 で 1669 → 1001 ms。表示を犠牲にする割に効かない |
 | **段階 2c（監視を常駐プロセスへ）は見送り** | 2026-09 | 速度目標はキャッシュと並列化で達成済み。移す価値は macOS / Linux 対応と溢れ検知にある |
+| **dired の自動更新を `my-dired-watch` に一本化しない（段階 2 は不採用）** | 2026-09-15 | 実装して測った上で戻した。**簡単にならない**（w32notify 依存で Windows 専用なので `my-dired.el` の分岐も autorevert を返す後始末も消せず、差し引き +66 行）。**反映が 4.3 ms → 335 ms** に遅くなる（autorevert は通知で即座に revert、こちらは 0.3 秒のデバウンス待ち）。`dired-sidebar` の throttle（1.5 秒アイドル・可視時のみ）も通らなくなる。得るのは watch 1 本（張るコストは 0.058 ms）だけ |
 | **dired の追従を常駐プロセス（gitd 統合）にしない** | 2026-09-15 | コストは**全部 Emacs の中**にある。4862 件で 648 ms のうちデーモンが肩代わりできるのは stat の 98 ms だけで、残りは ls-lisp の整形・挿入・アイコン。**検知そのものも既に Emacs まで届いている**（autorevert が捨てているだけ）。統合すれば `my:gitd--disabled` と `PROTOCOL` を共有し、**git の失敗で dired が止まる** → [docs](docs/dired/dired-extensions.md) |
 | **elpaca へは移行しない（straight のまま）** | 2026-08 | 設定本体が use-package なら `:straight` の 1 行を差し替えるだけで済む |
 | **`:custom-face` は使わない** | | テーマに負ける（§1「use-package と straight」） |

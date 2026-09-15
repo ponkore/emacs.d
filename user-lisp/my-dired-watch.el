@@ -24,23 +24,10 @@
 ;;      追記しても親ディレクトリの mtime は 1 ビットも動かない (実測)。
 ;;      仮に 1 を通しても、ここで nil を返されて revert に至らない
 ;;
-;; そこで `modified' のイベントを自分で拾う。
-;;
-;;; 段階 1 と段階 2 (`my:dired-watch-standalone')
-;;
-;; | | watch のフラグ | 行の増減 | 中身の変化 |
-;; |---|---|---|---|
-;; | 段階 1 (nil) | size / last-write-time / attributes | autorevert | ここ |
-;; | 段階 2 (t)   | + file-name / directory-name        | **ここ**   | ここ |
-;;
-;; 段階 2 では `dired-mode-hook' で `auto-revert-mode' を立てない
-;; (`my:dired-watch-owns-p' を `my-dired.el' が見る)。watch が 1 本になり、
-;; 判断も 1 か所になる。
-;;
-;; **ただし autorevert を不要にはできない。** このモードは w32notify に
-;; 依存していて Windows でしか動かないので、他の OS では autorevert が要る。
-;; つまり段階 2 は「置き換え」であって「単純化」ではない。`my-dired.el' の
-;; 分岐と、モードを切ったときに autorevert を返す後始末がその代償。
+;; したがってここでは autorevert に手を入れず、**`modified' のイベントだけを
+;; 自分で拾う**。行が増減する変化 (作成 / 削除 / 改名) は門 1 を通るので
+;; 今までどおり `my-dired.el' の `auto-revert-mode' に任せる。
+;; **既存の挙動には触らない。**
 ;;
 ;;; 【重要】全体 revert ではなく 1 行だけ貼り替える
 ;;
@@ -129,26 +116,6 @@ dired でビルド出力のディレクトリを開いていると毎秒数千�
 多数の行が変わったなら、貼り替えを繰り返すより 1 回読み直すほうが安い。"
   :type 'integer)
 
-(defcustom my:dired-watch-standalone t
-  "非 nil なら、行の増減もこちらで面倒を見る (段階 2)。
-
-nil のとき (段階 1) は `modified' だけを拾い、作成 / 削除 / 改名は
-`auto-revert-mode' に任せる。非 nil にすると autorevert を dired から外し、
-1 本の watch で全部を引き受ける。
-
-**このモードが無効なプラットフォーム (Windows 以外) では、この値に関係なく
-autorevert が使われる。** つまり `my:dired-auto-revert-setup' (my-dired.el)
-の分岐は消せない。段階 2 は「autorevert を置き換える」であって
-「autorevert を不要にする」ではない。"
-  :type 'boolean)
-
-(defun my:dired-watch-owns-p ()
-  "dired の自動更新をこちらが引き受けているなら非 nil。
-
-`my-dired.el' が `auto-revert-mode' を立てるかどうかの判断に使う。"
-  (and (bound-and-true-p my:dired-watch-mode)
-       my:dired-watch-standalone))
-
 ;;; ---------------------------------------------------------------- 状態
 
 (defvar-local my:dired-watch--watches nil
@@ -164,10 +131,6 @@ dired はバッファ 1 つにディレクトリが複数ありうる (`i' で�
 (defvar-local my:dired-watch--overflow nil
   "件数が `my:dired-watch-relist-limit' を超えたら t。全体 revert に倒す。")
 
-(defvar-local my:dired-watch--structural nil
-  "行が増減する変化 (作成 / 削除 / 改名) を見たら t。全体 revert に倒す。
-段階 2 (`my:dired-watch-standalone') でしか立たない。")
-
 (defvar-local my:dired-watch--timer nil)
 (defvar-local my:dired-watch--last 0.0
   "最後に更新した時刻 (レート制限用)。")
@@ -178,17 +141,14 @@ dired はバッファ 1 つにディレクトリが複数ありうる (`i' で�
 
 ;;; ---------------------------------------------------------------- 監視
 
-(defun my:dired-watch--flags ()
+(defconst my:dired-watch--flags '(size last-write-time attributes)
   "w32notify に渡すフラグ。
 
-段階 1 (`my:dired-watch-standalone' が nil) では **`file-name' と
-`directory-name' を入れない**。行の増減は autorevert の担当で、ここが二重に
-revert しないようにする。段階 2 では入れて、増減もこちらで拾う。
-
-`subtree' はどちらでも入れない。dired は 1 階層しか表示しないので、配下の
-変化で発火しても貼り替える行が無い。"
-  (append (when my:dired-watch-standalone '(file-name directory-name))
-          '(size last-write-time attributes)))
+**`file-name' と `directory-name' は入れない。** 行の増減 (作成 / 削除 /
+改名) は autorevert が拾う担当で、ここが二重に revert しないようにする。
+`subtree' も入れない。dired は 1 階層しか表示しないので、配下の変化で
+発火しても貼り替える行が無い (ディレクトリ自身の mtime は親の watch で
+`modified' として届く)。")
 
 (defun my:dired-watch--dirs ()
   "このバッファが表示しているディレクトリを返す (絶対、末尾スラッシュ無し)。"
@@ -208,24 +168,19 @@ revert しないようにする。段階 2 では入れて、増減もこちら�
   (cl-incf (plist-get my:dired-watch--stats :events))
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
-      (let ((action (nth 1 ev))
-            (name (nth 2 ev)))
-        (cond
-         ;; 行が増減する。1 行の貼り替えでは足りないので全体 revert に倒す。
-         ;; 段階 1 ではこのフラグを要求していないので届かない。
-         ((memq action '(added removed renamed-from renamed-to))
-          (setq my:dired-watch--structural t)
-          (my:dired-watch--arm buffer my:dired-watch-debounce))
-         ((and (eq action 'modified) (stringp name) (not (string-empty-p name)))
-          (let ((h (or my:dired-watch--pending
-                       (setq my:dired-watch--pending
-                             (make-hash-table :test #'equal)))))
-            (if (>= (hash-table-count h) my:dired-watch-relist-limit)
-                (setq my:dired-watch--overflow t)
-              (puthash (expand-file-name (subst-char-in-string ?\\ ?/ name)
-                                         (file-name-as-directory dir))
-                       t h)))
-          (my:dired-watch--arm buffer my:dired-watch-debounce)))))))
+      ;; フラグ上 `modified' しか来ないはずだが、念のため絞る。
+      (when (eq (nth 1 ev) 'modified)
+        (let ((name (nth 2 ev)))
+          (when (and (stringp name) (not (string-empty-p name)))
+            (let ((h (or my:dired-watch--pending
+                         (setq my:dired-watch--pending
+                               (make-hash-table :test #'equal)))))
+              (if (>= (hash-table-count h) my:dired-watch-relist-limit)
+                  (setq my:dired-watch--overflow t)
+                (puthash (expand-file-name (subst-char-in-string ?\\ ?/ name)
+                                           (file-name-as-directory dir))
+                         t h)))
+            (my:dired-watch--arm buffer my:dired-watch-debounce)))))))
 
 (defun my:dired-watch--sync ()
   "`dired-after-readin-hook'。表示中のディレクトリに watch を合わせる。
@@ -247,7 +202,7 @@ revert とサブディレクトリの挿入の両方でここに来る。**貼�
         (unless (assoc dir my:dired-watch--watches)
           (when-let* ((desc (ignore-errors
                               (w32notify-add-watch
-                               dir (my:dired-watch--flags)
+                               dir my:dired-watch--flags
                                (lambda (ev)
                                  (my:dired-watch--callback buffer dir ev))))))
             (push (cons dir desc) my:dired-watch--watches)
@@ -358,14 +313,12 @@ revert とサブディレクトリの挿入の両方でここに来る。**貼�
        (t
         (let ((files (and my:dired-watch--pending
                           (hash-table-keys my:dired-watch--pending)))
-              (overflow my:dired-watch--overflow)
-              (structural my:dired-watch--structural))
+              (overflow my:dired-watch--overflow))
           (setq my:dired-watch--pending nil
-                my:dired-watch--overflow nil
-                my:dired-watch--structural nil)
-          (when (or files overflow structural)
+                my:dired-watch--overflow nil)
+          (when (or files overflow)
             (setq my:dired-watch--last (float-time))
-            (if (or structural overflow (my:dired-watch--resort-needed-p))
+            (if (or overflow (my:dired-watch--resort-needed-p))
                 (progn
                   (cl-incf (plist-get my:dired-watch--stats :reverted))
                   ;; ここはアイコンが要るのでフックを外さない
@@ -413,24 +366,10 @@ revert とサブディレクトリの挿入の両方でここに来る。**貼�
         ;; 既にある dired バッファを拾う
         (dolist (b (buffer-list))
           (with-current-buffer b
-            (when (derived-mode-p 'dired-mode)
-              ;; 段階 2 では autorevert を引き取る。**ここでやらないと、
-              ;; 既に開いてあるバッファだけ両方が走る**
-              (when (and my:dired-watch-standalone
-                         (bound-and-true-p auto-revert-mode))
-                (auto-revert-mode -1))
-              (my:dired-watch--sync)))))
+            (when (derived-mode-p 'dired-mode) (my:dired-watch--sync)))))
     (remove-hook 'dired-after-readin-hook #'my:dired-watch--sync)
     (dolist (b (buffer-list))
-      (with-current-buffer b
-        (when my:dired-watch--watches
-          (my:dired-watch--unwatch)
-          ;; 引き取っていたものを返す。**返さないと、モードを切った瞬間から
-          ;; そのバッファは二度と更新されなくなる**
-          (when (and (derived-mode-p 'dired-mode)
-                     (not (bound-and-true-p auto-revert-mode)))
-            (setq-local auto-revert-verbose nil)
-            (auto-revert-mode 1)))))))
+      (with-current-buffer b (my:dired-watch--unwatch)))))
 
 ;; 対象は Windows のみ。他のバックエンドへの対応は、必要になってから
 ;; `file-notify-add-watch' 経由に一般化する (dired の watch は非再帰なので

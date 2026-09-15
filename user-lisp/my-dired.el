@@ -301,12 +301,7 @@ vertico は `minibuffer-setup-hook' で `vertico-map' を composed keymap の
     ;; 黙らせる。ファイルバッファ側 (global-auto-revert-mode) の
     ;; メッセージはそのまま残る。
     (setq-local auto-revert-verbose nil)
-    ;; 段階 2: my-dired-watch が動いていれば、増減もあちらが引き受ける
-    ;; (`my:dired-watch-owns-p')。**この分岐は消せない。** あちらは
-    ;; w32notify に依存していて Windows でしか動かないので、他の OS では
-    ;; autorevert が要る。
-    (unless (and (fboundp 'my:dired-watch-owns-p) (my:dired-watch-owns-p))
-      (auto-revert-mode 1)))
+    (auto-revert-mode 1))
 
   (defun my:dired-readin-modtime-fix (orig &rest args)
     "`dired-readin' が記録する mtime を、一覧を**読む前**の値にする。
