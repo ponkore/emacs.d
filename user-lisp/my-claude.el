@@ -22,7 +22,7 @@
 ;; **入力は会話バッファの末尾で行う。** バッファは区切り
 ;; (`my:claude-prompt-string') で 2 つに分かれる。
 ;;
-;;   区切りより前  確定した会話。read-only で、1 文字キー (i / TAB / z / q) が
+;;   区切りより前  確定した会話。read-only で、1 文字キー (i / p / n / TAB / z / q) が
 ;;                 効く (`my:claude-view-map' をテキストプロパティで載せてある)
 ;;   区切りより後  入力エリア。markdown として編集できる。C-c C-c で送る
 ;;
@@ -302,6 +302,18 @@ Anthropic API の上限は **base64 にしたあとで 5 MB** なので、生の
 プレースホルダは送信後に消えるので、ここに残さないと後から分からない。"
   :type 'integer)
 
+(defcustom my:claude-echo-bar " "
+  "こちらの発言の各行の行頭に出す帯。`my:claude-user-prefix-face' が載る。
+
+**既定は空白 1 つ。** 背景色を敷くだけで実線の帯になるので、
+グリフを持つフォントが要らない。`▌' (U+258C) や `┃' (U+2503) のような
+記号は East Asian Ambiguous で、`site-lisp/eaw.el' が幅 2 と数えるのに
+フォントが幅 1 で描くと桁がずれる。空白ならその心配が無い。
+
+太くしたければ空白を増やす (本文の開始位置がそのぶん右へ動く)。
+帯の後ろには常に空白が 1 つ入る (`my:claude--echo-prefix')。"
+  :type 'string)
+
 (defcustom my:claude-notify-sound
   (cond ((eq system-type 'windows-nt) "C:/Windows/Media/chimes.wav")
         ((eq system-type 'darwin) "/System/Library/Sounds/Glass.aiff")
@@ -332,7 +344,21 @@ Windows の `play-sound-file' は WAV しか鳴らせない。"
 
 (defface my:claude-user-face
   '((t :inherit font-lock-keyword-face :weight bold))
-  "こちらの発言の見出し。")
+  "こちらの発言の本文。")
+
+(defface my:claude-user-prefix-face
+  '((((background dark))  :background "#d2810a")
+    (((background light)) :background "#ffb648"))
+  "こちらの発言の行頭に出す帯 (`my:claude-echo-bar')。
+
+**背景しか持たない。** 帯にするのは空白なので前景は要らない。
+
+オレンジにしてあるのは、この会話バッファで**他に使っていない色**だから。
+ヘッダ行がマゼンタ / シアン / グリーン / イエロー、答えがグリーン、
+差分が赤と緑を使っている。長い応答を遡って自分の発言を探すときに、
+色だけで当たりが付くことが目的なので、他と混ざらない色を選ぶ。
+
+`:extend' は立てない。立てると帯が行末まで伸びて行全体が塗り潰される。")
 
 (defface my:claude-assistant-face
   '((t :inherit default))
@@ -1125,7 +1151,7 @@ base64 だけを対象にするので、本文に出てくる短い文字列は�
 
   read-only     編集を拒む (`text-read-only' が飛ぶ)
   front-sticky  直前への挿入も拒む
-  keymap        ここでだけ 1 文字キー (i / TAB / z / q) を効かせる
+  keymap        ここでだけ 1 文字キー (i / p / n / TAB / z / q) を効かせる
 
 **`rear-nonsticky' は区切りの末尾にだけ付ける**
  (`my:claude--setup-input-area')。確定領域の末尾には必ず詰め物か区切りが
@@ -1321,6 +1347,52 @@ undo は入力エリアのためだけにある。**出力は `buffer-undo-list'
 追従の作法は `my:claude--at-end\' を参照。"
   (my:claude--at-end session
     (insert (if face (propertize text 'font-lock-face face) text))))
+
+(defun my:claude--echo-prefix (&optional property)
+  "こちらの発言の行頭に出す目印を返す。
+
+帯 (`my:claude-echo-bar') に `my:claude-user-prefix-face' を載せ、
+本文との間に空白を 1 つ置いた文字列。
+
+PROPERTY は face を載せるプロパティ名。既定は `font-lock-face' で、
+バッファに挿す文字列はこちらを使う (確定した会話に font-lock は
+走らないが、他の挿入と流儀を揃える)。
+
+**`wrap-prefix' に渡すぶんだけは `face' を指定すること。**
+`font-lock-face' が face の別名として効くのは `char-property-alias-alist'
+を通る経路 (= バッファのテキスト) で、表示用の文字列にも及ぶとは限らない。
+外れ方は**論理行の帯はそのままで折り返し行だけ無色になる**形なので、
+気づきにくい割に手掛かりが残らない。"
+  (concat (propertize my:claude-echo-bar
+                      (or property 'font-lock-face)
+                      'my:claude-user-prefix-face)
+          " "))
+
+(defun my:claude--insert-echo (session text &optional face)
+  "こちらが送った TEXT を、各行に目印を付けて会話バッファに出す。
+
+`my:claude--insert' と違って **1 行ずつ** 目印を前置し、さらに
+`wrap-prefix' を載せる。前者が論理行、後者が折り返し行を受け持つ。
+会話バッファは `truncate-lines' が nil なので、長い 1 行は必ず
+折り返る。片方だけでは行頭が揃わない。
+
+領域には `my:claude-echo' を立てる。`my:claude-previous-message' /
+`my:claude-next-message' がこれを辿る。**画像の見出しやサムネイルにも
+同じものを立てる** (`my:claude--insert-image') ので、テキストと画像が
+続いていれば 1 つの発言として繋がる。"
+  (let ((prefix (my:claude--echo-prefix))
+        (wrap (my:claude--echo-prefix 'face)))
+    (my:claude--at-end session
+      (let ((beg (point)))
+        (insert (mapconcat
+                 (lambda (line)
+                   (concat prefix
+                           (if face (propertize line 'font-lock-face face) line)))
+                 (split-string text "\n")
+                 "\n")
+                "\n")
+        (add-text-properties beg (point)
+                             `(wrap-prefix ,wrap my:claude-echo t))))))
 
 (defun my:claude--insert-block (session text face)
   "TEXT を字下げして挿入する。"
@@ -3217,13 +3289,21 @@ batch や画像を扱えない環境では `image-size' がエラーになる。
             (file-size-human-readable (length (my:claude-image-data image))))))
 
 (defun my:claude--insert-image (session image)
-  "会話バッファに送信した IMAGE の見出しとサムネイルを出す。"
-  (my:claude--at-end session
-    (insert (propertize (concat "> " (my:claude--image-description image) "\n")
-                        'font-lock-face 'my:claude-image-face))
-    (when-let* ((thumb (my:claude--thumbnail image my:claude-image-echo-lines)))
-      (insert-image thumb)
-      (insert "\n"))))
+  "会話バッファに送信した IMAGE の見出しとサムネイルを出す。
+
+見出しはテキストのエコーと同じ目印を前置する
+ (`my:claude--insert-echo')。サムネイルの行にも `my:claude-echo' を
+立てて、発言としての繋がりを切らさない。**帯は前置しない** —
+画像はベースラインからはみ出す高さがあり、1 文字ぶんの背景では
+帯にならず、色の付いた点にしか見えない。"
+  (my:claude--insert-echo session (my:claude--image-description image)
+                          'my:claude-image-face)
+  (when-let* ((thumb (my:claude--thumbnail image my:claude-image-echo-lines)))
+    (my:claude--at-end session
+      (let ((beg (point)))
+        (insert-image thumb)
+        (insert "\n")
+        (put-text-property beg (point) 'my:claude-echo t)))))
 
 (defun my:claude--user-content (text images)
   "user メッセージの content ブロック配列を組む。
@@ -3261,8 +3341,7 @@ API が弾く。"
     (when (or images (not (string-empty-p (string-trim text))))
       (my:claude--insert session "\n")
       (unless (string-empty-p (string-trim text))
-        (my:claude--insert session (format "> %s\n" (string-trim text))
-                           'my:claude-user-face))
+        (my:claude--insert-echo session (string-trim text) 'my:claude-user-face))
       (dolist (image images)
         (my:claude--insert-image session image))
       (my:claude--insert session "\n")
@@ -3494,6 +3573,53 @@ overlay とは別物だが、範囲を広げる理由が無い。"
   (interactive)
   (goto-char (point-max)))
 
+(defun my:claude--echo-starts ()
+  "確定した会話にある自分の発言の先頭位置のリスト (昇順)。
+
+`my:claude-echo' が立っている連続した領域を 1 つの発言と数える。
+探す範囲は確定した会話だけ (`my:claude--output-end' まで)。
+区切りより後ろは書きかけの入力で、移動先にはならない。"
+  (let ((limit (my:claude--output-end))
+        (pos (point-min))
+        starts)
+    (when (and (< pos limit) (get-text-property pos 'my:claude-echo))
+      (push pos starts))
+    (while (and (setq pos (next-single-property-change
+                           pos 'my:claude-echo nil limit))
+                (< pos limit))
+      (when (get-text-property pos 'my:claude-echo)
+        (push pos starts)))
+    (nreverse starts)))
+
+(defun my:claude--goto-message (dir)
+  "自分の発言へ移動する。DIR が -1 なら前、1 なら次。
+
+**`recenter' でウィンドウの上寄りに置く。** 見返したいのは発言そのもの
+ではなく「それに対して claude が何をしたか」なので、発言を天井に貼って
+続きを見せる。"
+  (let* ((starts (my:claude--echo-starts))
+         (here (point))
+         (target (if (< dir 0)
+                     (car (last (seq-filter (lambda (p) (< p here)) starts)))
+                   (seq-find (lambda (p) (> p here)) starts))))
+    (unless target
+      (user-error (if (< dir 0)
+                      "これより前に自分の発言は無い"
+                    "これより後に自分の発言は無い")))
+    (push-mark here)
+    (goto-char target)
+    (recenter 1)))
+
+(defun my:claude-previous-message ()
+  "1 つ前の自分の発言へ移動する。"
+  (interactive)
+  (my:claude--goto-message -1))
+
+(defun my:claude-next-message ()
+  "1 つ後の自分の発言へ移動する。"
+  (interactive)
+  (my:claude--goto-message 1))
+
 (defun my:claude-discard-input ()
   "入力エリアの書きかけを捨てる。
 
@@ -3606,6 +3732,8 @@ overlay とは別物だが、範囲を広げる理由が無い。"
     (define-key map (kbd "C-c C-k") #'my:claude-discard-input)
     (define-key map (kbd "C-c C-i") #'my:claude-goto-input)
     (define-key map (kbd "C-c C-z") #'my:claude-toggle-maximize)
+    (define-key map (kbd "C-c C-p") #'my:claude-previous-message)
+    (define-key map (kbd "C-c C-n") #'my:claude-next-message)
     (define-key map (kbd "M-p") #'my:claude-input-previous)
     (define-key map (kbd "M-n") #'my:claude-input-next)
     (define-key map (kbd "M-v") #'my:claude-input-yank-image)
@@ -3622,12 +3750,14 @@ overlay とは別物だが、範囲を広げる理由が無い。"
 org バッファで `my:org-yank-image' に潰しているのと同じ流儀。画面送りは
 `C-z' (`my-keybind.el') が使える。
 
-1 文字キー (i / TAB / z / q) は入力の邪魔になるのでここには置かない。
+1 文字キー (i / p / n / TAB / z / q) は入力の邪魔になるのでここには置かない。
 確定した会話の側だけで効かせる (`my:claude-view-map')。")
 
 (defvar my:claude-view-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "i") #'my:claude-goto-input)
+    (define-key map (kbd "p") #'my:claude-previous-message)
+    (define-key map (kbd "n") #'my:claude-next-message)
     (define-key map (kbd "TAB") #'my:claude-toggle-fold)
     (define-key map (kbd "z") #'my:claude-toggle-maximize)
     (define-key map (kbd "q") #'quit-window)
@@ -3668,12 +3798,14 @@ org バッファで `my:org-yank-image' に潰しているのと同じ流儀。�
 
   区切りより前  確定した会話。read-only で、1 文字キーが効く
                 i    入力エリアへ移動
+                p/n  前後の自分の発言へ移動
                 TAB  折りたたんだツール出力の全体を別バッファに出す
                 z    このウィンドウを最大化 (もう一度で元のレイアウト)
                 q    ウィンドウを閉じる
   区切りより後  入力エリア。markdown として書ける
                 C-c C-c  送信      C-c C-k  書きかけを捨てる
                 M-p / M-n 履歴     M-v      クリップボードの画像を添付
+                C-c C-p / C-c C-n  前後の自分の発言へ移動
 
 応答は区切りの**前**に挿さるので、読みながら次を書ける。
 
