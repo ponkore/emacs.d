@@ -34,6 +34,7 @@
 (require 'url)
 (require 'url-http)
 (require 'xml)
+(require 'my-core)   ; my:day-of-week-name
 
 ;; url-http.el の (defvar url-http-response-status) は値を伴わないため、
 ;; special 宣言がそのファイルの中でしか効かない。こちらでも宣言しておく。
@@ -145,18 +146,14 @@ htnblog コマンドが使うものと同じ。userid / endpointurl / apikey を
 ;;; ひな形
 ;;; --------------------------------------------------
 
-(defconst my:htnblog--day-names ["日" "月" "火" "水" "木" "金" "土"]
-  "曜日の名前。
-`format-time-string' の %a は `system-time-locale' 次第で英語になるので、
-ロケールに依存しないよう自前で持つ。")
-
 (defun my:htnblog--date-string (&optional time)
   "TIME (既定は今日) を \"9月7日(日)\" の形で返す。"
-  (let ((decoded (decode-time (or time (current-time)))))
+  (let* ((time (or time (current-time)))
+         (decoded (decode-time time)))
     (format "%d月%d日(%s)"
             (decoded-time-month decoded)
             (decoded-time-day decoded)
-            (aref my:htnblog--day-names (decoded-time-weekday decoded)))))
+            (my:day-of-week-name time))))
 
 (defun my:htnblog--template (&optional time)
   "TIME の日付でひな形の文字列を作る。"

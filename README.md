@@ -246,7 +246,8 @@ Excel ブックは OS の関連付けに渡す、`C-c x` で exceldiff、`C-c m`
 | `C-x t` | `toggle-truncate-lines` |
 | `C-x =` | バッファの行数 |
 | `C-x !` / `C-x \|` | `shell-command` / `shell-command-on-region` |
-| `C-x C-;` | 日時を挿入 |
+| `C-x C-;` | 日時を挿入（`2026/09/14 12:34:56`） |
+| `C-;` | 日付を挿入（`2026-09-14 (月)`） |
 | `C-S-a` | `embark-act` |
 | `ESC ?` | `apropos` |
 | `<f2>` | フォントサイズの hydra |

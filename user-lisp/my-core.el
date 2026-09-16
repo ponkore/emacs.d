@@ -54,6 +54,16 @@ Windows は `w32-shell-execute' (ShellExecuteW)、macOS は open(1)、
       (_ (call-process "xdg-open" nil 0 nil file)))
     (message "Opened externally: %s" (abbreviate-file-name file))))
 
+(defconst my:day-of-week-names ["日" "月" "火" "水" "木" "金" "土"]
+  "曜日の名前。
+`format-time-string' の %a は `system-time-locale' 次第で英語になるので、
+ロケールに依存しないよう自前で持つ。")
+
+(defun my:day-of-week-name (&optional time)
+  "TIME (既定は現在) の曜日を \"月\" のような 1 文字で返す。"
+  (aref my:day-of-week-names
+        (decoded-time-weekday (decode-time (or time (current-time))))))
+
 ;;; [3] tree-sitter
 
 ;; Emacs 29 以降の組み込み tree-sitter。文法 (grammar) は共有ライブラリなので

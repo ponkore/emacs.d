@@ -3,6 +3,8 @@
 ;; init.el から機械的に分割したもの。読み込み順は init.el を参照。
 ;;; Code:
 
+(require 'my-core)   ; my:day-of-week-name
+
 ;;; --------------------------------------------------
 ;;; 基本キーバインド
 ;;; --------------------------------------------------
@@ -38,6 +40,7 @@
    ("ESC h" . backward-kill-word)
    ("%" . my:match-paren)
    ("C-x C-;" . my:insert-datetime)
+   ("C-;" . my:insert-date)
    ("C-x C-M-r" . revert-buffer)
    ([M-kanji] . ignore)  ;; M-kanji is undefined に対する対策
    ("M-`" . ignore))
@@ -54,7 +57,14 @@
      (t (self-insert-command (or arg 1)))))
   (defun my:insert-datetime ()
     (interactive)
-    (insert (format-time-string "%Y/%m/%d %T"))))
+    (insert (format-time-string "%Y/%m/%d %T")))
+  ;; org / markdown / テキストの見出しに書く日付。曜日は %a を使わず
+  ;; my:day-of-week-name で出す (%a は system-time-locale 次第で英語になる)。
+  (defun my:insert-date ()
+    "\"2026-09-14 (月)\" の形式で今日の日付を挿入する。"
+    (interactive)
+    (insert (format-time-string "%Y-%m-%d")
+            " (" (my:day-of-week-name) ")")))
 
 (provide 'my-keybind)
 ;;; my-keybind.el ends here
