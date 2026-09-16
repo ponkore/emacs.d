@@ -2074,7 +2074,15 @@ ALIGNS は列ごとの寄せ方、HEADER は見出し行の数、INDENT は行�
             (funcall rule "└" "┴" "┘"))))
 
 (defun my:claude--render-table-at-point (end)
-  "point の行から続くパイプ表を罫線の表に置き換える。END を越えない。"
+  "point の行から続くパイプ表を罫線の表に置き換える。END を越えない。
+
+【重要】**組み直した範囲は `my:claude--protect' で張り直す。**
+`insert' は周囲のテキストプロパティを継承しない (継承するのは
+`insert-and-inherit') ので、`delete-region' + `insert' で作り直した表は
+`my:claude--at-end' が載せた `read-only' / `keymap' / `front-sticky' を
+失う。**確定した会話のはずの表の中だけが編集でき、1 文字キーも効かない**
+という壊れ方をしていた。表の前後の行は元のテキストのままなので、
+見た目には何の手がかりも無い。"
   (let* ((start (line-beginning-position))
          (indent (progn (goto-char start) (looking-at "[ \t]*") (match-string 0)))
          (lines nil))
@@ -2094,7 +2102,8 @@ ALIGNS は列ごとの寄せ方、HEADER は見出し行の数、INDENT は行�
                (finish (point)))
           (delete-region start finish)
           (goto-char start)
-          (insert text))))))
+          (insert text)
+          (my:claude--protect start (point)))))))
 
 (defun my:claude--render-tables (beg end)
   "BEG..END にある markdown のパイプ表を罫線の表に組み直す。
