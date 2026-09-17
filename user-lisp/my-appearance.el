@@ -235,17 +235,31 @@
 ;;
 ;; tty では initial-frame-alist が使われないうえ workarea も当てにならないので
 ;; nil を返す。呼び出し側は従来の固定値にフォールバックする。
-(defun my:frame-geometry-by-ratio (left-ratio width-ratio height-ratio top)
-  "プライマリモニタの作業領域から initial-frame-alist 用の位置とサイズを返す。
-LEFT-RATIO / WIDTH-RATIO は作業領域の横幅に対する割合、HEIGHT-RATIO は
-縦幅に対する割合。TOP だけは画面サイズによらず一定でよいので値をそのまま使う。"
+(defun my:frame-geometry-right-edge (width-ratio)
+  "作業領域の右上いっぱいに置くフレームの位置とサイズを返す。
+WIDTH-RATIO は作業領域の横幅に対する割合。高さは作業領域に収まる最大の行数、
+位置は右端・上端。"
   (when (display-graphic-p)
-    (pcase-let ((`(,_ ,_ ,area-width ,area-height)
-                 (alist-get 'workarea (car (display-monitor-attributes-list)))))
-      `((top . ,top)
-        (left . ,(round (* area-width left-ratio)))
-        (width . ,(/ (round (* area-width width-ratio)) (frame-char-width)))
-        (height . ,(/ (round (* area-height height-ratio)) (frame-char-height)))))))
+    (pcase-let* ((`(,area-x ,area-y ,area-width ,area-height)
+                  (alist-get 'workarea (car (display-monitor-attributes-list))))
+                 ;; タイトルバー・ボーダー・fringe の分。frame-outer-* と
+                 ;; frame-text-* の差で取る。フォントに依らない値なので、
+                 ;; 起動時の暫定フレームで測っても最終形と同じ
+                 ;; (実測: 32 x 39 px)。
+                 (chrome-width (- (frame-outer-width) (frame-text-width)))
+                 (chrome-height (- (frame-outer-height) (frame-text-height)))
+                 (char-width (frame-char-width))
+                 (columns (/ (round (* area-width width-ratio)) char-width)))
+      `((top . ,area-y)
+        ;; 右端に接する位置を自分で計算する。`(left . (- 0))' は
+        ;; デスクトップ全体の右端に飛ぶ (実測: 3 画面構成で x=3936)。
+        (left . ,(- (+ area-x area-width) (* columns char-width) chrome-width))
+        (width . ,columns)
+        ;; 高さは「作業領域 - 外枠」に収まる最大の行数。行単位でしか
+        ;; 指定できないので端数は余る (2560x1392 のとき 10px)。
+        ;; fullscreen を fullheight にすればぴったり埋まるが、
+        ;; default-frame-alist に載って以降の全フレームに効いてしまう。
+        (height . ,(/ (- area-height chrome-height) (frame-char-height)))))))
 
 ;;; [3] Mac用
 
@@ -271,16 +285,17 @@ LEFT-RATIO / WIDTH-RATIO は作業領域の横幅に対する割合、HEIGHT-RAT
 (use-package emacs
   :if (eq system-type 'windows-nt)
   :config
-  ;; 割合は従来の見た目に合わせてある。作業領域 2560x1392 のとき
-  ;;   left 666 / width 144 桁 / height 51 行 (従来 670 / 136 / 50)。
+  ;; 幅は従来どおり作業領域の 45%、高さは作業領域いっぱい、位置は右上。
+  ;; 作業領域 2560x1392 (1440 からタスクバー 48px を除いたもの) のとき
+  ;;   left 1376 / top 0 / width 144 桁 / height 79 行。
   (setq initial-frame-alist
         (append
          ;; ns-transparent-titlebar は macOS 専用パラメータなので削除した
          '((vertical-scroll-bars . nil) ;; スクロールバーを消す
            (internal-border-width . 0))
          ;; position / size
-         (or (my:frame-geometry-by-ratio 0.26 0.45 0.70 40)
-             '((top . 40) (left . 670) (width . 136) (height . 50)))
+         (or (my:frame-geometry-right-edge 0.45)
+             '((top . 0) (left . 1376) (width . 144) (height . 79)))
          initial-frame-alist))
   (setq default-frame-alist (append initial-frame-alist default-frame-alist)))
 
