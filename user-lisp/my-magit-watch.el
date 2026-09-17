@@ -119,6 +119,7 @@
 (declare-function magit-gitdir "magit-git")
 (declare-function magit-refresh-buffer "magit-mode")
 (declare-function magit-process-git "magit-process")
+(declare-function magit-git-executable "magit-git")
 (defvar magit-git-global-arguments)
 (defvar magit-pre-refresh-hook)
 
@@ -326,10 +327,61 @@ mtime を見て判断する。ブランチ切替では両方とも必ず変わ�
       (directory-file-name dir)
     rel))
 
+(defun my:magit-watch--git-program ()
+  "git の実行ファイルを返す。**magit をロードしない。**
+
+magit がロードされているならその設定に従う。無ければ `vc-git-program'、
+それも無ければ \"git\"。"
+  (cond ((fboundp 'magit-git-executable) (magit-git-executable))
+        ((boundp 'vc-git-program) vc-git-program)
+        (t "git")))
+
+(defun my:magit-watch--check-ignore (paths)
+  "PATHS に対して `git check-ignore' を 1 回呼び、(EXIT . 出力) を返す。
+
+【重要】**magit がロードされていなくても動くこと。** 段階 2 で
+dired を開いただけのリポジトリも監視対象になったので、**magit を一度も
+開いていないセッションでもここへ来る**。以前は
+`magit--with-temp-process-buffer' と `magit-process-git' を無条件に
+呼んでいたため、その場合 `void-function' でタイマーごと落ちていた。
+バイトコンパイルしない方針なのでマクロの未定義はロード時に出ず、
+**実際に使われるまで表面化しない**。
+
+magit があるときは magit 経由にする。`magit-process-file' に張った
+`my-gitd' の advice に載るので、常駐デーモンが肩代わりして速い
+\(check-ignore は `my:gitd--read-only-subcommands' に入っている)。
+
+`process-environment' を引き継ぐのは `magit--with-temp-process-buffer'
+と同じ理由。呼び出し元でバッファローカルだと `with-temp-buffer' では
+伝わらない。"
+  (let* ((penv process-environment)
+         (exit nil)
+         (out (with-temp-buffer
+                (setq-local process-environment penv)
+                (setq exit
+                      ;; `magit-git-global-arguments' をそのまま使っては
+                      ;; いけない。
+                      ;;   - `--literal-pathspecs' を check-ignore は受け付けず
+                      ;;     "pathspec magic not supported by this command" で落ちる
+                      ;;   - `-z' は `--stdin' とセットでないと
+                      ;;     "-z only makes sense with --stdin" で落ちる
+                      ;; そこで最小限に絞る。`core.quotePath=false' は日本語
+                      ;; パスが C 形式でクォートされて突き合わせに失敗するのを
+                      ;; 防ぐため。
+                      (if (fboundp 'magit-process-git)
+                          (let ((magit-git-global-arguments
+                                 '("--no-pager" "-c" "core.quotePath=false")))
+                            (magit-process-git t (list "check-ignore" "--" paths)))
+                        (apply #'call-process (my:magit-watch--git-program) nil t nil
+                               "--no-pager" "-c" "core.quotePath=false"
+                               "check-ignore" "--" paths)))
+                (buffer-string))))
+    (cons exit out)))
+
 (defun my:magit-watch--ignored-p (repo keys)
   "KEYS (相対パスのリスト) が全部 git に無視されるなら非 nil。
 
-判定はキャッシュする。ビルド中は同じディレクトリが延々と来るので、
+判定はキャッシュする。ビルド中は同じキーが延々と来るので、
 **定常状態では git を 1 回も呼ばない**。未知のキーがあるときだけ
 `git check-ignore' をまとめて 1 回呼ぶ。"
   (let* ((cache (or (my:magit-watch-repo-ign-cache repo)
@@ -338,21 +390,11 @@ mtime を見て判断する。ブランチ切替では両方とも必ず変わ�
          (unknown (seq-filter (lambda (k) (eq (gethash k cache 'unset) 'unset)) keys)))
     (when unknown
       (let* ((default-directory (my:magit-watch-repo-root repo))
-             ;; `magit-git-global-arguments' をそのまま使ってはいけない。
-             ;;   - `--literal-pathspecs' を check-ignore は受け付けず
-             ;;     "pathspec magic not supported by this command" で落ちる
-             ;;   - `-z' は `--stdin' とセットでないと
-             ;;     "-z only makes sense with --stdin" で落ちる
-             ;; そこで最小限に絞る。`core.quotePath=false' は日本語パスが
-             ;; C 形式でクォートされて突き合わせに失敗するのを防ぐため。
-             (magit-git-global-arguments '("--no-pager" "-c" "core.quotePath=false"))
-             (exit nil)
-             (out (magit--with-temp-process-buffer
-                    (setq exit (magit-process-git t (list "check-ignore" "--" unknown)))
-                    (buffer-string)))
+             (res (my:magit-watch--check-ignore unknown))
+             (exit (car res))
              ;; 該当なしの終了コードは 1。128 以上は本物のエラー
              (ignored (and (memq exit '(0 1))
-                           (split-string out "\n" t "[ \t\r]+"))))
+                           (split-string (cdr res) "\n" t "[ \t\r]+"))))
         (when (and (integerp exit) (>= exit 128))
           (cl-incf (plist-get my:magit-watch--stats :ign-error))
           (unless my:magit-watch--ign-warned

@@ -354,6 +354,48 @@ gitd のキャッシュにトークンを供給する役目も負っている（
 失敗するのを防ぐため。終了コードは 0（該当あり）/ 1（該当なし）/
 128 以上（エラー）で、128 以上は 1 度だけ `message` で知らせる。
 
+#### 【重要】ここで magit の関数を無条件に呼んではいけない（2026-09-17）
+
+上のコードは **magit がロードされていることを前提にしていた**。段階 2 で
+**dired を開いただけのリポジトリも監視対象になった**ため、magit を一度も
+開いていないセッションでこの経路に入るようになり、こうなった。
+
+```
+Error running timer ‘my:magit-watch--fire-prewarm’: (void-function magit--with-temp-process-buffer)
+Error running timer ‘my:magit-watch--fire’: (void-function magit--with-temp-process-buffer)
+```
+
+再現は「GUI 起動直後に `C-x C-v` で git 管理下のディレクトリを開く」だけ。
+`dired-mode-hook` → `my:magit-watch-add-for-dired`（**git を起こさない**のが
+売りだった入口）で watch が張られ、最初のワークツリー変化で
+`my:magit-watch--stale-p` → `--worktree-relevant-p` → `--ignored-p` と降りてくる。
+
+**バイトコンパイルしない方針なので、マクロの未定義はロード時に出ない。**
+`magit--with-temp-process-buffer` はマクロなので、コンパイルしていれば
+展開時に分かる。インタプリタでは**実際にその行が走るまで**展開されず、
+`void-function` という**関数呼び出しに見える形**で出てくる。
+`declare-function` も嘘をつく（宣言はするがロードはしない）。
+
+タイマーの中で落ちるので `pending` が消えず、**そのセッションでは
+ワークツリー変化での dired の VC マーク更新が一切走らない**。
+`.git` のメタ変化（`meta`）は `--ignored-p` を通らないので動いてしまい、
+「たまに効く」という分かりにくい形になる。
+
+`my:magit-watch--check-ignore` に切り出して 2 経路にした。
+
+| magit | 使うもの |
+|---|---|
+| ロード済み | `magit-process-git`（`my-gitd` の advice に載るので速い） |
+| **未ロード** | `call-process`（`my:magit-watch--git-program`） |
+
+`process-environment` の引き継ぎは `magit--with-temp-process-buffer` が
+やっていたことをそのまま書く（呼び出し元でバッファローカルだと
+`with-temp-buffer` では伝わらない）。両経路で同じ結果になることは実測した。
+
+**段階 2 以降、イベント処理の経路には magit 依存を持ち込めない。**
+`magit-refresh-buffer` のように magit バッファに対してしか呼ばないものは
+別（そこに magit バッファがあるなら magit はロード済み）。
+
 ### 抑止条件に入れてよいもの・いけないもの
 
 **ユーザが操作をやめれば自然に解消するものだけ**を入れる

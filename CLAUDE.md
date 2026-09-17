@@ -873,6 +873,14 @@ gopls は大文字のドライブレターで返す（§1「Windows 固有」）
   `magit-gitdir` を使う `my:magit-watch-add` を dired から呼んではいけない）。
   外すのは dired バッファの `kill-buffer-hook` で、**magit バッファも他の
   dired バッファも残っていないときだけ**
+- **【重要】イベント処理の経路に magit の関数を書かない**（2026-09-17）。上の
+  とおり **magit を一度もロードしていないセッションでもそこへ来る**。
+  `check-ignore` が `magit--with-temp-process-buffer` を無条件に呼んでいて、
+  GUI 起動直後に `C-x C-v` するだけで `void-function` でタイマーが落ちていた。
+  **バイトコンパイルしない方針なので、マクロの未定義はロード時に出ない**
+  （`declare-function` も宣言するだけでロードはしない）。判定は `fboundp` で、
+  未ロードなら `call-process` に落とす（`my:magit-watch--check-ignore`）
+  → [docs](docs/magit/gitd-and-autorefresh.md)
 - **監視表の引きは `my:magit-watch--lookup`**（`gethash` ではない）。
   Windows はドライブレターの大小が食い違うので、素の `gethash` だと
   **同じリポジトリに watch が 2 本張られトークンが 2 つに割れる**
