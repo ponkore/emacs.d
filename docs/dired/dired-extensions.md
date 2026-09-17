@@ -428,6 +428,143 @@ GUI プローブでの実測（200 ファイルのディレクトリで `f005.tx
 
 ---
 
+## commit しても diff-hl のマークが消えない（段階 1、2026-09-17 に対処）
+
+`diff-hl-dired` の VC マーク（行頭の帯）が、commit したあとも `g` を押すまで
+古いままだった。
+
+### 更新経路が 1 本しかない
+
+`diff-hl-dired` がマークを描き直すのは、ここ 1 箇所だけ。
+
+```elisp
+;; diff-hl-dired.el:90
+(add-hook 'dired-after-readin-hook 'diff-hl-dired-update 10 t)
+```
+
+つまり**一覧を読み直したときだけ**。そこから素直に次が出る。
+
+| 変化 | 一覧 | マーク |
+|---|---|---|
+| 作成 / 削除 / 改名 | 変わる → autorevert が revert → readin | **更新される** |
+| **commit / stage / checkout / stash** | 変わらない | **古いまま** |
+| 既存ファイルを外部で書き換え | 行は貼り替わる（`my-dired-watch`） | **古いまま** |
+
+3 行目は `my-dired-watch` の副作用。あちらは貼り替えの間
+`dired-after-readin-hook` を nil に束縛する（アイコン再描画の 453 ms を
+避けるため）ので、**行だけ最新になってマークが置いていかれる**。
+
+### 上流の magit 連携は dired を見ていない
+
+`magit-post-refresh-hook` にいる `diff-hl-magit-post-refresh` は
+
+```elisp
+(when (and (buffer-local-value 'diff-hl-mode buf)
+           (not (buffer-modified-p buf))
+           file                         ; diff-hl--buffer-file-name
+           ...)
+```
+
+と、**ファイルを訪問しているバッファしか対象にしない**。`buffer-file-name` が
+nil の dired は 1 件も通らない。上流の穴であって設定側の不備ではない。
+
+### 実測（GUI、使い捨てリポジトリ）
+
+外部（シェル）から commit した場合:
+
+| | マーク | `buffer-chars-modified-tick` |
+|---|---|---|
+| commit 前 | `a.txt`=change / `untracked.txt`=unknown | 94 |
+| commit 後 | **同じまま**（ワークツリーは clean） | **152** |
+| `(diff-hl-dired-update)` を 1 回 | **消えた** | 152（変化なし） |
+
+tick が動いているのが要点で、**イベントは届いている**。commit で `.git/` の
+mtime が変わり `my-dired-watch` が `.git` の行を貼り替えている。検知の問題
+ではなく、繋がっていないだけ（magit-watch のときと同じ構図）。
+
+`diff-hl-dired-update` 単体のコスト:
+
+| | 値 |
+|---|---|
+| 同期部分（呼び出しが戻るまで） | 3.4 ms |
+| 非同期チェーン完了まで | **0.51〜0.53 秒** |
+| `vc-do-command` の回数 | **6 回** |
+| `point` / `buffer-chars-modified-tick` | **どちらも変わらない** |
+
+0.36 秒ぶんは Windows のプロセス生成コスト（6 × 約 60 ms）。**gitd は効かない。**
+あれが横取りするのは `magit-process-file` で、ここは `vc-git` 経由。
+コストはディレクトリのエントリ数ではなく**リポジトリの大きさ**で効く
+（`dir-status-files` は再帰的に返し、ディレクトリ行のマークをそこから集約する）。
+
+### 【重要】ここは全体でよい（`my-dired-watch` とは事情が違う）
+
+`my-dired-watch` が「全体 revert ではなく 1 行だけ」にしたのは、テキストの
+貼り替えが高価だったから。**`diff-hl-dired-update` はテキストを触らない**
+（overlay を消して貼り直すだけ）。実測どおり point もマークもスクロール位置も
+保たれる。
+
+そもそも行単位にはできない。
+
+- `diff-hl-dired-highlight-items` は `diff-hl-dired-clear`（バッファ全体の
+  overlay 削除）から始まる
+- データ取得が `dir-status-files`、つまりディレクトリ単位。1 ファイルだけ
+  知りたくてもコストは同じ
+- commit では**マークが付いていた全ファイルが同時に変わる**ので、
+  全体でなければ嘘が残る
+
+### 段階 1 でやったこと
+
+`magit-post-refresh-hook` と `vc-checkin-hook` に自前の関数を足し、
+**そのリポジトリ配下の表示中の dired バッファ**で `diff-hl-dired-update` を
+呼ぶ（`my-vc.el` の `my:diff-hl-dired-update-repo`）。
+
+`magit-post-refresh-hook` は `magit-refresh` でしか走らない。つまり
+**ユーザが `g` を押したときと magit のコマンド直後**の 2 つで、
+`my-magit-watch` の自動更新（`magit-refresh-buffer`）では走らない。
+走るのがユーザの操作時だけなので、バックグラウンドの負荷は増えない。
+
+重複の抑制は既存の `my:diff-hl-dired-update-guard` がそのまま引き受ける
+（走っていれば待って 1 回だけ）。実測でも `add` と `commit` の 2 回の
+リフレッシュが 1 本のチェーンに畳まれた。
+
+**表示中のバッファだけ**にしてあるのは、1 バッファあたり 6 プロセス
+0.51 秒だから。dired を 10 個開いていれば commit 1 回で 60 プロセスになる。
+
+end-to-end の実測（magit から commit）:
+
+| | |
+|---|---|
+| commit 前 | `a.txt`=change / `untracked.txt`=unknown |
+| **magit で `add` + `commit`** | **マークが消えた**（1072 ms） |
+| `buffer-chars-modified-tick` | 変わらない |
+| 表示していない dired バッファ | **`change` のまま**（仕様。`g` で直る） |
+
+`my:diff-hl-dired--under-p` の境界も検算した。**`file-equal-p` は使えない**
+（`w32-get-true-file-attributes` が nil なので inode が常に 0。CLAUDE.md）ので
+文字列で比べる。ROOT に必ず末尾スラッシュを付けるのは `~/Projects` と同じ理由。
+
+| DIR | ROOT | |
+|---|---|---|
+| `c:/Projects/ESC-Web/` | `C:/Projects/` | t |
+| `c:/ProjectsOld/foo/` | `C:/Projects/` | **nil** |
+| `C:/Projects/` | `c:/Projects/` | t（ドライブレターの大小を吸収） |
+
+### 残っていること（段階 2）
+
+外部の git（ターミナル、Claude Code からの commit）と `my-magit-watch` の
+自動更新には追従しない。やるなら `my:magit-watch--refresh` から同じ関数を
+呼び、dired だけ開いているリポジトリも監視に登録する
+（`my:magit-watch-add` は中で `magit-toplevel` を呼ぶので、dired 側からは
+`locate-dominating-file` で `.git` を見つけてから登録する必要がある）。
+そこで初めて「古い」印と、可視になった時点での更新が要る。
+
+**段階 3（`diff-hl-dired-highlight-items` にだけ乗り、データ取得を
+gitd 経由の `git status --porcelain -z --ignored` に差し替える）は採らない。**
+1 コマンド 46〜48 ms と 10 倍速いが、vc backend 非依存だったものが git 専用に
+なり（SVN 対応が死ぬ）、状態マッピングとディレクトリ集約を自前で持つことになる。
+
+---
+
 ## 【重要】消えたファイルの行が永久に残る（`dired-readin` のレース、2026-09-15 に対処）
 
 別端末で `touch a.txt` → `vim a.txt` で 2 回書いたら、dired に **`a.txt~` と

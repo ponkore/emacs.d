@@ -78,6 +78,12 @@
   (dired-mode-hook . diff-hl-dired-mode)
   ;; magit の操作後にマーカーを更新する
   (magit-post-refresh-hook . diff-hl-magit-post-refresh)
+  ;; 上の diff-hl-magit-post-refresh は「ファイルを訪問しているバッファ」しか
+  ;; 見ないので、dired のマークは別に取り直す (:init の長いコメントを参照)。
+  (magit-post-refresh-hook . my:diff-hl-dired-magit-post-refresh)
+  ;; C-x v v (vc-checkin) から commit した場合。上流の diff-hl-after-checkin も
+  ;; 同じフックにいるが、あちらも file バッファだけが対象。
+  (vc-checkin-hook . my:diff-hl-dired-update-repo)
   :config
   (global-diff-hl-mode +1)
   (diff-hl-flydiff-mode +1)
@@ -194,6 +200,106 @@
         (my:diff-hl-dired--rearm buffer orig))))
 
   (advice-add 'diff-hl-dired-update :around #'my:diff-hl-dired-update-guard)
+
+  ;; --------------------------------------------------
+  ;; commit のあとに dired のマークを取り直す (2026-09-17)
+  ;;
+  ;; `diff-hl-dired' がマークを更新する経路は **1 つしかない**。
+  ;;
+  ;;   (add-hook 'dired-after-readin-hook 'diff-hl-dired-update 10 t)
+  ;;
+  ;; つまり **dired が一覧を読み直したときだけ**で、行が増減しない変化は
+  ;; すべて取り残される。
+  ;;
+  ;;   作成 / 削除 / 改名  -> ディレクトリの mtime が変わる -> autorevert が
+  ;;                         revert -> readin -> **更新される**
+  ;;   commit / stage /    -> 一覧は変わらない -> revert されない ->
+  ;;   checkout / stash      **マークが古いまま残る**
+  ;;
+  ;; `my-dired-watch' が行を貼り替える経路でも更新されない。あちらは
+  ;; `dired-after-readin-hook' を nil に束縛する (アイコンの再描画に 453 ms
+  ;; かかるため)。**行だけ最新になってマークが置いていかれる。**
+  ;;
+  ;; 上流の magit 連携 (`diff-hl-magit-post-refresh') は埋めてくれない。
+  ;; あれは `diff-hl--buffer-file-name' が非 nil のバッファ、つまり
+  ;; **ファイルを訪問しているバッファしか見ない**ので、dired は 1 件も通らない。
+  ;;
+  ;; 実測 (2026-09-17、使い捨てリポジトリで外部から commit):
+  ;;
+  ;;   commit 前  a.txt=change / untracked.txt=unknown
+  ;;   commit 後  **同じまま** (ワークツリーは clean)
+  ;;   ここで (diff-hl-dired-update) を 1 回呼ぶ -> マークが消えた
+  ;;
+  ;;; 【重要】これはテキストを触らないので全体でよい
+  ;;
+  ;; `my-dired-watch' が「全体 revert ではなく 1 行だけ貼り替える」ことにした
+  ;; のは、テキストの貼り替えが高価だったから。**ここは事情が違う。**
+  ;; `diff-hl-dired-highlight-items' は overlay を消して貼り直すだけで、
+  ;; 実測でも `buffer-chars-modified-tick' は動かず point も保たれた。
+  ;;
+  ;; そもそも行単位にはできない。`diff-hl-dired-clear' がバッファ全体の
+  ;; overlay を消すところから始まるし、データ取得 (`dir-status-files') が
+  ;; ディレクトリ単位なので 1 ファイルだけ知りたくてもコストは同じ。
+  ;; commit では **マークが付いていた全ファイルが同時に変わる**ので、
+  ;; 全体でなければ嘘が残る。
+  ;;
+  ;;; 表示中のバッファだけにする理由
+  ;;
+  ;; 1 バッファあたり `vc-do-command' が 6 回 = 6 プロセスで 0.51 秒 (実測、
+  ;; 非同期)。うち 0.36 秒は Windows のプロセス生成コスト。**gitd は効かない**
+  ;; \(あれが横取りするのは `magit-process-file' で、ここは vc-git 経由)。
+  ;; dired バッファを 10 個開いていると commit 1 回で 60 プロセスになる。
+  ;;
+  ;; 表示していないバッファは今までどおり古いまま残る (`g' で直る)。外部の
+  ;; git や自動更新に追従させるのは段階 2 (`my-magit-watch' への相乗り) で、
+  ;; そこで初めて「古い」印と可視になった時点での更新が要る。
+  ;;
+  ;; 重複の抑制は上の `my:diff-hl-dired-update-guard' がそのまま引き受ける
+  ;; \(走っていれば待って 1 回だけ)。
+
+  (defun my:diff-hl-dired--under-p (dir root)
+    "DIR が ROOT 配下なら非 nil。
+
+【重要】`file-equal-p' は使えない。`my-platform.el' が
+`w32-get-true-file-attributes' を nil にしているため inode が常に 0 で返り、
+**同じドライブのディレクトリがすべて「同じ」と判定される** (CLAUDE.md)。
+文字列で比べる。stat を打たないので速くもある。"
+    (let ((d (file-name-as-directory (expand-file-name dir)))
+          (r (file-name-as-directory (expand-file-name root))))
+      (if (file-name-case-insensitive-p r)
+          ;; Windows は子プロセスの作業ディレクトリのドライブレターを
+          ;; 小文字にするので、大小が食い違ったまま届く (CLAUDE.md)。
+          (string-prefix-p (downcase r) (downcase d))
+        (string-prefix-p r d))))
+
+  (defun my:diff-hl-dired-update-repo (&optional root)
+    "ROOT 配下の**表示中の** dired バッファでマークを取り直す。
+
+ROOT を省略すると `vc-root-dir' で求める (`vc-checkin-hook' 用)。
+求まらなければ何もしない。"
+    (when-let* ((root (or root (ignore-errors (vc-root-dir)))))
+      (dolist (buf (buffer-list))
+        (with-current-buffer buf
+          (when (and (derived-mode-p 'dired-mode)
+                     (bound-and-true-p diff-hl-dired-mode)
+                     ;; wdired 中は触らない。編集中のバッファに overlay を
+                     ;; 張り直すことになる (`my-dired-watch' と同じ判定)
+                     buffer-read-only
+                     (get-buffer-window buf t)
+                     (my:diff-hl-dired--under-p default-directory root))
+            (diff-hl-dired-update))))))
+
+  (defun my:diff-hl-dired-magit-post-refresh ()
+    "`magit-post-refresh-hook'。magit の操作後に dired のマークを取り直す。
+
+このフックは `magit-refresh' でしか走らない。つまり **ユーザが `g' を
+押したときと magit のコマンド (commit / stage / checkout ...) の直後**の
+2 つで、`my-magit-watch' の自動更新 (`magit-refresh-buffer') では走らない。
+外部の git に追従させるのは段階 2。
+
+ルートは `magit-toplevel' で取る。このフックは `magit-refresh' の中、
+つまり `magit--refresh-cache' が束縛された状態で走るので git は起きない。"
+    (my:diff-hl-dired-update-repo (ignore-errors (magit-toplevel))))
 
   ;; leaf の :hydra 相当 (init 時にインライン展開される)。
   :init

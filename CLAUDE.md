@@ -730,6 +730,23 @@ vc-git の `dir-status-files` はプロセスを 6 回前後リレーし、Windo
 0.5〜1 秒かかる。auto-revert で再入すると**両チェーンが同じ一時バッファを
 `erase-buffer` し合う**。`my-vc.el` に 2 つ対処が入っている。
 
+### 【重要】VC マークが更新されるのは「一覧を読み直したとき」だけ
+
+`diff-hl-dired-update` は `dired-after-readin-hook` にしか載っていない。
+**行が増減しない変化（commit / stage / checkout、既存ファイルの書き換え）では
+マークが古いまま残る。** 上流の `diff-hl-magit-post-refresh` は
+`buffer-file-name` を持つバッファしか見ないので dired を埋めてくれない。
+
+`my-vc.el` の `my:diff-hl-dired-update-repo` を `magit-post-refresh-hook` と
+`vc-checkin-hook` に載せて、**そのリポジトリ配下の表示中の dired バッファ**で
+取り直している（段階 1）。**表示していないバッファと外部の git には追従しない**
+（段階 2 は未着手）。
+
+`diff-hl-dired-update` は**テキストを触らない**（overlay の消去と貼り直しだけ）
+ので、`my-dired-watch` と違って行単位にする必要は無い。むしろ
+`diff-hl-dired-clear` がバッファ全体を消すところから始まるので**できない**。
+→ [docs](docs/dired/dired-extensions.md)
+
 ## `my-text` — org / markdown
 
 → [docs/text/org-extensions.md](docs/text/org-extensions.md) / [docs/text/markdown.md](docs/text/markdown.md)
@@ -977,6 +994,12 @@ upstream は 2020-12 で止まっているが**祝日法が 2021 年以降変わ
 `my-magit-watch` は `magit-refresh-buffer`（そのバッファだけ）を呼ぶので、
 `magit-post-refresh-hook`（diff-hl がぶら下がっている）は走らない。
 fringe のマーカーを最新にしたいときは手で `g` を押す。
+
+**dired の VC マークも同じ理由で追従しない**（2026-09-17）。`magit` の操作と
+`vc-checkin` は段階 1 で拾うようにしたが、**外部の git（ターミナルや
+Claude Code からの commit）と自動更新は拾わない**。表示していない dired
+バッファも対象外。段階 2（`my:magit-watch--refresh` への相乗り + dired から
+監視登録）は未着手。→ [docs](docs/dired/dired-extensions.md)
 
 ### 自動更新の `.gitignore` 判定はディレクトリ単位（2026-09、仕様）
 
