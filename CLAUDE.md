@@ -88,6 +88,11 @@ emacs --batch --debug-init -l early-init.el -l init.el --eval '(message "OK")'
   外す必要がある
 - **検証用のディレクトリは毎回ユニークな名前で作る。** dired バッファを kill した
   直後は w32notify の watch が握っていて `Permission denied` で消せないことがある
+- **w32notify のイベントを待つプローブは、1 つの式の中で完結させられない。**
+  イベントは**コマンドループ経由で配送される**ので、`accept-process-output` を
+  回してもプロセス出力が読めるだけで**特殊イベントは 1 件も処理されない**。
+  `emacsclient` の呼び出しを分け、**その間に Emacs をコマンドループへ戻す**こと。
+  これを知らないと「イベントが来ていない」という誤った結論が出る（実際に出た）
 
 ### 【重要】「設定されたか」と「効いたか」は別々に見る
 
@@ -737,10 +742,18 @@ vc-git の `dir-status-files` はプロセスを 6 回前後リレーし、Windo
 マークが古いまま残る。** 上流の `diff-hl-magit-post-refresh` は
 `buffer-file-name` を持つバッファしか見ないので dired を埋めてくれない。
 
-`my-vc.el` の `my:diff-hl-dired-update-repo` を `magit-post-refresh-hook` と
-`vc-checkin-hook` に載せて、**そのリポジトリ配下の表示中の dired バッファ**で
-取り直している（段階 1）。**表示していないバッファと外部の git には追従しない**
-（段階 2 は未着手）。
+`my-vc.el` の `my:diff-hl-dired-update-repo` を呼んで取り直す。入口は 3 つ。
+
+| | 拾うもの |
+|---|---|
+| `magit-post-refresh-hook` | magit のコマンド直後と `g` |
+| `vc-checkin-hook` | `C-x v v` での commit |
+| `my:magit-watch--refresh` | **外部の git と自動更新** |
+
+**実際に走るのは表示中のバッファだけ。** 残りには `my:diff-hl-dired--stale` を
+立て、可視になった時点で `window-buffer-change-functions` から取り直す
+（1 バッファ 6 プロセス 0.51 秒かかるため）。重ければ
+`my:magit-watch-update-dired` を nil にすると最初の 2 つだけに戻る。
 
 `diff-hl-dired-update` は**テキストを触らない**（overlay の消去と貼り直しだけ）
 ので、`my-dired-watch` と違って行単位にする必要は無い。むしろ
@@ -855,6 +868,14 @@ gopls は大文字のドライブレターで返す（§1「Windows 固有」）
 - **抑止条件に `frame-focus-state` を入れてはいけない。** フォーカスが外れている間は
   永久に偽なので、**その時点から二度と更新されなくなる**
 - テスト用リポジトリは `git init -b main`（このマシンは `init.defaultBranch = main`）
+- **dired を開くだけで監視対象が増える**（2026-09-17、段階 2）。登録は
+  `my:magit-watch-add-for-dired` で、**git を起こさない**（`magit-toplevel` /
+  `magit-gitdir` を使う `my:magit-watch-add` を dired から呼んではいけない）。
+  外すのは dired バッファの `kill-buffer-hook` で、**magit バッファも他の
+  dired バッファも残っていないときだけ**
+- **監視表の引きは `my:magit-watch--lookup`**（`gethash` ではない）。
+  Windows はドライブレターの大小が食い違うので、素の `gethash` だと
+  **同じリポジトリに watch が 2 本張られトークンが 2 つに割れる**
 
 ## `my-claude`
 
@@ -995,11 +1016,10 @@ upstream は 2020-12 で止まっているが**祝日法が 2021 年以降変わ
 `magit-post-refresh-hook`（diff-hl がぶら下がっている）は走らない。
 fringe のマーカーを最新にしたいときは手で `g` を押す。
 
-**dired の VC マークも同じ理由で追従しない**（2026-09-17）。`magit` の操作と
-`vc-checkin` は段階 1 で拾うようにしたが、**外部の git（ターミナルや
-Claude Code からの commit）と自動更新は拾わない**。表示していない dired
-バッファも対象外。段階 2（`my:magit-watch--refresh` への相乗り + dired から
-監視登録）は未着手。→ [docs](docs/dired/dired-extensions.md)
+**dired の VC マークは別経路で追従させた**（2026-09-17）。`my-magit-watch` が
+`my:diff-hl-dired-update-repo` を直接呼ぶ（段階 2）ので、外部の git でも
+マークは更新される。**fringe のほうは従来どおり `g` が要る。**
+→ [docs](docs/dired/dired-extensions.md)
 
 ### 自動更新の `.gitignore` 判定はディレクトリ単位（2026-09、仕様）
 

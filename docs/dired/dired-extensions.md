@@ -549,19 +549,108 @@ end-to-end の実測（magit から commit）:
 | `c:/ProjectsOld/foo/` | `C:/Projects/` | **nil** |
 | `C:/Projects/` | `c:/Projects/` | t（ドライブレターの大小を吸収） |
 
-### 残っていること（段階 2）
+---
 
-外部の git（ターミナル、Claude Code からの commit）と `my-magit-watch` の
-自動更新には追従しない。やるなら `my:magit-watch--refresh` から同じ関数を
-呼び、dired だけ開いているリポジトリも監視に登録する
-（`my:magit-watch-add` は中で `magit-toplevel` を呼ぶので、dired 側からは
-`locate-dominating-file` で `.git` を見つけてから登録する必要がある）。
-そこで初めて「古い」印と、可視になった時点での更新が要る。
+## 外部の git にも追従させる（段階 2、2026-09-17）
 
-**段階 3（`diff-hl-dired-highlight-items` にだけ乗り、データ取得を
-gitd 経由の `git status --porcelain -z --ignored` に差し替える）は採らない。**
-1 コマンド 46〜48 ms と 10 倍速いが、vc backend 非依存だったものが git 専用に
-なり（SVN 対応が死ぬ）、状態マッピングとディレクトリ集約を自前で持つことになる。
+段階 1 が拾えるのは Emacs の中の magit と `vc-checkin` だけ。**ターミナルや
+Claude Code からの commit** は `magit-post-refresh-hook` を通らないので、
+`my-magit-watch` 側から拾う。
+
+### 入口は 3 つになった
+
+| | 拾うもの |
+|---|---|
+| `magit-post-refresh-hook` | magit のコマンド直後と `g`（段階 1） |
+| `vc-checkin-hook` | `C-x v v` での commit（段階 1） |
+| **`my:magit-watch--refresh`** | **外部の git と自動更新**（段階 2） |
+
+`my:magit-watch--refresh` は `magit-refresh-buffer`（そのバッファだけ）しか
+呼ばないので、段階 1 の経路はここでは走らない。そこから直接
+`my:diff-hl-dired-update-repo` を呼ぶ。**magit バッファが 1 つも無い
+リポジトリでも通る**（`dolist` が空振りしても dired は更新される）。
+
+### 【重要】dired を開いただけのリポジトリは監視されていなかった
+
+監視表に入る経路は `magit-mode-hook` だけだった。つまり **magit バッファを
+一度も開いていないリポジトリではイベントが 1 件も来ない**。dired しか開いて
+いない状態では段階 2 が効かないので、`dired-mode-hook` からも登録する。
+
+`my:magit-watch-add` をそのまま使ってはいけない。あちらは `magit-toplevel` と
+`magit-gitdir`（= `rev-parse --git-dir`）を呼ぶので、**dired を開くたびに
+git が走り、magit のロードまで強制される**。`my:magit-watch-add-for-dired` は
+`locate-dominating-file` で `.git` を探すだけで、**git を起こさない**。
+worktree / submodule では `.git` がファイルなので、中の `gitdir: PATH` を
+読んで gitdir にする。
+
+### 【重要】登録キーの大小を吸収する（`my:magit-watch--lookup`）
+
+`gethash` だけでは足りない。Windows では同じディレクトリが `c:/...` とも
+`C:/...` とも綴られる。取りこぼすと**同じリポジトリに watch が 2 本張られ、
+トークンが 2 つに割れる**。どちらが `my:magit-watch-scope` に当たるかは
+`maphash` の順序次第なので、**gitd が古い答えを返しうる**。
+
+### 【重要】watch を外さないと、消せないディレクトリが残る
+
+dired を開くだけで監視対象が増えるようになったので、放っておくと 1 セッションで
+watch が際限なく増える。しかも w32notify の watch は**そのディレクトリの
+ハンドルを握る**ので、Emacs の外から `rm -rf` できなくなる（検証用リポジトリを
+消そうとして実際に踏んだ）。
+
+dired バッファの `kill-buffer-hook` で、**magit バッファも他の dired バッファも
+残っていなければ**監視を外す（`my:magit-watch--after-kill-dired`）。
+`kill-buffer-hook` は自分がまだ生きている状態で走るので、自分を除いて数える。
+
+### 表示していないバッファは「印」だけ
+
+`my:diff-hl-dired-update-repo` は表示中のバッファだけを取り直し、残りには
+`my:diff-hl-dired--stale` を立てる。可視になった時点で
+`window-buffer-change-functions` → アイドルタイマー →
+`my:diff-hl-dired--update-stale` が拾う。
+
+**このフックの中で `diff-hl-dired-update` を直接呼ばない。** redisplay から
+走るので、6 プロセスを起こすのはタイマーへ逃がす。連続した切り替えが 1 回に
+まとまる利点もある。
+
+印を下ろすのは `my:diff-hl-dired--start`、つまり**入口によらず実際に
+取り直しが走ったとき**。`dired-after-readin-hook` 経由の更新でもそこを通るので、
+隠れている間に autorevert が revert したバッファに無駄な取り直しが残らない。
+
+### 実測（GUI、使い捨てリポジトリ、magit を一切通さない）
+
+| 操作 | マーク | `refreshed` | `dired` |
+|---|---|---|---|
+| シェルで `a.txt` を編集 | `a.txt`=change / `new2.txt`=unknown | +5 | +5 |
+| **シェルで `git commit`** | **消えた** | +3 | +3 |
+| 隠した状態でシェルで編集 | nil のまま（`stale` = t） | +5 | **+0** |
+| そのバッファを表示 | `a.txt`=change（`stale` = nil） | — | +1 |
+
+`dired-mode-hook` からの登録も効いている（`dired-noselect` の直後に
+`my:magit-watch--lookup` が非 nil）。kill したら監視表から消えることも確認した。
+
+### 【重要】w32notify のイベントは `accept-process-output` では届かない
+
+最初の計測で「commit してもマークが消えない」と出たが、**プローブの作り方が
+間違っていた**。w32notify のイベントは**コマンドループ経由で配送される**
+（CLAUDE.md が batch について書いているのと同じ話）。`emacsclient -e` で
+評価している式の中で `accept-process-output` を回しても、プロセス出力は
+読めるが**特殊イベントは 1 件も処理されない**。
+
+`ec.sh` の呼び出しを分け、**その間に Emacs をコマンドループへ戻す**こと。
+同じ式の中で完結させようとすると、必ず「イベントが来ていない」ように見える。
+
+### 重ければ段階 1 に戻せる
+
+`my:magit-watch-update-dired` を nil にすると、段階 2 の更新も dired からの
+監視登録も止まり、段階 1 だけになる。**コードを外す必要は無い。** 実際の回数は
+`my:magit-watch-stats` の「リフレッシュ N (dired M)」で見る。
+
+### 段階 3 は採らない
+
+`diff-hl-dired-highlight-items` にだけ乗り、データ取得を gitd 経由の
+`git status --porcelain -z --ignored` に差し替えれば 1 コマンド 46〜48 ms と
+10 倍速いが、vc backend 非依存だったものが git 専用になり（SVN 対応が死ぬ）、
+状態マッピングとディレクトリ集約を自前で持つことになる。
 
 ---
 

@@ -90,6 +90,26 @@
 ;; 判定はディレクトリ単位なので、**リポジトリ直下の無視されるファイル**
 ;; (ルートの `*.log' など) はパス単位で見る。ディレクトリ数が
 ;; `my:magit-watch--wt-dirs-limit' を超えたら判断を諦めてリフレッシュする。
+;;
+;;; dired の VC マークも取り直す (段階 2、2026-09-17)
+;;
+;; `diff-hl-dired' のマークが更新される経路は `dired-after-readin-hook' しか
+;; 無いので、commit / stage / checkout のように**行が増減しない変化**では
+;; 古いまま残る。段階 1 (`my-vc.el') が magit の操作と `vc-checkin' を拾い、
+;; `my:magit-watch--refresh' から `my:diff-hl-dired-update-repo' を呼ぶこの
+;; 経路が**外部の git (ターミナルや Claude Code からの commit) と自動更新**を
+;; 拾う。
+;;
+;; そのために dired も `dired-mode-hook' から監視対象に加える
+;; (`my:magit-watch-add-for-dired')。**そこで git を起こしてはいけない。**
+;; magit バッファを一度も開いていないリポジトリは監視表に無く、イベントが
+;; 1 件も来ないため、加えないと段階 2 が効かない。
+;;
+;; 取り直しは 1 バッファあたり 6 プロセス 0.51 秒かかる (vc-git 経由なので
+;; **gitd は効かない**)。実際に走るのは表示中のバッファだけで、残りには印を
+;; 立てて可視になった時点で取り直す。回数は `my:magit-watch-stats' の
+;; 「dired」で見え、重ければ `my:magit-watch-update-dired' を nil にすると
+;; 段階 1 に戻る。
 
 ;;; Code:
 
@@ -133,6 +153,25 @@ nil にすると先読みを頼まない (リフレッシュ直前には必ず�
 追跡対象のファイルが本当に大量に書き換わる場合の上限としてここで抑える。"
   :type 'number)
 
+(defcustom my:magit-watch-update-dired t
+  "非 nil なら、リフレッシュのときに dired の VC マークも取り直す (段階 2)。
+
+`diff-hl-dired' のマークが更新される経路は `dired-after-readin-hook' しか
+無いので、commit / stage / checkout のように**行が増減しない変化**では
+古いまま残る。段階 1 (`my-vc.el' の `magit-post-refresh-hook' と
+`vc-checkin-hook') が magit の操作を拾い、ここが**外部の git と自動更新**を
+拾う。
+
+**nil にすれば段階 1 だけに戻る。コードを外す必要は無い。** 取り直しは
+1 バッファあたり `vc-do-command' 6 回 = 6 プロセスで 0.51 秒かかり、
+\(vc-git 経由なので) gitd が効かない。自動更新のたびに走らせるのが重ければ
+ここで切る。実際の回数は `my:magit-watch-stats' の「dired」で見る。
+
+nil にすると、dired を開いただけのリポジトリを監視対象に加えるのも止まる
+\(`my:magit-watch-add-for-dired')。magit バッファがあるリポジトリの監視は
+そのまま。"
+  :type 'boolean)
+
 (defcustom my:magit-watch-visible-only t
   "非 nil なら、ウィンドウに表示されている magit バッファだけ更新する。
 
@@ -162,7 +201,7 @@ nil にすると先読みを頼まない (リフレッシュ直前には必ず�
 
 (defvar my:magit-watch--stats
   (list :events 0 :classified 0 :refreshed 0 :skipped 0 :deferred 0
-        :throttled 0 :prewarmed 0 :ign-error 0)
+        :throttled 0 :prewarmed 0 :ign-error 0 :dired 0)
   "統計。`my:magit-watch-stats' で表示する。")
 
 (defvar my:magit-watch--ign-warned nil
@@ -409,12 +448,34 @@ mtime を見て判断する。ブランチ切替では両方とも必ず変わ�
             (or (not my:magit-watch-visible-only) (get-buffer-window buf t))))
      (buffer-list))))
 
+(declare-function my:diff-hl-dired-update-repo "my-vc")
+
+(defun my:magit-watch--refresh-dired (repo)
+  "REPO 配下の dired バッファの VC マークを取り直す (段階 2)。
+
+`my:magit-watch--refresh' が `magit-refresh-buffer' しか呼ばないため、
+`magit-post-refresh-hook' に載せた段階 1 の経路はここでは走らない。
+**外部の git (ターミナルや Claude Code からの commit) を拾うのはここだけ。**
+
+実際に走るのは**表示中の dired バッファだけ**で、残りには印が付き、
+可視になった時点で取り直される (`my-vc.el')。
+
+`my-vc.el' が無い環境 (diff-hl を入れていない) では何もしない。"
+  (when (and my:magit-watch-update-dired
+             (fboundp 'my:diff-hl-dired-update-repo))
+    (let ((n (my:diff-hl-dired-update-repo (my:magit-watch-repo-root repo))))
+      (when (and (integerp n) (> n 0))
+        (cl-incf (plist-get my:magit-watch--stats :dired) n)))))
+
 (defun my:magit-watch--refresh (repo)
   (dolist (buf (my:magit-watch--buffers repo))
     (with-current-buffer buf
       ;; magit-refresh (全バッファ + post-refresh-hook の diff-hl) ではなく
       ;; そのバッファだけにする。自動更新のたびに全部を取り直すのは重い。
       (magit-refresh-buffer)))
+  ;; magit バッファが 1 つも無いリポジトリ (dired だけ開いている) でもここは
+  ;; 通る。上の dolist が空振りしても dired は更新する。
+  (my:magit-watch--refresh-dired repo)
   (setf (my:magit-watch-repo-last-refresh repo) (float-time)))
 
 (defun my:magit-watch--fire (root)
@@ -558,26 +619,88 @@ ONLY-IF-IDLE が非 nil なら、既に予約があるときは**延長しない
              my:magit-watch--repos)
     found))
 
+(defun my:magit-watch--lookup (root)
+  "ROOT で登録済みのリポジトリを返す。**大文字小文字の食い違いを吸収する。**
+
+【重要】`gethash' だけでは足りない。Windows では同じディレクトリが
+`c:/...' とも `C:/...' とも綴られる (CLAUDE.md「ドライブレターの大小が
+食い違う」)。取りこぼすと**同じリポジトリに watch が 2 本張られ、トークンが
+2 つに割れる**。どちらが `my:magit-watch-scope' に当たるかは `maphash' の
+順序次第になるので、gitd が古い答えを返しうる。"
+  (or (gethash root my:magit-watch--repos)
+      (and (file-name-case-insensitive-p root)
+           (let ((r (downcase root)) found)
+             (maphash (lambda (k repo)
+                        (when (string-equal r (downcase k)) (setq found repo)))
+                      my:magit-watch--repos)
+             found))))
+
+(defun my:magit-watch--register (root gitdir)
+  "ROOT (末尾 \"/\") を監視表に入れて watch を張る。既にあれば何もしない。"
+  (unless (my:magit-watch--lookup root)
+    (let ((repo (my:magit-watch--make-repo
+                 :root root :gitdir gitdir :serial 1)))
+      ;; watch を張る前にフィンガープリントを取る (取りこぼし防止)
+      (setf (my:magit-watch-repo-fp repo)
+            (my:magit-watch--fingerprint repo))
+      (setf (my:magit-watch-repo-desc repo)
+            (w32notify-add-watch
+             (directory-file-name root)
+             '(file-name directory-name size last-write-time subtree)
+             (lambda (ev) (my:magit-watch--callback root ev))))
+      (puthash root repo my:magit-watch--repos)
+      repo)))
+
 (defun my:magit-watch-add (&optional directory)
-  "DIRECTORY のリポジトリを監視対象にする。既にしていれば何もしない。"
+  "DIRECTORY のリポジトリを監視対象にする。既にしていれば何もしない。
+
+**magit を経由するので git が走りうる。** `magit-gitdir' は
+`rev-parse --git-dir' を呼ぶため、登録済みかどうかを**先に**見ること。
+dired からの登録には `my:magit-watch-add-for-dired' を使う。"
   (when (and my:magit-watch-mode (eq system-type 'windows-nt))
     (let ((default-directory (or directory default-directory)))
       (when-let* ((root (magit-toplevel))
                   (root (file-name-as-directory (expand-file-name root))))
-        (unless (gethash root my:magit-watch--repos)
+        (unless (my:magit-watch--lookup root)
           (when-let* ((gitdir (magit-gitdir)))
-            (let ((repo (my:magit-watch--make-repo
-                         :root root :gitdir gitdir :serial 1)))
-              ;; watch を張る前にフィンガープリントを取る (取りこぼし防止)
-              (setf (my:magit-watch-repo-fp repo)
-                    (my:magit-watch--fingerprint repo))
-              (setf (my:magit-watch-repo-desc repo)
-                    (w32notify-add-watch
-                     (directory-file-name root)
-                     '(file-name directory-name size last-write-time subtree)
-                     (lambda (ev) (my:magit-watch--callback root ev))))
-              (puthash root repo my:magit-watch--repos)
-              repo)))))))
+            (my:magit-watch--register root gitdir)))))))
+
+(defun my:magit-watch--gitdir-of (root)
+  "ROOT の gitdir を返す。**git は起こさない。**
+
+`.git' がディレクトリならそれ。worktree と submodule ではファイルで、
+中身が `gitdir: PATH' の 1 行なのでそこから取る (相対パスは ROOT 基準)。"
+  (let ((dot (expand-file-name ".git" root)))
+    (cond
+     ((file-directory-p dot) (file-name-as-directory dot))
+     ((file-regular-p dot)
+      (with-temp-buffer
+        (insert-file-contents dot nil 0 4096)
+        (goto-char (point-min))
+        (when (looking-at "gitdir:[ \t]*\\(.+?\\)[ \t]*$")
+          (file-name-as-directory
+           (expand-file-name (match-string 1) root))))))))
+
+(defun my:magit-watch-add-for-dired (&optional directory)
+  "DIRECTORY のリポジトリを監視対象にする。**git を起こさない。**
+
+dired を開いただけのリポジトリを拾うための入口。監視されていなければ
+イベントが来ず、段階 2 の dired 更新も走らない。
+
+`my:magit-watch-add' をそのまま使ってはいけない。あちらは `magit-toplevel'
+と `magit-gitdir' を呼ぶので、**dired を開くたびに git が走り、magit の
+ロードまで強制される**。`.git' を上へ探すだけで足りる (worktree /
+submodule でも `.git' はファイルとして在る)。"
+  (when (and my:magit-watch-mode
+             (eq system-type 'windows-nt)
+             my:magit-watch-update-dired)
+    (let ((dir (or directory default-directory)))
+      (unless (file-remote-p dir)
+        (when-let* ((root (locate-dominating-file dir ".git"))
+                    (root (file-name-as-directory (expand-file-name root))))
+          (unless (my:magit-watch--lookup root)
+            (when-let* ((gitdir (my:magit-watch--gitdir-of root)))
+              (my:magit-watch--register root gitdir))))))))
 
 (defun my:magit-watch-remove (root)
   (when-let* ((repo (gethash root my:magit-watch--repos)))
@@ -635,17 +758,51 @@ ONLY-IF-IDLE が非 nil なら、既に予約があるときは**延長しない
   "`magit-mode-hook'。バッファができたら監視を始める。"
   (my:magit-watch-add default-directory))
 
+(defun my:magit-watch--after-dired ()
+  "`dired-mode-hook'。dired を開いただけのリポジトリも監視対象にする。
+
+これが無いと、**magit バッファを一度も開いていないリポジトリでは
+イベントが 1 件も来ない** (監視表に入るのは `magit-mode-hook' 経由だけ
+だった)。段階 2 の dired 更新もそこでは走らない。"
+  (my:magit-watch-add-for-dired default-directory)
+  (when (and my:magit-watch-update-dired
+             (my:magit-watch--repo-of default-directory))
+    (add-hook 'kill-buffer-hook #'my:magit-watch--after-kill-dired nil t)))
+
+(defun my:magit-watch--after-kill-dired ()
+  "`kill-buffer-hook' (dired バッファのみ)。最後の 1 つなら監視をやめる。
+
+【重要】**dired を開くだけで監視対象が増えるようになった (段階 2) ので、
+これが無いと 1 セッションで watch が際限なく増える。** しかも watch は
+そのディレクトリのハンドルを握るため、**Emacs の外から消せなくなる**
+\(検証用リポジトリを消そうとして実際に踏んだ)。
+
+`kill-buffer-hook' はこのバッファがまだ生きている状態で走るので、
+自分自身を除いて数える。magit バッファが残っていれば外さない。"
+  (when-let* ((repo (my:magit-watch--repo-of default-directory))
+              (root (my:magit-watch-repo-root repo))
+              (self (current-buffer)))
+    (unless (seq-some
+             (lambda (buf)
+               (and (not (eq buf self))
+                    (with-current-buffer buf
+                      (and (derived-mode-p 'magit-mode 'dired-mode)
+                           (my:magit-watch--under-p default-directory root)))))
+             (buffer-list))
+      (my:magit-watch-remove root))))
+
 ;;; ---------------------------------------------------------------- コマンド
 
 ;;;###autoload
 (defun my:magit-watch-stats ()
   "イベント数・リフレッシュ数・抑止数を表示する。"
   (interactive)
-  (message "magit-watch: %d 監視中 / イベント %d (分類を通った %d) / リフレッシュ %d / 先読み %d / 変化なしで抑止 %d / 操作中で待ち直し %d / レート制限で待ち直し %d%s"
+  (message "magit-watch: %d 監視中 / イベント %d (分類を通った %d) / リフレッシュ %d (dired %d) / 先読み %d / 変化なしで抑止 %d / 操作中で待ち直し %d / レート制限で待ち直し %d%s"
            (hash-table-count my:magit-watch--repos)
            (plist-get my:magit-watch--stats :events)
            (plist-get my:magit-watch--stats :classified)
            (plist-get my:magit-watch--stats :refreshed)
+           (plist-get my:magit-watch--stats :dired)
            (plist-get my:magit-watch--stats :prewarmed)
            (plist-get my:magit-watch--stats :skipped)
            (plist-get my:magit-watch--stats :deferred)
@@ -663,13 +820,18 @@ ONLY-IF-IDLE が非 nil なら、既に予約があるときは**延長しない
   (if my:magit-watch-mode
       (progn
         (add-hook 'magit-mode-hook #'my:magit-watch--after-mode)
+        (add-hook 'dired-mode-hook #'my:magit-watch--after-dired)
         (add-hook 'magit-refresh-buffer-hook #'my:magit-watch--after-refresh)
         (add-hook 'magit-pre-refresh-hook #'my:magit-watch--pre-refresh)
-        ;; 既にある magit バッファを拾う
+        ;; 既にある magit / dired バッファを拾う
         (dolist (buf (buffer-list))
           (with-current-buffer buf
-            (when (derived-mode-p 'magit-mode) (my:magit-watch-add)))))
+            ;; dired 側は --after-dired を通すこと。監視登録だけでなく
+            ;; kill-buffer-hook も張る
+            (cond ((derived-mode-p 'magit-mode) (my:magit-watch-add))
+                  ((derived-mode-p 'dired-mode) (my:magit-watch--after-dired))))))
     (remove-hook 'magit-mode-hook #'my:magit-watch--after-mode)
+    (remove-hook 'dired-mode-hook #'my:magit-watch--after-dired)
     (remove-hook 'magit-refresh-buffer-hook #'my:magit-watch--after-refresh)
     (remove-hook 'magit-pre-refresh-hook #'my:magit-watch--pre-refresh)
     (my:magit-watch--remove-all)))

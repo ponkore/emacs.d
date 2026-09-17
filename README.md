@@ -125,7 +125,7 @@ git clone git@github.com:ponkore/emacs.d.git ~/.emacs.d
 | `my-project` | projectile（`C-c p`） |
 | `my-vc` | magit、diff-hl（`C-c g`）、Windows の SVN 対応 |
 | `my-gitd` | magit の git 実行を常駐プロセスに肩代わりさせる。Windows のみ |
-| `my-magit-watch` | ワークツリーを監視して magit バッファを自動更新。Windows のみ |
+| `my-magit-watch` | ワークツリーを監視して magit バッファと dired の VC マークを自動更新。Windows のみ |
 | `my-shell` | exec-path-from-shell、Windows 用 shell 設定 |
 | `my-utils` | calendar（日本の祝日）、open-junk-file、grep/ripgrep、server |
 | `my-claude` | Claude Code を stream-json で使う（`C-c a`） |
@@ -202,6 +202,8 @@ Go の `ptyd` が ConPTY を持って子プロセスを動かし、VT を stdio 
 Excel ブックは OS の関連付けに渡す、`C-c x` で exceldiff、`C-c m` で MarkText、
 サイドバー（`F8`）、外部の増減に追随する自動更新。**サイズ・日時・属性の変化**にも
 追従する（`my-dired-watch`。行が増減しないので、その行だけを貼り替える）。
+**VC マーク（diff-hl）も commit / stage に追従する**（ターミナルや Claude Code から
+コミットした場合も含む）。
 → [docs/dired/dired-extensions.md](docs/dired/dired-extensions.md)
 
 ### org / markdown

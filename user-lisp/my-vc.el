@@ -84,6 +84,8 @@
   ;; C-x v v (vc-checkin) から commit した場合。上流の diff-hl-after-checkin も
   ;; 同じフックにいるが、あちらも file バッファだけが対象。
   (vc-checkin-hook . my:diff-hl-dired-update-repo)
+  ;; 隠れている間に古くなった dired を、可視になった時点で取り直す (段階 2)。
+  (window-buffer-change-functions . my:diff-hl-dired--update-on-display)
   :config
   (global-diff-hl-mode +1)
   (diff-hl-flydiff-mode +1)
@@ -150,6 +152,14 @@
   (defvar-local my:diff-hl-dired--deadline nil
     "待ちを諦める時刻 (`float-time')。待っていないときは nil。")
 
+  (defvar-local my:diff-hl-dired--stale nil
+    "表示していない間に VC 状態が変わったら t。可視になった時点で取り直す。
+
+立てるのは `my:diff-hl-dired-update-repo' (下の段階 2 のブロック)。
+下ろすのは `my:diff-hl-dired--start'、つまり**取り直しが実際に走ったとき**。
+`dired-after-readin-hook' 経由の更新でもそこを通るので、隠れている間に
+autorevert が revert したバッファに無駄な取り直しが残らない。")
+
   (defun my:diff-hl-dired--in-flight-p ()
     "この dired バッファの status チェーンがまだ走っているなら非 nil。
 
@@ -160,6 +170,8 @@
   (defun my:diff-hl-dired--start (orig)
     "ORIG (`diff-hl-dired-update') を実際に呼び、一時バッファを黙らせる。"
     (setq my:diff-hl-dired--deadline nil)
+    ;; ここまで来れば取り直される。**入口がどれであっても**印は下ろしてよい。
+    (setq my:diff-hl-dired--stale nil)
     (funcall orig)
     ;; 一時バッファはここで (再) 生成されている。バッファは使い回されるうえ
     ;; チェーンの終わりに kill されるので、毎回張り直す。
@@ -250,12 +262,24 @@
   ;; \(あれが横取りするのは `magit-process-file' で、ここは vc-git 経由)。
   ;; dired バッファを 10 個開いていると commit 1 回で 60 プロセスになる。
   ;;
-  ;; 表示していないバッファは今までどおり古いまま残る (`g' で直る)。外部の
-  ;; git や自動更新に追従させるのは段階 2 (`my-magit-watch' への相乗り) で、
-  ;; そこで初めて「古い」印と可視になった時点での更新が要る。
+  ;; 表示していないバッファには `my:diff-hl-dired--stale' を立てるだけにして、
+  ;; **可視になった時点で** `window-buffer-change-functions' から取り直す。
+  ;; 印を下ろすのは `my:diff-hl-dired--start'、つまり入口によらず
+  ;; 「実際に取り直しが走ったとき」なので、隠れている間に autorevert が
+  ;; revert したバッファに無駄な取り直しが残らない。
   ;;
   ;; 重複の抑制は上の `my:diff-hl-dired-update-guard' がそのまま引き受ける
   ;; \(走っていれば待って 1 回だけ)。
+  ;;
+  ;;; 入口は 3 つ
+  ;;
+  ;;   `magit-post-refresh-hook'  magit のコマンド直後と `g' (段階 1)
+  ;;   `vc-checkin-hook'          C-x v v での commit      (段階 1)
+  ;;   `my:magit-watch--refresh'  外部の git と自動更新     (段階 2)
+  ;;
+  ;; 段階 2 は `my-magit-watch.el' 側から `my:diff-hl-dired-update-repo' を
+  ;; 呼ぶ形。**切り戻せるようにしてある** (`my:magit-watch-update-dired' を
+  ;; nil にすると段階 1 だけに戻る)。
 
   (defun my:diff-hl-dired--under-p (dir root)
     "DIR が ROOT 配下なら非 nil。
@@ -273,21 +297,61 @@
         (string-prefix-p r d))))
 
   (defun my:diff-hl-dired-update-repo (&optional root)
-    "ROOT 配下の**表示中の** dired バッファでマークを取り直す。
+    "ROOT 配下の dired バッファでマークを取り直す。取り直した数を返す。
+
+**実際に走るのは表示中のバッファだけ。** 表示していないものには
+`my:diff-hl-dired--stale' を立て、可視になった時点で
+`my:diff-hl-dired--update-on-display' が拾う。1 バッファあたり 6 プロセス
+0.51 秒かかるので、見ていないバッファのために払うには高い。
 
 ROOT を省略すると `vc-root-dir' で求める (`vc-checkin-hook' 用)。
 求まらなければ何もしない。"
-    (when-let* ((root (or root (ignore-errors (vc-root-dir)))))
-      (dolist (buf (buffer-list))
-        (with-current-buffer buf
-          (when (and (derived-mode-p 'dired-mode)
+    (let ((n 0))
+      (when-let* ((root (or root (ignore-errors (vc-root-dir)))))
+        (dolist (buf (buffer-list))
+          (with-current-buffer buf
+            (when (and (derived-mode-p 'dired-mode)
+                       (bound-and-true-p diff-hl-dired-mode)
+                       ;; wdired 中は触らない。編集中のバッファに overlay を
+                       ;; 張り直すことになる (`my-dired-watch' と同じ判定)
+                       buffer-read-only
+                       (my:diff-hl-dired--under-p default-directory root))
+              (if (get-buffer-window buf t)
+                  (progn (diff-hl-dired-update)
+                         (setq n (1+ n)))
+                (setq my:diff-hl-dired--stale t))))))
+      n))
+
+  (defvar my:diff-hl-dired--display-timer nil
+    "`my:diff-hl-dired--update-stale' を呼ぶアイドルタイマー。")
+
+  (defun my:diff-hl-dired--update-stale ()
+    "表示中の dired のうち、印が立っているものを取り直す。"
+    (setq my:diff-hl-dired--display-timer nil)
+    (dolist (frame (frame-list))
+      (dolist (win (window-list frame 'no-minibuf))
+        (with-current-buffer (window-buffer win)
+          (when (and my:diff-hl-dired--stale
+                     (derived-mode-p 'dired-mode)
                      (bound-and-true-p diff-hl-dired-mode)
-                     ;; wdired 中は触らない。編集中のバッファに overlay を
-                     ;; 張り直すことになる (`my-dired-watch' と同じ判定)
-                     buffer-read-only
-                     (get-buffer-window buf t)
-                     (my:diff-hl-dired--under-p default-directory root))
+                     buffer-read-only)
+            ;; 印は my:diff-hl-dired--start が下ろす (待たされた場合も含めて
+            ;; 実際に走った時点で下りる)
             (diff-hl-dired-update))))))
+
+  (defun my:diff-hl-dired--update-on-display (&optional frame)
+    "`window-buffer-change-functions'。可視になった dired を取り直す。
+
+【重要】**ここで `diff-hl-dired-update' を直接呼ばない。** この種のフックは
+redisplay から走るので、6 プロセスを起こすのはアイドルタイマーへ逃がす。
+表示が落ち着くまで待てば、連続した切り替えが 1 回にまとまる利点もある。"
+    (unless my:diff-hl-dired--display-timer
+      (when (seq-some (lambda (win)
+                        (buffer-local-value 'my:diff-hl-dired--stale
+                                            (window-buffer win)))
+                      (window-list frame 'no-minibuf))
+        (setq my:diff-hl-dired--display-timer
+              (run-with-idle-timer 0.2 nil #'my:diff-hl-dired--update-stale)))))
 
   (defun my:diff-hl-dired-magit-post-refresh ()
     "`magit-post-refresh-hook'。magit の操作後に dired のマークを取り直す。
