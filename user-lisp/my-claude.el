@@ -166,6 +166,16 @@ AskUserQuestion があるとき、`my:claude-auto-approve' が一致するとき
 nil にするとブロックが確定してから一度に出る (段階 3 までの挙動)。"
   :type 'boolean)
 
+(defcustom my:claude-spinner-interval 0.1
+  "ヘッダ行の先頭に出す応答待ちの点を回す間隔 (秒)。nil なら回さない。
+
+タイマーは **claude が動いているセッションがある間だけ** 回る
+ (`my:claude--spinner-refresh')。確認待ちの間は止まる。
+
+1 回のコストはヘッダ行 1 本の再描画だけ (`:eval' の列も `.git/HEAD' の
+stat 0.043 ms で済む) なので、端末の TUI に合わせて速めにしてある。"
+  :type '(choice (const :tag "回さない" nil) number))
+
 (defcustom my:claude-forward-subagent-text t
   "非 nil なら `--forward-subagent-text' を付ける。
 
@@ -472,12 +482,29 @@ Windows の `play-sound-file' は WAV しか鳴らせない。"
 
 (defface my:claude-header-cost-face
   '((t :inherit shadow))
-  "ヘッダ行 7 列目 (セッション累計コストと応答待ちの `...')。
+  "ヘッダ行 7 列目 (セッションの累計コスト)。
 
 ここだけ色名を直接書かず `shadow' を継ぐ。statusline スクリプトが
 コストを C_DIM (ANSI の dim) で出しており、dim に対応する固定の色が
 無いため。`shadow' は前景しか持たないので、背景がテーマのまま残る点は
 他の列と同じ。")
+
+(defface my:claude-header-busy-face
+  '((((background dark))  :foreground "deep sky blue" :weight bold)
+    (((background light)) :foreground "blue" :weight bold))
+  "ヘッダ行の先頭に出す応答待ちの点 (`⠋')。
+
+**暗い背景で `\"blue\"' と書かない。** ANSI の blue (#0000ff) は
+modus-vivendi のような黒い背景では読めない。目に入ることがこの桁の
+役割なので、明るい側に振ってある。")
+
+(defface my:claude-header-asking-face
+  '((((background dark))  :foreground "yellow" :weight bold)
+    (((background light)) :foreground "dark goldenrod" :weight bold))
+  "ヘッダ行の先頭に出す確認待ちの `?'。
+
+**点と色を変えてある。** 止まっていることに加えて色でも分かるように。
+待っているのは claude ではなく自分なので、青のままだと見分けが付かない。")
 
 (defface my:claude-prompt-face
   '((t :background "dark slate blue" :foreground "light steel blue"))
@@ -536,7 +563,7 @@ face をリストにすると先に書いたものが勝つので、色は列ご
   effort           ; effort level (settings.json から求めたもの)
   context-tokens   ; 直近の assistant の message.usage の合計
   context-window   ; result の modelUsage.<model>.contextWindow
-  (busy nil)     ; 応答待ちか
+  (busy nil)     ; 応答待ち。nil / t (claude が動いている) / `asking' (返事待ち)
   (tool-names (make-hash-table :test 'equal)) ; tool_use_id -> ツール名
   (approved nil) ; このセッションで自動許可すると決めたツール名
   last-result)   ; 直近の result イベント (alist)
@@ -589,6 +616,109 @@ read-only なのでそれは起こらない。**区切りを挟むのはこの�
   "SESSION を終了して一覧から外す。"
   (my:claude-quit-session session)
   (my:claude--forget-session session))
+
+;;; --------------------------------------------------
+;;; 応答待ち (busy)
+;;; --------------------------------------------------
+
+;; `busy' は 3 値。**真偽値ではない**ので `eq' で見ること。
+;;
+;;   nil       待っていない
+;;   t         claude が動いている      -> ヘッダ行の先頭の点が回る
+;;   `asking'  ミニバッファで返事待ち   -> 止まった `?' になる
+;;
+;; 分けているのは、この 2 つで**待っている側が逆**だから。点が動いて
+;; いる間は放っておけばよく、止まっているときは自分が答えないと進まない。
+;; 許可プロンプトも AskUserQuestion も `result' が来る前に聞くので、
+;; 区別しないと「考え中」のまま自分の返事を待ち続けることになる。
+
+(defconst my:claude--spinner-frames ["⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏"]
+  "応答待ちの点 (ブレイル)。端末の TUI と同じ回り方。
+
+**HackGen には無い。** 手元では Cascadia Code に落ちて描かれる (実測)。
+`char-width' は 1 だが **実描画は 9 px** で、HackGen の ASCII (8 px) と
+1 px ずれる。10 面とも同じ 9 px なので回っている間は揺れないが、
+`?' や空白と入れ替わるところでは揃わない。後ろを `:align-to' で
+埋めて桁を固定してある (`my:claude--busy-segment')。")
+
+(defconst my:claude--busy-column 2
+  "ヘッダ行の先頭に空ける桁数 (点 1 桁 + 区切りの空白 1 桁)。")
+
+(defvar my:claude--spinner-index 0
+  "いま出している `my:claude--spinner-frames' の添字。")
+
+(defvar my:claude--spinner-timer nil
+  "点を動かすタイマー。動いているセッションが無い間は nil。")
+
+(defun my:claude--spinner-string ()
+  "ヘッダ行に出す点。"
+  (aref my:claude--spinner-frames
+        (mod my:claude--spinner-index (length my:claude--spinner-frames))))
+
+(defun my:claude--spinner-sessions ()
+  "点を動かす必要があるセッション (`busy' が t のもの)。"
+  (seq-filter (lambda (s) (eq (my:claude-session-busy s) t))
+              my:claude--sessions))
+
+(defun my:claude--redraw-header (session)
+  "SESSION の会話バッファのヘッダ行を描き直す。
+
+`force-mode-line-update' に ALL を渡さないのは、動いているバッファだけで
+足りるため。表示されていなければ何も起きない。"
+  (let ((buf (my:claude-session-buffer session)))
+    (when (buffer-live-p buf)
+      (with-current-buffer buf (force-mode-line-update)))))
+
+(defun my:claude--spinner-tick ()
+  "点を 1 つ進めて、待っているバッファだけ描き直す。"
+  (let ((sessions (my:claude--spinner-sessions)))
+    (if (null sessions)
+        ;; 誰も待っていない。取りこぼしたときの保険で、ここでも止める。
+        (my:claude--spinner-refresh)
+      (setq my:claude--spinner-index (1+ my:claude--spinner-index))
+      (mapc #'my:claude--redraw-header sessions))))
+
+(defun my:claude--spinner-refresh ()
+  "待っているセッションの有無に合わせてタイマーを入れ切りする。
+
+**止め忘れると Emacs が永久に 0.1 秒ごとに起きる**ので、`busy' を
+下ろす経路は必ず `my:claude--set-busy' を通すこと。"
+  (let ((want (and my:claude-spinner-interval
+                   (my:claude--spinner-sessions))))
+    (cond ((and want (not my:claude--spinner-timer))
+           (setq my:claude--spinner-index 0
+                 my:claude--spinner-timer
+                 (run-at-time my:claude-spinner-interval
+                              my:claude-spinner-interval
+                              #'my:claude--spinner-tick)))
+          ((and (not want) my:claude--spinner-timer)
+           (cancel-timer my:claude--spinner-timer)
+           (setq my:claude--spinner-timer nil)))))
+
+(defun my:claude--set-busy (session state)
+  "SESSION の応答待ちを STATE (nil / t / `asking') にする。
+
+**`busy' を直に `setf' しない。** タイマーの入り切りと再描画を
+ここでまとめて引き受けている。"
+  (setf (my:claude-session-busy session) state)
+  (my:claude--spinner-refresh)
+  (my:claude--redraw-header session))
+
+(defmacro my:claude--with-asking (session &rest body)
+  "BODY を実行する間、SESSION を確認待ちにする。
+
+ミニバッファで返事を待つ間だけ点を止める。**戻すのは `unwind-protect'
+で。** `C-g' で抜けたときに `asking' のまま残ると、そのセッションは
+以後ずっと点が止まったままになる。
+
+答えたあとは claude が続きを動かすので t に戻す。もともと待って
+いなかった (nil の) ときだけ nil のままにする。"
+  (declare (indent 1) (debug (form body)))
+  (let ((s (make-symbol "session")))
+    `(let ((,s ,session))
+       (unwind-protect
+           (progn (my:claude--set-busy ,s 'asking) ,@body)
+         (my:claude--set-busy ,s (and (my:claude-session-busy ,s) t))))))
 
 (defun my:claude--guess-directory ()
   "claude を動かすディレクトリを自動で決める。決められなければ nil。
@@ -1040,7 +1170,7 @@ RESUME は `my:claude--command' に渡す (t で --continue、文字列で --res
     (my:claude--insert session
                        (format "\n[プロセス %s]\n" e)
                        'my:claude-meta-face)
-    (setf (my:claude-session-busy session) nil)
+    (my:claude--set-busy session nil)
     (my:claude--forget-session session)))
 
 ;;; --------------------------------------------------
@@ -1646,51 +1776,78 @@ size face から来る。大きさを 1 か所で決めるためにこうして�
   (apply #'propertize (replace-regexp-in-string "%" "%%" text)
          'face (list face 'my:claude-header-size-face) props))
 
+(defun my:claude--busy-segment ()
+  "ヘッダ行の先頭に出す応答待ち。`header-line-format\' の `:eval\' から呼ぶ。
+
+**末尾ではなく先頭に置く。** 末尾はブランチ名やディレクトリ名が伸びると
+ウィンドウの右で切れて見えなくなるうえ、いちばん見ない場所でもある。
+
+**待っていないときも桁を空ける。** 出したり消したりすると、その左右に
+ある列が 1 桁ずつ動いてしまう。後ろの空白を `:align-to\' で
+`my:claude--busy-column\' 桁目まで伸ばすので、中身が点 (9 px) でも
+`?\' (8 px) でも空白 (8 px) でも、2 列目以降の位置は変わらない。
+
+face は 3 通り。**色だけでなく動きでも分かるようにしてある。**
+
+  claude が動いている  回る点     青
+  確認待ち             止まる `?\' イエロー
+  待っていない         空白"
+  (concat
+   (pcase (and my:claude--session (my:claude-session-busy my:claude--session))
+     ('nil (my:claude--header-segment " " 'default))
+     ('asking (my:claude--header-segment "?" 'my:claude-header-asking-face))
+     (_ (my:claude--header-segment (my:claude--spinner-string)
+                                   'my:claude-header-busy-face)))
+   ;; 【重要】埋める空白にも face を載せる (`my:claude--header-segment' が
+   ;; 大きさの face を足す)。行の高さは行内でいちばん高いグリフで決まるので、
+   ;; 1 か所でも素のままだとヘッダ行が縮まない。
+   (my:claude--header-segment " " 'default
+                              'display `(space :align-to ,my:claude--busy-column))))
+
 (defun my:claude--cost-segment ()
-  "ヘッダ行の最後の列。セッション累計コストと、応答待ちの `...'。
+  "ヘッダ行の最後の列。セッションの累計コスト。
 
 `header-line-format\' の `:eval\' から呼ぶ。**モードラインではなく
 ここに出す。** かつては `mode-line-process\' に
 `[プロジェクト名 ... $0.12]\' を出していたが、ヘッダ行と重複していた。
 
-`:eval\' にするのは応答待ちの表示のため。`busy\' は送信した時点で立ち、
-`result\' で降りる。ターンごとの `my:claude--update-header\' では
-立ち上がりに間に合わない。
-
 コストは直近の `result\' の `total_cost_usd\'。**1 往復ぶんではなく
 セッション開始からの累計**が来る (`--resume\' で継いだ会話ぶんを含む)。
 
-**区切りも自分で出す。** 起動直後は `result\' がまだ来ておらず応答待ちでも
-ないので何も出さないが、そのとき区切りだけが末尾に残らないようにするため。"
+`:eval\' にしてあるのは、`result\' が来たその場で更新するため。
+
+**区切りも自分で出す。** 起動直後は `result\' がまだ来ておらず何も
+出さないので、そのとき区切りだけが末尾に残らないようにするため。"
   (and-let* ((session my:claude--session)
-             (parts (delq nil
-                          (list (and-let* ((r (my:claude-session-last-result session))
-                                           (c (alist-get 'total_cost_usd r)))
-                                  (format "$%.2f" c))
-                                (and (my:claude-session-busy session) "...")))))
+             (r (my:claude-session-last-result session))
+             (c (alist-get 'total_cost_usd r)))
     (concat my:claude--header-separator
-            (my:claude--header-segment (string-join parts " ")
+            (my:claude--header-segment (format "$%.2f" c)
                                        'my:claude-header-cost-face))))
 
 (defun my:claude--header (session)
   "会話バッファのヘッダ行。
 
-**表示はここに集約する。** 7 列に分けて色を付けてある
- (`~/.claude/statusline-command.sh\' が端末の TUI で使っている ANSI 色に
-合わせた)。モードラインには何も出さない。
+**表示はここに集約する。** 先頭に応答待ちの 1 桁を置き、その後ろを
+7 列に分けて色を付けてある (`~/.claude/statusline-command.sh\' が端末の
+TUI で使っている ANSI 色に合わせた)。モードラインには何も出さない。
 
+  0 応答待ち (回る点 / 確認待ちは `?\')          青 / イエロー
   1 アカウント (プラン) と claude のバージョン   マゼンタ
   2 プロジェクト名 (フルパスは help-echo)        シアン
   3 git ブランチ                                 グリーン
   4 モデルと effort                              イエロー
   5 コンテキスト使用量                           グリーン
   6 レート上限とリセット時刻                     シアン
-  7 累計コストと応答待ちの `...\'                 dim
+  7 累計コスト                                   dim
 
-**戻り値は文字列ではなくリスト** (mode-line 構文)。3 列目と 7 列目は
+**戻り値は文字列ではなくリスト** (mode-line 構文)。0 / 3 / 7 列目は
 `:eval\' で、再描画のたびに評価される。ブランチの切り替えは Emacs の
 外でも起き、応答待ちは送信した時点で立つので、どちらもターンごとの
 更新 (`my:claude--update-header\') では追随できないため。
+
+**0 列目は区切りを出さず、待っていなくても桁を空ける**
+ (`my:claude--busy-segment\')。消すと後ろの列がまるごと 1 桁動く。
 
 **7 列目は区切りも自分で出す** (`my:claude--cost-segment\')。末尾なので、
 出すものが無いときに区切りだけが残らないようにする必要がある。
@@ -1771,8 +1928,9 @@ settings.json から求める (`my:claude--effort')。"
     ;; **`mapconcat' で 1 つの文字列にはしない。** `(:eval ...)' の列を
     ;; 活かすため、mode-line 構文のリストのまま返す。
     ;;
-    ;; [7] は区切り込みで自分を出すので、ここで挟む対象には入れない。
-    (append (cdr (mapcan (lambda (seg) (list my:claude--header-separator seg))
+    ;; [0] と [7] は区切り込みで自分を出すので、ここで挟む対象には入れない。
+    (append (list '(:eval (my:claude--busy-segment)))
+            (cdr (mapcan (lambda (seg) (list my:claude--header-separator seg))
                          (nreverse segs)))
             (list '(:eval (my:claude--cost-segment))))))
 
@@ -2374,8 +2532,8 @@ point が末尾から外れて自動スクロールが止まっていた**。"
 (defun my:claude--handle-result (obj session)
   ;; 中断されると content_block_stop が来ないことがある。
   (my:claude--close-stream-block session)
-  (setf (my:claude-session-last-result session) obj
-        (my:claude-session-busy session) nil)
+  (setf (my:claude-session-last-result session) obj)
+  (my:claude--set-busy session nil)
   ;; コンテキストの上限。モデルごとに入っている (1M 版なら 1000000)。
   ;; ここでしか来ないので、来たときに覚えておく。
   (dolist (e (alist-get 'modelUsage obj))
@@ -2637,11 +2795,13 @@ nil のときや `can_use_tool\' が飛んで来ないときは `?\' 行が出�
  (`my:claude-answer-questions' を参照)。"
   (condition-case err
       (let ((answers nil))
-        (dolist (q (append (alist-get 'questions input) nil))
-          (my:claude--show-question session q)
-          (let ((a (my:claude--read-answer q)))
-            (push (cons (or (alist-get 'question q) "") a) answers)
-            (my:claude--insert session (format "  → %s\n" a) 'my:claude-answer-face)))
+        (my:claude--with-asking session
+          (dolist (q (append (alist-get 'questions input) nil))
+            (my:claude--show-question session q)
+            (let ((a (my:claude--read-answer q)))
+              (push (cons (or (alist-get 'question q) "") a) answers)
+              (my:claude--insert session (format "  → %s\n" a)
+                                 'my:claude-answer-face))))
         (my:claude--respond-deny
          session rid
          (concat "Your questions have been answered: "
@@ -2688,53 +2848,57 @@ nil のときや `can_use_tool\' が飛んで来ないときは `?\' 行が出�
       ;; 鳴らすのはループの外で 1 回。`v' (入力を全部見る) で聞き直す
       ;; ときは既にこちらを見ているので、鳴らす意味が無い。
       (my:claude--notify-input-wait)
-      (let (done)
-        (while (not done)
-          (pcase (car (read-multiple-choice
-                       (format "%s %s を許可する?"
-                               name (truncate-string-to-width desc 60 nil nil "…"))
-                       `((?y "今回だけ許可")
-                         (?n "拒否")
-                         (?r "理由を書いて拒否")
-                         (?a ,(if (and sugg (> (length sugg) 0))
-                                  (format "以後聞かない (%s)"
-                                          (my:claude--suggestion-label sugg))
-                                "以後このツールは聞かない"))
-                         (?v "入力を全部見る"))))
-            (?y (my:claude--respond-allow session rid input)
-                (setq done t))
-            (?n (my:claude--insert session (format "  (拒否: %s)\n" name)
-                                   'my:claude-error-face)
-                (my:claude--respond-deny session rid "Denied by the user in Emacs.")
-                (setq done t))
-            ;; 理由を渡せると claude が別の手を考えられる。
-            ;; 「そのファイルは触らないで、代わりに…」が効く。
-            (?r (let ((why (read-string "拒否する理由: ")))
-                  (my:claude--insert session (format "  (拒否: %s — %s)\n" name why)
+      ;; 聞いている間は「確認待ち」。**`?v' で聞き直す分も含めて**
+      ;; ループごと包む。ミニバッファに戻るたびに点が動き出しては
+      ;; 意味が無い。
+      (my:claude--with-asking session
+        (let (done)
+          (while (not done)
+            (pcase (car (read-multiple-choice
+                         (format "%s %s を許可する?"
+                                 name (truncate-string-to-width desc 60 nil nil "…"))
+                         `((?y "今回だけ許可")
+                           (?n "拒否")
+                           (?r "理由を書いて拒否")
+                           (?a ,(if (and sugg (> (length sugg) 0))
+                                    (format "以後聞かない (%s)"
+                                            (my:claude--suggestion-label sugg))
+                                  "以後このツールは聞かない"))
+                           (?v "入力を全部見る"))))
+              (?y (my:claude--respond-allow session rid input)
+                  (setq done t))
+              (?n (my:claude--insert session (format "  (拒否: %s)\n" name)
                                      'my:claude-error-face)
-                  (my:claude--respond-deny session rid why))
-                (setq done t))
-            ;; 要求には permission_suggestions が付いてくる (例: acceptEdits に
-            ;; 切り替える)。これを updatedPermissions に載せて返すと
-            ;; **claude 側が以後聞いてこなくなる** (実測で 2 回目の Write が
-            ;; 聞かれなくなった)。付いていないときは Emacs 側で覚えるだけの
-            ;; 従来動作に落とす。
-            (?a (if (and sugg (> (length sugg) 0))
-                    (progn
-                      (my:claude--insert
-                       session
-                       (format "  (以後許可: %s — %s)\n"
-                               name (my:claude--suggestion-label sugg))
-                       'my:claude-meta-face)
-                      (my:claude--respond-permission
-                       session rid
-                       `((behavior . "allow")
-                         (updatedInput . ,input)
-                         (updatedPermissions . ,sugg))))
-                  (push name (my:claude-session-approved session))
-                  (my:claude--respond-allow session rid input))
-                (setq done t))
-            (?v (my:claude--show-input name input)))))))))
+                  (my:claude--respond-deny session rid "Denied by the user in Emacs.")
+                  (setq done t))
+              ;; 理由を渡せると claude が別の手を考えられる。
+              ;; 「そのファイルは触らないで、代わりに…」が効く。
+              (?r (let ((why (read-string "拒否する理由: ")))
+                    (my:claude--insert session (format "  (拒否: %s — %s)\n" name why)
+                                       'my:claude-error-face)
+                    (my:claude--respond-deny session rid why))
+                  (setq done t))
+              ;; 要求には permission_suggestions が付いてくる (例: acceptEdits に
+              ;; 切り替える)。これを updatedPermissions に載せて返すと
+              ;; **claude 側が以後聞いてこなくなる** (実測で 2 回目の Write が
+              ;; 聞かれなくなった)。付いていないときは Emacs 側で覚えるだけの
+              ;; 従来動作に落とす。
+              (?a (if (and sugg (> (length sugg) 0))
+                      (progn
+                        (my:claude--insert
+                         session
+                         (format "  (以後許可: %s — %s)\n"
+                                 name (my:claude--suggestion-label sugg))
+                         'my:claude-meta-face)
+                        (my:claude--respond-permission
+                         session rid
+                         `((behavior . "allow")
+                           (updatedInput . ,input)
+                           (updatedPermissions . ,sugg))))
+                    (push name (my:claude-session-approved session))
+                    (my:claude--respond-allow session rid input))
+                  (setq done t))
+              (?v (my:claude--show-input name input))))))))))
 
 (defun my:claude--show-input (name input)
   "ツールの入力を別バッファに出す。"
@@ -3354,7 +3518,7 @@ API が弾く。"
       (dolist (image images)
         (my:claude--insert-image session image))
       (my:claude--insert session "\n")
-      (setf (my:claude-session-busy session) t)
+      (my:claude--set-busy session t)
       (my:claude--send-json
        session
        `((type . "user")
