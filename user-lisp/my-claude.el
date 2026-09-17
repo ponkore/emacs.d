@@ -231,6 +231,31 @@ stat 0.043 ms で済む) なので、端末の TUI に合わせて速めにし�
 こちらは Emacs 自身が数えるので合わせる必要が無い。"
   :type 'boolean)
 
+(defcustom my:claude-render-emphasis t
+  "非 nil なら markdown の `**強調**' の `**' を落として太字にする。
+
+`**' を残したまま太字にすると、記号のぶんだけ桁がずれる。表のセルの
+中では実害が出る (`string-width' で桁を数えるので、見えている記号 4 桁が
+そのまま列幅に乗る) ため、**記号ごと消して face だけを残す**。
+
+コードブロックと行中のコードの中は触らない
+ (`my:claude--render-emphasis')。"
+  :type 'boolean)
+
+(defcustom my:claude-table-max-width nil
+  "罫線の表に使う桁数の上限。nil なら会話バッファのウィンドウ幅に合わせる。
+
+これを超える表は、広い列から順に詰めてセルの中で折り返す
+ (`my:claude--wrap-cell')。
+
+【重要】**幅は組んだ時点のもので固定される。** 罫線に組み直した時点で
+元のパイプ表は捨てているので、あとからウィンドウを広げても
+ (`my:claude-toggle-maximize'、左右分割) 組み直しはしない。追従させるには
+原文をテキストプロパティに退避して `window-size-change-functions' から
+組み直すことになるが、確定領域を書き換えるたびに `my:claude--protect' を
+張り直す必要があり、割に合わない。"
+  :type '(choice (const :tag "ウィンドウ幅" nil) integer))
+
 (defcustom my:claude-window-height-ratio 0.5
   "`my:claude-layout' で会話バッファに使うフレーム高さの割合。"
   :type 'number)
@@ -421,6 +446,13 @@ Windows の `play-sound-file' は WAV しか鳴らせない。"
 (defface my:claude-inline-code-face
   '((t :inherit font-lock-constant-face))
   "行中の `コード`。")
+
+(defface my:claude-bold-face
+  '((t :weight bold))
+  "markdown の **強調**。
+
+**色を持たせない。** 地の face (`my:claude-assistant-face' など) に
+重ねて載せる (`my:claude--add-face') ので、色を書くと下の色を潰す。")
 
 (defface my:claude-subagent-face
   '((t :inherit font-lock-doc-face))
@@ -2091,6 +2123,22 @@ markdown-mode は autoload 済みなので、必要になった時点で読み�
         ((consp f) (copy-sequence f))
         (t (list f))))
 
+(defun my:claude--add-face (beg end face)
+  "BEG..END の `font-lock-face' に FACE を **重ねて** 載せる。
+
+**上書きしてはいけない。** 確定した会話には挿入時に
+`my:claude-assistant-face' などが載っており、`put-text-property' で
+単に差し替えると発言の色が落ちる。既にある値を `my:claude--face-list'
+でリストにして先頭に積む (先に書いた属性が勝つ)。"
+  (let ((pos beg))
+    (while (< pos end)
+      (let ((next (or (next-single-property-change pos 'font-lock-face nil end)
+                      end))
+            (cur (get-text-property pos 'font-lock-face)))
+        (put-text-property pos next 'font-lock-face
+                           (cons face (my:claude--face-list cur)))
+        (setq pos next)))))
+
 (defun my:claude--code-face-p (pos)
   "POS がコードブロック (フェンス行を含む) の中か。
 
@@ -2141,7 +2189,73 @@ font-lock を有効にできない (`my:claude--fontify-markdown' 参照) ため
                            (append (my:claude--face-list (nth 2 sp))
                                    (list 'my:claude-code-face)))))))
 
+;;; markdown の **強調**
+
+(defconst my:claude--emphasis-regexp
+  "\\*\\*\\([^ \t\n*]\\|[^ \t\n*][^*\n]*[^ \t\n*]\\)\\*\\*"
+  "markdown の `**強調**'。1 番目の部分式が中身。
+
+`**' の内側は空にできず、両端に空白を置けない (markdown の規則)。
+中身に `*' を含めないので `**a** と **b**' は 2 つに分かれる。
+`*' 1 つの強調は拾わない。**掛け算やグロブに当たる**うえ、claude の
+出力では強調に使われないため。")
+
+(defun my:claude--render-emphasis (beg end)
+  "BEG..END の `**…**' から `**' を落とし、その範囲を太字にする。
+
+コードブロックと行中のコードの中は触らない。`` `**a**` `` のように
+コードとして書かれた `**' を消してしまうと、原文が復元できなくなる。
+
+**表より前に呼ぶ。** パイプ表のままなら 1 セルが必ず 1 行に収まって
+いるので、ここで落とした `**' と載せた face を、表を組むときに
+そのまま持ち越せる (`my:claude--line-face-string')。"
+  (when my:claude-render-emphasis
+    (goto-char beg)
+    (while (re-search-forward my:claude--emphasis-regexp end t)
+      (let* ((mbeg (match-beginning 0))
+             (cbeg (match-beginning 1))
+             (cend (match-end 1))
+             (mend (match-end 0))
+             (len (- cend cbeg)))
+        (if (or (my:claude--code-face-p mbeg)
+                (memq 'my:claude-inline-code-face
+                      (my:claude--face-list
+                       (get-text-property mbeg 'font-lock-face))))
+            (goto-char mend)
+          ;; 後ろから消す (先に消すと前の位置がずれる)。
+          (delete-region cend mend)
+          (delete-region mbeg cbeg)
+          (my:claude--add-face mbeg (+ mbeg len) 'my:claude-bold-face)
+          (goto-char (+ mbeg len)))))))
+
 ;;; markdown の表を罫線に組み直す
+
+(defun my:claude--line-face-string ()
+  "いまの行を、`font-lock-face' **だけ**を持つ文字列にして返す。
+
+表のセルは装飾が済んだあとのバッファから取り出す。どちらの極端も
+まずい。
+
+  `buffer-substring-no-properties'  見出し・行中のコード・強調の face が
+                                    落ちる。**折り返した先の色が消える**
+  `buffer-substring'                `read-only' / `keymap' /
+                                    `front-sticky' まで連れてくる。
+                                    `insert' した先で保護が二重になり、
+                                    `my:claude--protect' の張り直しと
+                                    噛み合わない
+
+そこで `font-lock-face' だけを写す。"
+  (let* ((beg (line-beginning-position))
+         (end (line-end-position))
+         (s (buffer-substring-no-properties beg end))
+         (pos beg))
+    (while (< pos end)
+      (let ((next (next-single-property-change pos 'font-lock-face nil end))
+            (f (get-text-property pos 'font-lock-face)))
+        (when f
+          (put-text-property (- pos beg) (- next beg) 'font-lock-face f s))
+        (setq pos next)))
+    s))
 
 (defun my:claude--table-row-p ()
   "いまの行が `| a | b |' の形なら非 nil。"
@@ -2155,19 +2269,32 @@ font-lock を有効にできない (`my:claude--fontify-markdown' 参照) ため
 
 (defun my:claude--split-row (line)
   "`| a | b |' の LINE をセルのリストにする。
-`\\|' でエスケープされた `|' はセルの区切りにしない。"
+`\\|' でエスケープされた `|' はセルの区切りにしない。
+
+【重要】**セルは `substring' で切り出す。** 1 文字ずつ `aref' して
+`(apply #\\='string …)' で組み直すと**テキストプロパティが落ちる**ので、
+装飾済みの face (見出し・行中のコード・強調) がここで全部消える。
+区切りを探すだけを文字のループで行い、切り出しは範囲で行う。"
   (let* ((body (string-remove-suffix
                 "|" (string-remove-prefix "|" (string-trim line))))
          (n (length body))
-         (cells nil) (cur nil) (i 0))
+         (cells nil) (start 0) (i 0))
     (while (< i n)
       (let ((c (aref body i)))
         (cond ((and (eq c ?\\) (< (1+ i) n) (eq (aref body (1+ i)) ?|))
-               (push ?| cur) (setq i (+ i 2)))
-              ((eq c ?|) (push (nreverse cur) cells) (setq cur nil) (setq i (1+ i)))
-              (t (push c cur) (setq i (1+ i))))))
-    (push (nreverse cur) cells)
-    (mapcar (lambda (cs) (string-trim (apply #'string cs))) (nreverse cells))))
+               (setq i (+ i 2)))
+              ((eq c ?|)
+               (push (substring body start i) cells)
+               (setq i (1+ i))
+               (setq start i))
+              (t (setq i (1+ i))))))
+    (push (substring body start n) cells)
+    (mapcar (lambda (s)
+              ;; `\|' を `|' に戻す。置換したその 1 文字だけ face が
+              ;; 落ちるが、セルの中の `|' は罫線と紛れるので元から
+              ;; 装飾の対象にならない。
+              (string-trim (replace-regexp-in-string "\\\\|" "|" s t t)))
+            (nreverse cells))))
 
 (defun my:claude--table-align (cells)
   "区切り行のセル CELLS から、列ごとの寄せ方 (left/right/center) を返す。"
@@ -2186,13 +2313,125 @@ font-lock を有効にできない (`my:claude--fontify-markdown' 参照) ため
                  (concat (make-string l ?\s) s (make-string (- d l) ?\s))))
       (_       (concat s (make-string d ?\s))))))
 
+(defconst my:claude--table-fallback-width 100
+  "会話バッファがウィンドウに出ていないときに使う表の桁数。")
+
+(defun my:claude--table-width ()
+  "罫線の表に使える桁数を返す。
+
+`window-max-chars-per-line' で測る。**`window-body-width' では足りない**
+ (CLAUDE.md「桁は自分で数えないこと」)。行番号の欄や継続記号のぶんを
+引いてくれるのはこちらだけで、`display-line-numbers-mode' が有効な
+バッファでは実際に使える幅が数桁狭い。
+
+ウィンドウに出ていなければ `my:claude--table-fallback-width'。
+表を組むのは応答が確定した時点なので普通は出ているが、別のフレームに
+送ったあとなどは見つからないことがある。"
+  (or my:claude-table-max-width
+      (let ((win (get-buffer-window (current-buffer) t)))
+        (and win (max 20 (1- (window-max-chars-per-line win)))))
+      my:claude--table-fallback-width))
+
+(defun my:claude--cap-widths (widths budget floor)
+  "列幅 WIDTHS の合計が BUDGET に収まるよう、広い列から順に詰めて返す。
+
+全列に共通の上限 L を置き、`Σ min(w, L)' が BUDGET に収まる最大の L を
+二分探索する (水位法)。**狭い列は削らない。** 広い列だけが切られるので、
+短い見出しの列はそのままの幅で残る。
+
+FLOOR はどの列にも残す最低の桁数。BUDGET がそれすら賄えないときは
+はみ出させる (潰すと文字が 1 つも入らない)。"
+  (if (<= (apply #'+ widths) budget)
+      widths
+    (let ((lo floor) (hi (apply #'max widths)))
+      (while (< lo hi)
+        (let* ((mid (/ (+ lo hi 1) 2))
+               (sum (apply #'+ (mapcar (lambda (w) (min w mid)) widths))))
+          (if (<= sum budget) (setq lo mid) (setq hi (1- mid)))))
+      (mapcar (lambda (w) (min w lo)) widths))))
+
+(defconst my:claude--kinsoku-bol
+  "。、，．・：；？！ヽヾゝゞ々ー」』）］｝〉》〕〙〗’”ぁぃぅぇぉっゃゅょゎァィゥェォッャュョヮヵヶ"
+  "行頭に置かない文字 (禁則処理)。")
+
+(defconst my:claude--kinsoku-eol
+  "「『（［｛〈《〔〘〖‘“"
+  "行末に置かない文字 (禁則処理)。")
+
+(defun my:claude--kinsoku-point (s from i)
+  "S を I で切ると禁則に反するとき、追い出した位置を返す。FROM は行頭。
+
+**追い出しは 2 文字まで。** 禁則文字が続くとき (`……」。' など) に
+際限なく戻すと、その行がほとんど空になる。
+
+`kinsoku.el' は使わない。あれは `fill' の経路から呼ばれる前提で
+バッファの point を動かす作りなので、文字列を切る用途には合わない。"
+  (let ((n (length s)) (limit 2))
+    (while (and (> i (1+ from)) (> limit 0)
+                (or (and (< i n)
+                         (seq-contains-p my:claude--kinsoku-bol (aref s i) #'eq))
+                    (seq-contains-p my:claude--kinsoku-eol (aref s (1- i)) #'eq)))
+      (setq i (1- i))
+      (setq limit (1- limit)))
+    i))
+
+(defun my:claude--word-char-p (c)
+  "C が ASCII の語を構成する文字か。
+
+空白以外の ASCII をすべて語とみなす。`foo/bar.el' や `\\=`code\\=`' を
+途中で切りたくないので、記号も含めて 1 つの塊として扱う。"
+  (and (< c 128) (not (memq c '(?\s ?\t)))))
+
+(defun my:claude--word-break-point (s from i)
+  "S を I で切ると ASCII の語の途中になるとき、語の手前まで戻した位置を返す。
+
+**行の後半まで戻せるときだけ戻す。** 長い URL のように語そのものが
+1 行より長い場合、行頭まで戻ると何も載らないまま無限に折り返す。"
+  (let ((n (length s)))
+    (if (and (< i n)
+             (my:claude--word-char-p (aref s i))
+             (my:claude--word-char-p (aref s (1- i))))
+        (let ((j i))
+          (while (and (> j from) (my:claude--word-char-p (aref s (1- j))))
+            (setq j (1- j)))
+          (if (> j (+ from (/ (- i from) 2))) j i))
+      i)))
+
+(defun my:claude--wrap-point (s from width)
+  "S の FROM から WIDTH 桁に収まる切れ目を返す (その位置は含まない)。"
+  (let ((i from) (w 0) (n (length s)))
+    (while (and (< i n) (<= (+ w (char-width (aref s i))) width))
+      (setq w (+ w (char-width (aref s i))))
+      (setq i (1+ i)))
+    ;; WIDTH より広い 1 文字はそのまま出す (さもないと進まない)。
+    (when (= i from) (setq i (1+ from)))
+    (my:claude--word-break-point s from (my:claude--kinsoku-point s from i))))
+
+(defun my:claude--wrap-cell (s width)
+  "S を WIDTH 桁で折り返し、行のリストにして返す。
+
+**テキストプロパティは `substring' が持ち越す**ので、`**強調**' や
+行中のコードの face は折り返した先にも残る。"
+  (if (<= (string-width s) width)
+      (list s)
+    (let ((lines nil) (i 0) (n (length s)))
+      (while (< i n)
+        (let ((end (my:claude--wrap-point s i width)))
+          (push (substring s i end) lines)
+          (setq i end)))
+      (nreverse lines))))
+
 (defun my:claude--table-string (rows aligns header indent)
   "ROWS を罫線の表にした文字列を返す。
 
 ALIGNS は列ごとの寄せ方、HEADER は見出し行の数、INDENT は行頭に付ける空白。
 桁は `string-width' で数えるので、East Asian Ambiguous は
 `site-lisp/eaw.el' が与える幅 2 になる。**元の桁は使わない**
- (claude は幅 1 で組んでいることがある)。"
+ (claude は幅 1 で組んでいることがある)。
+
+幅が `my:claude--table-width' に収まらないときは、広い列から詰めて
+ (`my:claude--cap-widths') セルの中で折り返す (`my:claude--wrap-cell')。
+**収まるうちは何もしない**ので、短い表の見た目は変わらない。"
   (let* ((ncol (apply #'max 1 (mapcar #'length rows)))
          (rows (mapcar (lambda (r)
                          (append r (make-list (- ncol (length r)) "")))
@@ -2214,32 +2453,66 @@ ALIGNS は列ごとの寄せ方、HEADER は見出し行の数、INDENT は行�
          ;; eaw を外した Emacs では `─' が幅 1 になるので、その場合は
          ;; 何も広げない (`rw' を実測しているのはそのため)。
          (rw (max 1 (char-width ?─)))
-         (widths (mapcar (lambda (i)
-                           (let ((w (apply #'max 1
-                                           (mapcar (lambda (r)
-                                                     (string-width (nth i r)))
-                                                   rows))))
-                             (+ w (mod (- rw (mod (+ w 2) rw)) rw))))
-                         (number-sequence 0 (1- ncol))))
+         ;; 自然幅 = そのセルをすべて 1 行で出すのに要る桁。
+         (natural (mapcar (lambda (i)
+                            (apply #'max 1
+                                   (mapcar (lambda (r) (string-width (nth i r)))
+                                           rows)))
+                          (number-sequence 0 (1- ncol))))
+         ;; セルに使える桁の合計。1 行の全長は
+         ;;   indent + (ncol+1) 本の `│' + 各列 (詰め物 2 + 幅)
+         ;;
+         ;; 【重要】**縦罫 `│' も 1 文字 rw 桁ある。** `─' だけを勘定して
+         ;; `│' を 1 桁と数えると、ncol+1 本ぶん (2 列なら 3 桁) 足りず、
+         ;; 組み上がった表が毎回ウィンドウ幅を超える。GUI 実測で
+         ;; 上限 40 に対し 42 桁になっていた (batch は rw=1 なので
+         ;; たまたま合ってしまい、気づけない)。
+         ;;
+         ;; あわせて**刻みの調整で列ごとに最大 rw-1 桁広がるぶんも
+         ;; 引いておく** (先に引かないと、調整した結果がはみ出す)。
+         (budget (- (my:claude--table-width) (string-width indent)
+                    (* (1+ ncol) rw) (* 2 ncol) (* ncol (1- rw))))
+         (capped (my:claude--cap-widths natural budget rw))
+         (widths (mapcar (lambda (w) (+ w (mod (- rw (mod (+ w 2) rw)) rw)))
+                         capped))
+         ;; 各セルを列幅で折り返す。行は「セルごとの行のリスト」になる。
+         (rows (mapcar (lambda (r)
+                         (mapcar (lambda (i)
+                                   (my:claude--wrap-cell (nth i r) (nth i widths)))
+                                 (number-sequence 0 (1- ncol))))
+                       rows))
          (rule (lambda (l m r)
                  (concat indent l
                          (mapconcat (lambda (w) (make-string (/ (+ w 2) rw) ?─))
                                     widths m)
                          r "\n")))
+         ;; 1 行の高さは、そのセルのうちいちばん行数の多いものに合わせる。
+         ;; 足りないセルは空文字で埋める (`my:claude--pad' が詰める)。
          (row (lambda (r)
-                (concat indent "│"
-                        (mapconcat
-                         (lambda (i)
-                           (concat " " (my:claude--pad (nth i r) (nth i widths)
-                                                       (nth i aligns))
-                                   " "))
-                         (number-sequence 0 (1- ncol)) "│")
-                        "│\n"))))
-    (concat (funcall rule "┌" "┬" "┐")
-            (mapconcat row (seq-take rows header) "")
-            (if (> header 0) (funcall rule "├" "┼" "┤") "")
-            (mapconcat row (seq-drop rows header) "")
-            (funcall rule "└" "┴" "┘"))))
+                (let ((h (apply #'max 1 (mapcar #'length r))))
+                  (mapconcat
+                   (lambda (k)
+                     (concat indent "│"
+                             (mapconcat
+                              (lambda (i)
+                                (concat " " (my:claude--pad
+                                             (or (nth k (nth i r)) "")
+                                             (nth i widths) (nth i aligns))
+                                        " "))
+                              (number-sequence 0 (1- ncol)) "│")
+                             "│\n"))
+                   (number-sequence 0 (1- h)) "")))))
+    ;; 行と行の間にも罫線を引く (`├┼┤')。セルが 2 行以上に
+    ;; 折り返されたときに、どこまでが 1 行なのか目で追えなくなるため。
+    ;; 見出しと本体の境目も同じ罫線なので、そこだけ特別扱いはしない。
+    (let ((sep (funcall rule "├" "┼" "┤"))
+          (head (seq-take rows header))
+          (body (seq-drop rows header)))
+      (concat (funcall rule "┌" "┬" "┐")
+              (mapconcat row head sep)
+              (if (and head body) sep "")
+              (mapconcat row body sep)
+              (funcall rule "└" "┴" "┘")))))
 
 (defun my:claude--render-table-at-point (end)
   "point の行から続くパイプ表を罫線の表に置き換える。END を越えない。
@@ -2255,9 +2528,7 @@ ALIGNS は列ごとの寄せ方、HEADER は見出し行の数、INDENT は行�
          (indent (progn (goto-char start) (looking-at "[ \t]*") (match-string 0)))
          (lines nil))
     (while (and (< (point) end) (my:claude--table-row-p))
-      (push (buffer-substring-no-properties
-             (line-beginning-position) (line-end-position))
-            lines)
+      (push (my:claude--line-face-string) lines)
       (forward-line 1))
     (setq lines (nreverse lines))
     (let* ((sep (seq-position lines nil
@@ -2309,11 +2580,19 @@ ALIGNS は列ごとの寄せ方、HEADER は見出し行の数、INDENT は行�
  (`my:claude--fontify-region' が font-lock を入力エリアだけに限っているのは
 このため)。ブロックが確定した時点で一度だけ塗る。
 
-やることは 3 つ。**この順でなければならない。**
+やることは 4 つ。**この順でなければならない。**
 
   1. ``` のブロックを塗る (言語指定があればその言語として着色する)
-  2. `|' の表を罫線に組み直す。1 の結果を見てコードブロックの中を避ける
-  3. 見出しと行中のコード
+  2. 見出しと行中のコード。1 の結果を見てコードブロックの中を避ける
+  3. `**強調**' の `**' を落として太字にする。2 の結果を見て
+     行中のコードの中を避ける
+  4. `|' の表を罫線に組み直す。1〜3 が載せた face ごと組み直す
+
+【重要】**表は最後。** 2 と 3 は `` `…` `` や `**…**' を
+**行の中で**探すので、先に表を組んでセルが折り返されると、開きと
+閉じが別の行に分かれて対にならない。隣の記号と誤って組になり、
+色が半端な位置から始まったり終わったりする (実際にそうなっていた)。
+パイプ表のままなら 1 セルは必ず 1 行に収まっている。
 
 呼ばれる場所は 2 か所ある (逐次表示の `content_block_stop' と、
 delta が来ないスラッシュコマンドの `assistant')。**片方だけだと
@@ -2349,9 +2628,7 @@ delta が来ないスラッシュコマンドの `assistant')。**片方だけ�
                   (put-text-property body-end (min (marker-position end)
                                                    (line-end-position))
                                      'font-lock-face 'my:claude-code-fence-face))))
-            ;; [2] パイプ表を罫線に
-            (my:claude--render-tables beg end)
-            ;; [3] 見出しと行中のコード。コードブロックの中は塗り直さない。
+            ;; [2] 見出しと行中のコード。コードブロックの中は塗り直さない。
             (goto-char beg)
             (while (re-search-forward "^[ \t]*#\\{1,6\\} .*$" end t)
               (unless (my:claude--code-face-p (match-beginning 0))
@@ -2363,7 +2640,11 @@ delta が来ないスラッシュコマンドの `assistant')。**片方だけ�
                           (eq (get-text-property (match-beginning 0) 'font-lock-face)
                               'my:claude-heading-face))
                 (put-text-property (match-beginning 0) (match-end 0)
-                                   'font-lock-face 'my:claude-inline-code-face))))
+                                   'font-lock-face 'my:claude-inline-code-face)))
+            ;; [3] **強調**
+            (my:claude--render-emphasis beg end)
+            ;; [4] パイプ表を罫線に。2 と 3 が載せた face ごと組み直す。
+            (my:claude--render-tables beg end))
           (set-marker end nil))))))
 
 (defun my:claude--mark-text-start (session)
