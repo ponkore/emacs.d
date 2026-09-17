@@ -556,6 +556,7 @@ face をリストにすると先に書いたものが勝つので、色は列ご
   text-start     ; いま流し込んでいる本文の開始位置 (マーカー)
   streamed-text  ; いま開いているブロックを delta で出したか
   terminal-only  ; 端末でしか使えないスラッシュコマンドの名前
+  mcp-servers    ; system/init の mcp_servers ((name . …) (status . …) の並び)
   (pending "")   ; フィルタの未処理バイト
   session-id
   model
@@ -1955,27 +1956,36 @@ settings.json から求める (`my:claude--effort')。"
                   (equal (my:claude-session-model session) (alist-get 'model obj)))
        (setf (my:claude-session-model session) (alist-get 'model obj)
              (my:claude-session-effort session) (my:claude--effort session)))
-     (setf (my:claude-session-session-id session) (alist-get 'session_id obj)
-           (my:claude-session-model session) (alist-get 'model obj)
-           ;; ヘッダ行に出す。`claude --version' を別に呼ぶ必要は無い。
-           (my:claude-session-claude-version session)
-           (alist-get 'claude_code_version obj)
-           ;; 端末が要るコマンド (doctor / color / reload-plugins)。
-           ;; 補完の注釈で分かるようにする。
-           (my:claude-session-terminal-only session)
-           (append (alist-get 'terminal_slash_commands obj) nil))
-     (my:claude--update-header session)
-     ;; MCP の失敗は毎ターン出すとうるさいので 1 度だけ本文に出す。
-     (let ((bad (seq-filter
-                 (lambda (m) (not (equal (alist-get 'status m) "connected")))
-                 (append (alist-get 'mcp_servers obj) nil))))
-       (when (and bad (not (my:claude-session-session-id session)))
-         (my:claude--insert
-          session
-          (format "MCP 未接続: %s
-"
-                  (mapconcat (lambda (m) (alist-get 'name m)) bad ", "))
-          'my:claude-error-face))))
+     ;; 【重要】**session-id を書き換える前に**「初回の init か」を控える。
+     ;; 下の「MCP 未接続」は session-id が nil であることを初回の目印に
+     ;; していたが、その session-id はこの setf が init から入れている。
+     ;; 後で見ると必ず非 nil なので、**一度も出ないコードになっていた。**
+     (let ((first-init (null (my:claude-session-session-id session))))
+       (setf (my:claude-session-session-id session) (alist-get 'session_id obj)
+             (my:claude-session-model session) (alist-get 'model obj)
+             ;; ヘッダ行に出す。`claude --version' を別に呼ぶ必要は無い。
+             (my:claude-session-claude-version session)
+             (alist-get 'claude_code_version obj)
+             ;; 端末が要るコマンド (doctor / color / reload-plugins)。
+             ;; 補完の注釈で分かるようにする。
+             (my:claude-session-terminal-only session)
+             (append (alist-get 'terminal_slash_commands obj) nil)
+             ;; サーバごとの名前と状態。**これが唯一の入手経路。**
+             ;; `/mcp' は stream-json 経路では要約しか返さない
+             ;; (`my:claude-list-mcp-servers' を参照)。
+             (my:claude-session-mcp-servers session)
+             (append (alist-get 'mcp_servers obj) nil))
+       (my:claude--update-header session)
+       ;; MCP の失敗は毎ターン出すとうるさいので 1 度だけ本文に出す。
+       (let ((bad (seq-filter
+                   (lambda (m) (not (equal (alist-get 'status m) "connected")))
+                   (my:claude-session-mcp-servers session))))
+         (when (and bad first-init)
+           (my:claude--insert
+            session
+            (format "MCP 未接続: %s (C-c a M で一覧)\n"
+                    (mapconcat (lambda (m) (alist-get 'name m)) bad ", "))
+            'my:claude-error-face)))))
     ("permission_denied"
      (my:claude--insert
       session
@@ -3368,6 +3378,50 @@ Opus と Haiku を行き来してもそれまでの話は消えない。"
       (my:claude-layout session)
       session)))
 
+(defun my:claude--show-mcp-servers (label servers)
+  "SERVERS を別バッファに出す。LABEL はセッションの名前。"
+  (let ((buf (get-buffer-create "*claude mcp*")))
+    (with-current-buffer buf
+      (let ((inhibit-read-only t)
+            (n (seq-count (lambda (m) (equal (alist-get 'status m) "connected"))
+                          servers)))
+        (erase-buffer)
+        (insert (format "MCP サーバ (%s) — %d 件中 %d 接続\n\n"
+                        label (length servers) n))
+        (dolist (m (seq-sort-by (lambda (m) (or (alist-get 'name m) ""))
+                                #'string-lessp servers))
+          (let ((status (or (alist-get 'status m) "?")))
+            (insert (propertize (format "  %-14s %s\n" status (alist-get 'name m))
+                                'face (if (equal status "connected")
+                                          'my:claude-meta-face
+                                        'my:claude-error-face)))))
+        (goto-char (point-min))
+        (special-mode)))
+    (display-buffer buf)))
+
+;;;###autoload
+(defun my:claude-list-mcp-servers ()
+  "このセッションの MCP サーバを名前と状態で一覧する。claude には何も送らない。
+
+**`/mcp' では名前も状態も分からない。** stream-json 経路の claude は
+「5 MCP server(s): 3 connected, 2 not connected, 0 disabled. Use `/mcp'
+in the terminal for details.」という要約しか返さず、詳細は端末版でしか
+出ない。引数無しだと「\"\" isn't a recognized /mcp action」になることもある。
+
+一方 `system/init' の `mcp_servers' にはサーバごとの名前と状態が入って
+おり、**ターンの頭に毎回届いている**。`my:claude--handle-system' が
+それを控えてあるので、ここでは出すだけでよい。
+
+**1 度も送っていないセッションでは空。** init が来るのはターンの頭なので、
+起動した直後にはまだ何も無い。"
+  (interactive)
+  (let* ((session (or (my:claude--current-session)
+                      (user-error "claude のセッションが無い")))
+         (servers (my:claude-session-mcp-servers session)))
+    (if (null servers)
+        (message "MCP の情報がまだ来ていない (1 度送れば init と一緒に届く)")
+      (my:claude--show-mcp-servers (my:claude-session-label session) servers))))
+
 ;;; --------------------------------------------------
 ;;; 画像の添付
 ;;; --------------------------------------------------
@@ -4065,7 +4119,8 @@ org バッファで `my:org-yank-image' に潰しているのと同じ流儀。�
          ("C-c a i" . my:claude-input)
          ("C-c a s" . my:claude-send-region)
          ("C-c a k" . my:claude-interrupt)
-         ("C-c a q" . my:claude-quit)))
+         ("C-c a q" . my:claude-quit)
+         ("C-c a M" . my:claude-list-mcp-servers)))
 
 (provide 'my-claude)
 ;;; my-claude.el ends here

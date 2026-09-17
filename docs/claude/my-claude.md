@@ -32,6 +32,7 @@ Windows の Emacs には PTY が無いので claude の対話 TUI は動かな�
 | `C-c a s` | リージョンを送る（**レイアウトは変えない**） |
 | `C-c a k` | 中断 |
 | `C-c a q` | セッション終了 |
+| `C-c a M` | MCP サーバを名前と状態で一覧する（下記。`/mcp` では分からない） |
 
 `*claude(PROJ)*` の中では、**確定した会話の側と入力エリアでキーが変わる**
 （後述）。
@@ -1409,9 +1410,63 @@ Expected {behavior: 'allow', updatedInput?: object}
 **`/mcp` などが送信できたのに何も表示されない**。実際にそうなっていた。
 
 スラッシュコマンドは API を消費しない（`$0.0000`）ので気軽に使える。
-ただし `/mcp` は「詳細は端末の `/mcp` で」と要約を返すだけで、対話 UI は出ない。
 `init` の `terminal_slash_commands`（`doctor` / `color` / `reload-plugins`）は
 端末が要るもので、補完の注釈に `[端末専用]` と出るようにしてある。
+
+### MCP サーバの一覧は `/mcp` では取れない（`C-c a M`）
+
+`/mcp` は端末専用のコマンドとしては挙がっていないのに、stream-json 経路では
+**要約 1 行しか返さない**。
+
+```
+5 MCP server(s): 3 connected, 2 not connected, 0 disabled.
+Use `/mcp` in the terminal for details.
+```
+
+**どのサーバが落ちているのかが分からない。** 引数を付けないと
+`"" isn't a recognized /mcp action. Try reconnect, enable, or disable.`
+になることもある（対話 UI が出せないぶんが丸ごと落ちている）。
+
+一方、`system/init` の `mcp_servers` には**サーバごとの名前と状態が入って
+いて、ターンの頭に毎回届いている**。
+
+```json
+{"type":"system","subtype":"init", …
+ "mcp_servers":[{"name":"redmine","status":"connected"},
+                {"name":"obsidian","status":"failed"}, …]}
+```
+
+`my:claude--handle-system` がこれをセッションに控え、`C-c a M`
+（`my:claude-list-mcp-servers`）が `*claude mcp*` に出す。claude には何も
+送らないので、応答待ちでも押せる。
+
+```
+MCP サーバ (emacs.d) — 5 件中 3 接続
+
+  failed         backlog
+  connected      claude.ai Claude Docs
+  connected      claude.ai Microsoft 365
+  failed         obsidian
+  connected      redmine
+```
+
+**init が来るのはターンの頭なので、起動して 1 度も送っていないセッションでは
+空**（その場合はその旨をエコーエリアに出す）。
+
+#### 「1 度だけ出す」の目印に、その場で書き換える値を使っていた
+
+接続に失敗したサーバは会話に 1 度だけ赤字で出すことになっていたが、
+**一度も出ていなかった**。初回かどうかを `session-id` が nil かで見ていた
+一方、その `session-id` は同じ `setf` が init から入れていたため。
+
+```elisp
+(setf (my:claude-session-session-id session) (alist-get 'session_id obj) …)
+…
+(when (and bad (not (my:claude-session-session-id session)))  ; 必ず nil でない
+```
+
+`setf` の**前**に `first-init` へ控えるよう直した。エラーにならず、
+「MCP は全部繋がっている」ようにしか見えない壊れ方をする。
 
 ## 【重要】Emacs から起動すると cwd のドライブレターが小文字になる
 
