@@ -328,6 +328,123 @@ This affects both the echo area and the `*Messages*' buffer."
   ;; leaf の :global-minor-mode 相当
   :config (global-auto-revert-mode 1))
 
+;;; [3] tab-bar (疑似ワークスペース)
+
+;; tab-bar のタブは「ウィンドウ構成」であって「バッファの集合」ではない。
+;; 付随してフレームパラメータ `buffer-list' / `buried-buffer-list' を
+;; wc-bl / wc-bbl として退避・復元しているだけで (`tab-bar--tab' と
+;; `tab-bar-select-tab')、これは所属ではなく**そのタブで表示した履歴**。
+;;
+;; そのため `tab-bar-new-tab-to' は buffer-list に一切触らず、
+;; **新しいタブは前のタブのバッファをそっくり引き継ぐ**。ここで空に
+;; しておかないと、my-completion.el で `consult-buffer-list-function' を
+;; `consult--frame-buffer-list' にしてもタブごとに分かれて見えない。
+;; **2 つで 1 組**。
+;;
+;; tab-bar-mode は起動時に有効にする (:config)。放っておいても 2 つ目の
+;; タブを作った時点で `tab-bar-new-tab-to' が自分で (tab-bar-mode 1) を
+;; 呼ぶが、それでは**タブが 1 つの間は C-TAB / C-S-TAB が効かない**。
+;; `tab-next' / `tab-previous' は global-map ではなく `tab-bar-mode-map'
+;; にあるため。Emacs 31.1 の `tab-bar-show' の既定は t (30 までは 1) なので、
+;; タブが 1 つでもタブバーの行は出る。
+;;
+;; 組み込みなので :straight は付けない。名前は実在する feature (tab-bar)。
+(use-package tab-bar
+  :demand t
+  :bind ("C-c t" . my:tab-bar-open-directory)
+  :hook (tab-bar-tab-post-open-functions . my:tab-bar-clear-buffer-list)
+  :preface
+  (defcustom my:tab-bar-directories
+    '("~/Projects/ESC-Web/WebCoreSystem_v1/"
+      "~/Projects/nel/RINSETSU/"
+      "~/.emacs.d/"
+      "~/.config/")
+    "`my:tab-bar-open-directory' がミニバッファに出すディレクトリ。
+
+`~/Projects' は my-platform.el のジャンクション / symlink 越しに見ている
+ので、この書き方のまま mac / Linux でも通る (c:/Projects と書くと
+そのマシンでしか開けない)。"
+    :type '(repeat directory)
+    :group 'tab-bar)
+
+  (defcustom my:tab-bar-marks '("🟥" "🟧" "🟨" "🟩" "🟦" "🟪" "🟫")
+    "タブ名の先頭に付ける印。`my:tab-bar-open-directory' が順に使う。
+
+HackGen には無いが Windows では Segoe UI Emoji が描く (実測)。"
+    :type '(repeat string)
+    :group 'tab-bar)
+
+  (defun my:tab-bar--mark ()
+    "まだどのタブも使っていない印を返す。
+
+全部使い切っていたらタブの数で順に回す。既存のタブ名の 1 文字目と
+比べるだけなので、印を付けていないタブ (C-x t 2 で作ったもの) は
+候補を食わない。"
+    (let ((used (mapcar (lambda (tab)
+                          (let ((name (alist-get 'name tab)))
+                            (and (stringp name) (not (string-empty-p name))
+                                 (substring name 0 1))))
+                        (funcall tab-bar-tabs-function))))
+      (or (seq-find (lambda (m) (not (member m used))) my:tab-bar-marks)
+          (nth (mod (length used) (length my:tab-bar-marks)) my:tab-bar-marks))))
+
+  (defun my:tab-bar--read-directory ()
+    "`my:tab-bar-directories' から選ぶ。\"<free>\" なら C-x C-f と同じように読む。
+
+候補は書いた順のまま出す。\"<free>\" を末尾に固定したいので、
+metadata で並べ替えを止めている (素のリストを渡すと履歴順に並ぶ)。"
+    (let* ((free "<free>")
+           (cands (append my:tab-bar-directories (list free)))
+           (choice (completing-read
+                    "新しいタブで開くディレクトリ: "
+                    (lambda (str pred action)
+                      (if (eq action 'metadata)
+                          '(metadata (display-sort-function . identity)
+                                     (cycle-sort-function . identity))
+                        (complete-with-action action cands str pred)))
+                    nil t)))
+      (if (equal choice free)
+          (read-directory-name "ディレクトリ: ")
+        choice)))
+
+  (defun my:tab-bar-open-directory (dir)
+    "DIR を新しいタブの dired で開き、タブ名を「印 + 末尾の名前」にする。
+
+印は `my:tab-bar--mark' が選ぶ。名前は `~/Projects/nel/RINSETSU/' なら
+\"RINSETSU\"。"
+    (interactive (list (my:tab-bar--read-directory)))
+    (let* ((dir (file-name-as-directory (expand-file-name dir)))
+           (base (file-name-nondirectory (directory-file-name dir)))
+           ;; タブを作る前に決める。作った後だと新しいタブ自身の名前
+           ;; (dired のバッファ名) まで「使用済み」に数えてしまう。
+           (mark (my:tab-bar--mark)))
+      (unless (file-directory-p dir)
+        (user-error "ディレクトリが無い: %s" dir))
+      (tab-bar-new-tab)
+      (dired dir)
+      (tab-bar-rename-tab (concat mark (if (string-empty-p base) dir base)))))
+
+  (defun my:tab-bar-clear-buffer-list (_tab)
+    "新しいタブのバッファ一覧を、そのタブに表示しているものだけにする。
+
+`tab-bar-tab-post-open-functions' に載せる。呼ばれる時点で新しいタブが
+既にカレントで、バッファ一覧はまだフレームパラメータの側に生きている
+\(`tab-bar--current-tab-make' は wc-bl を持たない\) ので、ここで
+書き換えればそのままそのタブの値になる。
+
+`tab-bar-duplicate-tab' は複製が目的なので対象外にする。あれは
+`tab-bar-new-tab-choice' を `clone' に束縛して呼んでくるので、
+束縛が生きているこの時点で見分けられる。"
+    (unless (eq tab-bar-new-tab-choice 'clone)
+      (set-frame-parameter
+       nil 'buffer-list
+       ;; 同じバッファを 2 つのウィンドウに出していると重複するので潰す
+       ;; (consult がそのまま 2 行出してしまう)。
+       (delete-dups (mapcar #'window-buffer (window-list nil 'nomini))))
+      (set-frame-parameter nil 'buried-buffer-list nil)))
+  :config
+  (tab-bar-mode 1))
+
 ;;; [3] editorconfig
 
 ;; Emacs 30 で本体に入った (:straight は付けない。org / transient と同じ扱い)。

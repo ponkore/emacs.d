@@ -33,7 +33,11 @@
    ;; ("C-x l" . goto-line)
    ("C-x =" . my:count-lines-buffer)
    ("C-x g" . grep)
-   ("C-x t" . toggle-truncate-lines)
+   ;; C-x t は Emacs の `tab-prefix-map' (0 閉じる / 2 新規 / RET 選択 /
+   ;; u 閉じたタブを戻す / r 改名 ...)。ここを潰すと**タブ操作がメニュー
+   ;; バーからしか呼べなくなる**ので、toggle-truncate-lines は C-x T へ
+   ;; 退避した。`where-is-internal' が menu-bar しか返さないのが目印。
+   ("C-x T" . toggle-truncate-lines)
    ("ESC C-g" . keyboard-quit)
    ("C-x !" . shell-command)
    ("C-x |" . shell-command-on-region)

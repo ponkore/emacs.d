@@ -629,7 +629,7 @@ corfu がそれを拾って `*Messages*` に backtrace を流し、`message-log-
 **変数を変えても、既に text-mode 派生になっているバッファには効かない**
 （`add-hook` はモードを立てた時点で済んでいる）。
 
-## `my-editor` — editorconfig / C-e
+## `my-editor` — editorconfig / C-e / tab-bar
 
 → [docs/editing/editorconfig.md](docs/editing/editorconfig.md) / [docs/editing/line-movement.md](docs/editing/line-movement.md)
 
@@ -671,6 +671,29 @@ remap して避けているが、`C-e` を別のコマンドに張り替える�
 
 **桁は自分で数えないこと。** `display-line-numbers-mode` が有効だと実際に使える幅が
 減る（`current-column` は 139 なのに描画は col 143）。
+
+### 【重要】`C-TAB` / `C-S-TAB` は `global-map` に無い
+
+`tab-next` / `tab-previous` は **`tab-bar-mode-map`（マイナーモードマップ）**に
+ある。`where-is-internal` は `[C-tab]` を返すのに
+`(lookup-key global-map (kbd "<C-tab>"))` は nil なので、グローバルだと思って
+探すと見つからない。壊れ方は 2 つ。
+
+- **`tab-bar-mode` が off の間は効かない。** 起動時に `(tab-bar-mode 1)` を
+  呼んでいるのはこのため。放っておくと 2 つ目のタブを作るまで off
+- **同じ層の他のマイナーモードマップに負ける。** `yas-minor-mode-map` が
+  `<C-tab>` に `yas-expand` を張っていて、**正順だけ**効かなくなっていた
+  （`C-S-TAB` は無事なので「片道だけ壊れている」ようにしか見えない）。
+  yasnippet の展開は `C-x i TAB` に移してある
+
+`my:tab-bar-open-directory`（`C-c t`）はタブ名の先頭に色付きの印を付ける。
+**印は `tab-bar-new-tab` の前に決める**（後だと新しいタブ自身の名前まで
+「使用済みの色」に数える）。
+
+**`C-x t` は潰さない。** `tab-prefix-map`（`0` 閉じる / `2` 新規 / `RET` 選択 /
+`u` 戻す）がまるごと乗っている。長らく `toggle-truncate-lines` で上書きして
+いて、**タブを閉じる手段がメニューバーしか無かった**（`C-x T` へ退避済み）。
+`(where-is-internal 'tab-close)` が `[menu-bar ...]` しか返さないのが目印。
 
 ## `my-dired`
 

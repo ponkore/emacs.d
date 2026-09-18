@@ -105,6 +105,25 @@
   ;; 現行の既定値は 1MB で、ここで設定していた 1024000 とほぼ同じ。
   (consult-preview-partial-size 1024000)
   (consult-narrow-key "<")
+  ;; C-x b を「今のタブ (フレーム) で表示したバッファ」だけに絞る。
+  ;; 既定は #'buffer-list で全バッファが混ざる。`consult--frame-buffer-list'
+  ;; はフレームパラメータの `buffer-list' / `buried-buffer-list' を返すもので、
+  ;; tab-bar がこれをタブごとに退避・復元する (wc-bl / wc-bbl) ため、
+  ;; 何もしなくてもそのままタブ単位になる。
+  ;;
+  ;; 他のタブのバッファは `consult-source-other-buffer' から引ける。
+  ;; `consult-narrow-key' が `<' なので `< o'。このソースは :enabled が
+  ;; 「`consult-buffer-list-function' が #'buffer-list 以外か」なので、
+  ;; **この 1 行だけで自動的に有効になる**。
+  ;;
+  ;; 【重要】**単独では効かない。** `tab-bar-new-tab-to' は buffer-list に
+  ;; 一切触らないので、新しいタブは前のタブのバッファをそのまま引き継ぐ。
+  ;; my-editor.el の `my:tab-bar-clear-buffer-list' と 2 つで 1 組。
+  ;;
+  ;; なお C-x C-r (`my:consult-recent-file-or-bookmark') は recentf を
+  ;; そのまま出すので、こちらの影響を受けない (下のコメント参照)。
+  ;; ファイルを開く入口はタブで絞らない、という切り分けにしてある。
+  (consult-buffer-list-function #'consult--frame-buffer-list)
   :init
   ;; C-uを付けるとカーソル位置の文字列を使うmy-consult-lineコマンドを定義する
   (defun my:consult-line (&optional at-point)

@@ -111,7 +111,7 @@ git clone git@github.com:ponkore/emacs.d.git ~/.emacs.d
 | `my-appearance` | フォント、フレーム、modus-vivendi テーマ、doom-modeline、nerd-icons |
 | `my-completion` | vertico、consult、marginalia、orderless、corfu、cape、embark |
 | `my-keybind` | グローバルキーバインド |
-| `my-editor` | hydra、symbol-overlay、smartparens、whitespace、yasnippet、recentf、editorconfig ほか |
+| `my-editor` | hydra、symbol-overlay、smartparens、whitespace、yasnippet、recentf、editorconfig、tab-bar ほか |
 | `my-dired` | dired、hydra-dired、dired-sidebar（`F8`）、dired-x の上書き対策、exceldiff / MarkText の起動 |
 | `my-dired-watch` | ファイルのサイズ・日時・属性の変化で dired の行を貼り替える。Windows のみ |
 | `my-text` | text-mode、org-mode、ox-pandoc、markdown、rst、adoc |
@@ -245,12 +245,14 @@ Excel ブックは OS の関連付けに渡す、`C-c x` で exceldiff、`C-c m`
 | `C-x b` | `consult-buffer` |
 | `C-x C-r` | recentf + ブックマークから開く |
 | `C-x g` | `grep` |
-| `C-x t` | `toggle-truncate-lines` |
+| `C-x T` | `toggle-truncate-lines` |
 | `C-x =` | バッファの行数 |
 | `C-x !` / `C-x \|` | `shell-command` / `shell-command-on-region` |
 | `C-x C-;` | 日時を挿入（`2026/09/14 12:34:56`） |
 | `C-;` | 日付を挿入（`2026-09-14 (月)`） |
 | `C-S-a` | `embark-act` |
+| `C-c t` | ディレクトリを選んで**新しいタブ**で開く（タブ名に色付きの印） |
+| `C-TAB` / `C-S-TAB` | タブ移動（`tab-next` / `tab-previous`。組み込み） |
 | `ESC ?` | `apropos` |
 | `<f2>` | フォントサイズの hydra |
 | `<f8>` | dired サイドバーの開閉 |
@@ -266,6 +268,7 @@ Excel ブックは OS の関連付けに渡す、`C-c x` で exceldiff、`C-c m`
 | `C-c !` | flymake（`n` / `p` 移動、`l` / `P` 一覧、`h` hydra） |
 | `C-c p` | projectile（`s` は検索 dwim） |
 | `C-x i` | yasnippet（`TAB` expand / `i` insert / `n` new / `v` visit / `l` tables / `g` reload） |
+| `C-x t` | タブ（`0` 閉じる / `1` 他を閉じる / `2` 新規 / `RET` 選択 / `u` 戻す / `r` 改名。組み込み） |
 
 ### Claude Code（`C-c a`）
 
