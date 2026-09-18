@@ -396,8 +396,17 @@ Windows の `play-sound-file' は WAV しか鳴らせない。"
 `:extend' は立てない。立てると帯が行末まで伸びて行全体が塗り潰される。")
 
 (defface my:claude-assistant-face
-  '((t :inherit default))
-  "claude の本文。")
+  '((((background dark))  :foreground "#b8b8b8")
+    (((background light)) :foreground "#4a4a4a"))
+  "claude の本文。
+
+**地の色は `default' より 1 段落とす。** 端末の claude (TUI) の
+見え方に合わせてある。地を落とすことで、`**強調**'
+ (`my:claude-bold-face') が太さだけでなく**明るさ**でも際立つ。
+
+`shadow' (#989898) よりは明るくしてある。ツールの結果
+ (`my:claude-tool-result-face') と補足 (`my:claude-meta-face') が
+そちらなので、本文が同じ灰色になると区別が付かない。")
 
 (defface my:claude-tool-face
   '((t :inherit font-lock-function-name-face))
@@ -448,11 +457,20 @@ Windows の `play-sound-file' は WAV しか鳴らせない。"
   "行中の `コード`。")
 
 (defface my:claude-bold-face
-  '((t :weight bold))
+  '((((background dark))  :foreground "#ffffff" :weight bold)
+    (((background light)) :foreground "#000000" :weight bold))
   "markdown の **強調**。
 
-**色を持たせない。** 地の face (`my:claude-assistant-face' など) に
-重ねて載せる (`my:claude--add-face') ので、色を書くと下の色を潰す。")
+地の face (`my:claude-assistant-face') より**明るい**色を持つ。
+`my:claude--add-face' は既にある face の**前**に積むので、ここに
+書いた色が地の色に勝つ。
+
+【重要】**色を持たせてよいのは、この face が載る先が本文だけだから。**
+`my:claude--fontify-markdown' を通るのは assistant のテキスト
+ブロックだけで、サブエージェントの発言もツールの結果も通らない。
+唯一重なりうる見出しでは、`my:claude--render-emphasis' が
+**記号だけ落として face は載せない**ようにしてある (載せると
+見出しの色が白で潰れる)。")
 
 (defface my:claude-subagent-face
   '((t :inherit font-lock-doc-face))
@@ -2189,6 +2207,44 @@ font-lock を有効にできない (`my:claude--fontify-markdown' 参照) ため
                            (append (my:claude--face-list (nth 2 sp))
                                    (list 'my:claude-code-face)))))))
 
+;;; markdown の行中のコード
+
+(defun my:claude--heading-face-p (pos)
+  "POS に `my:claude-heading-face' が載っているか。"
+  (memq 'my:claude-heading-face
+        (my:claude--face-list (get-text-property pos 'font-lock-face))))
+
+(defun my:claude--render-inline-code (beg end)
+  "BEG..END の `` `…` `` から `` ` `` を落とし、その範囲を色で示す。
+
+**記号ごと消すのは `**強調**' と同じ理由。** 色が付いていれば範囲は
+分かるので記号は要らず、表のセルの中では見えている記号 2 桁が
+そのまま列幅に乗る (`my:claude--render-emphasis' の docstring)。
+
+コードブロックの中は触らない。見出しの中は**記号だけ落として face は
+載せない** (見出しの色を保つため)。
+
+**`my:claude--render-emphasis' より先に呼ぶ。** あちらは
+`my:claude-inline-code-face' を見てコードの中の `**' を避けるので、
+face がまだ載っていないと `` `**a**` `` の `**' まで消してしまう。"
+  (goto-char beg)
+  (while (re-search-forward "`\\([^`\n]+\\)`" end t)
+    (let* ((mbeg (match-beginning 0))
+           (cbeg (match-beginning 1))
+           (cend (match-end 1))
+           (mend (match-end 0))
+           (len (- cend cbeg))
+           (heading (my:claude--heading-face-p mbeg)))
+      (if (my:claude--code-face-p mbeg)
+          (goto-char mend)
+        ;; 後ろから消す (先に消すと前の位置がずれる)。
+        (delete-region cend mend)
+        (delete-region mbeg cbeg)
+        (unless heading
+          (put-text-property mbeg (+ mbeg len)
+                             'font-lock-face 'my:claude-inline-code-face))
+        (goto-char (+ mbeg len))))))
+
 ;;; markdown の **強調**
 
 (defconst my:claude--emphasis-regexp
@@ -2216,7 +2272,8 @@ font-lock を有効にできない (`my:claude--fontify-markdown' 参照) ため
              (cbeg (match-beginning 1))
              (cend (match-end 1))
              (mend (match-end 0))
-             (len (- cend cbeg)))
+             (len (- cend cbeg))
+             (heading (my:claude--heading-face-p mbeg)))
         (if (or (my:claude--code-face-p mbeg)
                 (memq 'my:claude-inline-code-face
                       (my:claude--face-list
@@ -2225,7 +2282,10 @@ font-lock を有効にできない (`my:claude--fontify-markdown' 参照) ため
           ;; 後ろから消す (先に消すと前の位置がずれる)。
           (delete-region cend mend)
           (delete-region mbeg cbeg)
-          (my:claude--add-face mbeg (+ mbeg len) 'my:claude-bold-face)
+          ;; 見出しには載せない。`my:claude-bold-face' は色を持つので、
+          ;; 載せると見出しの色が潰れる (既に太字でもある)。
+          (unless heading
+            (my:claude--add-face mbeg (+ mbeg len) 'my:claude-bold-face))
           (goto-char (+ mbeg len)))))))
 
 ;;; markdown の表を罫線に組み直す
@@ -2583,7 +2643,8 @@ ALIGNS は列ごとの寄せ方、HEADER は見出し行の数、INDENT は行�
 やることは 4 つ。**この順でなければならない。**
 
   1. ``` のブロックを塗る (言語指定があればその言語として着色する)
-  2. 見出しと行中のコード。1 の結果を見てコードブロックの中を避ける
+  2. 見出しと行中のコード。行中のコードは `` ` `` を落として色だけ
+     残す。1 の結果を見てコードブロックの中を避ける
   3. `**強調**' の `**' を落として太字にする。2 の結果を見て
      行中のコードの中を避ける
   4. `|' の表を罫線に組み直す。1〜3 が載せた face ごと組み直す
@@ -2634,13 +2695,7 @@ delta が来ないスラッシュコマンドの `assistant')。**片方だけ�
               (unless (my:claude--code-face-p (match-beginning 0))
                 (put-text-property (match-beginning 0) (match-end 0)
                                    'font-lock-face 'my:claude-heading-face)))
-            (goto-char beg)
-            (while (re-search-forward "`[^`\n]+`" end t)
-              (unless (or (my:claude--code-face-p (match-beginning 0))
-                          (eq (get-text-property (match-beginning 0) 'font-lock-face)
-                              'my:claude-heading-face))
-                (put-text-property (match-beginning 0) (match-end 0)
-                                   'font-lock-face 'my:claude-inline-code-face)))
+            (my:claude--render-inline-code beg end)
             ;; [3] **強調**
             (my:claude--render-emphasis beg end)
             ;; [4] パイプ表を罫線に。2 と 3 が載せた face ごと組み直す。
