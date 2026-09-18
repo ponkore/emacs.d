@@ -265,7 +265,7 @@ Excel ブックは OS の関連付けに渡す、`C-c x` で exceldiff、`C-c m`
 | `C-c l` | eglot（`r` rename / `a` code-actions / `f` format / `d` doc / `h` inlay hints / `R` reconnect / `q` shutdown） |
 | `C-c !` | flymake（`n` / `p` 移動、`l` / `P` 一覧、`h` hydra） |
 | `C-c p` | projectile（`s` は検索 dwim） |
-| `C-x i` | yasnippet（`i` insert / `n` new / `v` visit / `l` tables / `g` reload） |
+| `C-x i` | yasnippet（`TAB` expand / `i` insert / `n` new / `v` visit / `l` tables / `g` reload） |
 
 ### Claude Code（`C-c a`）
 

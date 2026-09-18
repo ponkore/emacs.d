@@ -224,10 +224,15 @@ This affects both the echo area and the `*Messages*' buffer."
   :diminish
   :custom ((yas-indent-line 'fixed)
            (yas-global-mode t))
+  ;; 展開は C-x i TAB。TAB / <tab> は corfu に譲るので外す。
+  ;; 【重要】<C-tab> には割り当てない。tab-bar の C-TAB (`tab-next') と
+  ;; 同じマイナーモードマップの層で競合し、`minor-mode-map-alist' の
+  ;; 並び順で yas が勝つため、タブ移動が正順だけ効かなくなる
+  ;; (C-S-TAB = `tab-previous' は生きているので、片道だけ壊れて見える)。
   :bind (:map yas-minor-mode-map
          ("TAB" . nil)
          ("<tab>" . nil)
-         ("<C-tab>" . yas-expand)
+         ("C-x i TAB" . yas-expand)
          ("C-x i i" . yas-insert-snippet)
          ("C-x i n" . yas-new-snippet)
          ("C-x i v" . yas-visit-snippet-file)
