@@ -65,6 +65,25 @@
 (use-package nxml-mode
   :mode ("\\.csproj\\'" . nxml-mode))
 
+;;; [3] CSV / TSV
+
+;; .tsv は csv-mode の autoload で tsv-mode になる。csv-align-mode は
+;; display プロパティで見た目だけ揃えるので、ファイルの中身は変わらない。
+;; tsv-mode は csv-mode の派生なので csv-mode-hook だけに張る。
+;; tsv-mode-hook にも張ると 2 回走り、トグルの csv-header-line が消える。
+(use-package csv-mode
+  :straight t
+  :hook
+  (csv-mode-hook . my:csv-mode-setup)
+  :custom
+  (csv-align-max-width 60)
+  :config
+  (defun my:csv-mode-setup ()
+    (csv-align-mode 1)
+    (csv-header-line 1)
+    ;; 横に長い表は折り返さない
+    (setq-local truncate-lines t)))
+
 ;;; [3] xxx
 
 (provide 'my-fileformat)
