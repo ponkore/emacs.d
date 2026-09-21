@@ -52,6 +52,20 @@
 (setq user-lisp-auto-scrape nil)
 
 ;; ---------------------------------------------------------------
+;; macOS: native-comp の -mmacosx-version-min を明示する
+;; ---------------------------------------------------------------
+;; libgccjit (Homebrew gcc) の driver は Darwin のカーネル番号から macOS の
+;; 版を「major - 9」で逆算して -mmacosx-version-min に渡す。Darwin 27 (macOS 27)
+;; では 18.0 になり、clang が "invalid version number" で拒否するので
+;; native-compile が全滅する。明示すれば driver は逆算しない。
+;; .eln はこのマシンでしか使わないので、下限は Apple Silicon の最初の版で足りる。
+;; straight のビルドは init.el の冒頭で走るため、ここで入れる。
+;; 非同期コンパイルのワーカーにもこの変数は引き継がれる (comp-run.el)。
+(when (eq system-type 'darwin)
+  (with-eval-after-load 'comp
+    (add-to-list 'native-comp-driver-options "-mmacosx-version-min=11.0" t)))
+
+;; ---------------------------------------------------------------
 ;; フレームの初期設定
 ;; ---------------------------------------------------------------
 ;; ツールバー等をここで消しておくと、起動時に一瞬表示されてから消える
