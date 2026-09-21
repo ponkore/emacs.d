@@ -60,10 +60,17 @@
 ;; native-compile が全滅する。明示すれば driver は逆算しない。
 ;; .eln はこのマシンでしか使わないので、下限は Apple Silicon の最初の版で足りる。
 ;; straight のビルドは init.el の冒頭で走るため、ここで入れる。
-;; 非同期コンパイルのワーカーにもこの変数は引き継がれる (comp-run.el)。
+;;
+;; with-eval-after-load 'comp で足してはいけない。この変数は comp.el の
+;; defcustom だが、JIT の非同期コンパイル (comp-run.el) は親で comp を
+;; ロードせず、ワーカーには「boundp なときだけ」値を渡す。comp が未ロードの
+;; セッション (-nw で diff-hl-margin を開いたときなど) では何も渡らず、
+;; ワーカー側で既定値に戻って全滅する。defcustom は束縛済みの変数を
+;; 上書きしないので、ここで直に入れる。"-Wl,-w" は darwin の既定値。
 (when (eq system-type 'darwin)
-  (with-eval-after-load 'comp
-    (add-to-list 'native-comp-driver-options "-mmacosx-version-min=11.0" t)))
+  (defvar native-comp-driver-options)
+  (setq native-comp-driver-options
+        '("-Wl,-w" "-mmacosx-version-min=11.0")))
 
 ;; ---------------------------------------------------------------
 ;; フレームの初期設定
