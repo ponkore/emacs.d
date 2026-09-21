@@ -19,7 +19,8 @@ description: 起動中の Emacs (server) に emacsclient 経由で S 式を評�
 bash .claude/skills/emacs-eval/ec.sh '(emacs-version)'
 ```
 
-これが通れば準備完了。`emacsclient` は PATH に無いので `ec.sh` が
+これが通れば準備完了。`ec.sh` はまず PATH の `emacsclient` を使う
+（mac は Homebrew のものが PATH にある）。Windows では PATH に無いので
 `C:/Apps/emacs/emacs-31.1/bin/emacsclient.exe` を探しにいく（`EMACSCLIENT`
 環境変数で上書き可）。
 
@@ -55,16 +56,22 @@ $ bash .claude/skills/emacs-eval/ec.sh '(list (string-pixel-width "a") (string-p
 以下このファイルでは `ec.sh` と略記する。実際は
 `bash .claude/skills/emacs-eval/ec.sh` を Bash ツールで実行する
 （作業ディレクトリが `.emacs.d` でなければ絶対パスで
-`bash /c/Users/masao/.emacs.d/.claude/skills/emacs-eval/ec.sh`）。
+`bash ~/.emacs.d/.claude/skills/emacs-eval/ec.sh`）。
 `-f` / `-l` に渡すファイルパスは相対でも絶対でもよい。
 
 **式の中では `'` ではなく `(quote x)` / `(function f)` と書く。** シェルの
 シングルクォートの中にシングルクォートは置けない。`'` をそのまま書きたい
 （長い式、`#'` を多用する式）なら、`-f` でファイルに書いて渡す。
 
-## 【重要】文字コードの境界は「cp932 に有るか」で決まる
+## 【重要】Windows では文字コードの境界が「cp932 に有るか」で決まる
 
-`my-japanese.el` が `default-process-coding-system` の cdr を cp932 にしており、
+**この節は Windows だけの話。** mac / Linux では server の接続プロセスが
+`(utf-8-unix . utf-8-unix)` なので、絵文字も `𠮷` も往復とも化けない
+（実測で `ec.sh '(length "🙂")'` → `1`）。`ec.sh` も cp932 からの変換を
+Windows でしかしない（mac で変換すると、たまたま cp932 として読める
+バイト列が黙って化ける。`"ア"` → `"繧｢"`）。
+
+Windows では `my-japanese.el` が `default-process-coding-system` の cdr を cp932 にしており、
 server の接続プロセスもそれを継承する（実測で `(raw-text-unix . cp932)`）。
 `ec.sh` は戻り値を cp932 → UTF-8 に直してから出すので日本語は読めるが、
 **cp932 に無い文字は往路・復路とも `?` に潰れる**（不可逆）。
@@ -78,12 +85,13 @@ server の接続プロセスもそれを継承する（実測で `(raw-text-unix
 
 実測（`ec.sh '(length "🙂")'` → `2`、`ec.sh -f` で同じ式 → `1`）。
 
-**cp932 の外を扱うとき、および結果が長いときは、必ずファイル経由にする。**
+**cp932 の外を扱うとき（Windows）、および結果が長いとき（全 OS）は、
+必ずファイル経由にする。**
 
 ```bash
 cat > tmp/probe.el <<'EOF'
 (let ((coding-system-for-write 'utf-8-unix))
-  (with-temp-file "c:/Users/masao/.emacs.d/tmp/ec-out.txt"
+  (with-temp-file (expand-file-name "tmp/ec-out.txt" user-emacs-directory)
     (insert (format "%S" 調べたい式)))
   "-> tmp/ec-out.txt")
 EOF
@@ -92,8 +100,9 @@ bash .claude/skills/emacs-eval/ec.sh -f tmp/probe.el
 
 書けたら `tmp/ec-out.txt` を Read で読む。`tmp/` は CLAUDE.md が定める
 「作業用の捨て場」（`.gitkeep` 以外は git 管理外）なので、プローブと出力は
-そこに置く。ファイルのパスは Emacs に渡す側では **Windows 形式**
-（`c:/...`）で書くこと。`/c/...` は Emacs が解釈しない（`-f` / `-l` に渡す
+そこに置く。出力先は `user-emacs-directory` から組み立てれば OS を問わない。
+パスを直に書くなら、Windows では Emacs に渡す側を **Windows 形式**
+（`c:/...`）にすること。`/c/...` は Emacs が解釈しない（`-f` / `-l` に渡す
 パスは `ec.sh` が `cygpath` で変換する）。
 
 ## 安全に使うための約束
@@ -218,7 +227,7 @@ ec.sh -l user-lisp/my-claude.el
 # *Messages* の末尾を読む
 cat > tmp/probe.el <<'EOF'
 (let ((coding-system-for-write 'utf-8-unix))
-  (with-temp-file "c:/Users/masao/.emacs.d/tmp/ec-out.txt"
+  (with-temp-file (expand-file-name "tmp/ec-out.txt" user-emacs-directory)
     (insert (with-current-buffer "*Messages*"
               (buffer-substring-no-properties
                (max (point-min) (- (point-max) 4000)) (point-max)))))
@@ -236,6 +245,7 @@ ec.sh -f tmp/probe.el
 **内側**に置くこと（外側だと `condition-case` が先に捕まえてハンドラが走らない）。
 
 ```elisp
+(require 'backtrace)   ; backtrace-to-string は autoload されない
 (let ((bt nil))
   (condition-case e
       (handler-bind ((error (lambda (_)
@@ -244,12 +254,15 @@ ec.sh -f tmp/probe.el
         (調べたい式))
     (error
      (let ((coding-system-for-write 'utf-8-unix))
-       (with-temp-file "c:/Users/masao/.emacs.d/tmp/ec-out.txt"
+       (with-temp-file (expand-file-name "tmp/ec-out.txt" user-emacs-directory)
          (insert (error-message-string e) "\n" (or bt ""))))
      "-> tmp/ec-out.txt")))
 ```
 
 先頭の 5 フレームはハンドラ自身なので、実際の失敗箇所はその下に出る。
+`require` を省くと、`backtrace.el` が未ロードのセッション（デバッガを一度も
+開いていない）では `void-function` になり、元のエラーの代わりにそれが出る。
+`require` を含むので `-f` でファイルごと渡すこと。
 
 ### 状態の観測
 

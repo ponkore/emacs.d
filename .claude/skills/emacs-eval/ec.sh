@@ -76,9 +76,15 @@ esac
 
 out=$("$client" -e "$body" 2>&1); rc=$?
 
-# 結果は server 接続プロセスの coding (cp932) で返る。UTF-8 に直して出す。
-conv=$(printf '%s' "$out" | tr -d '\r' | iconv -f CP932 -t UTF-8 2>/dev/null) \
-  || conv=$(printf '%s' "$out" | tr -d '\r')
+# Windows では結果が server 接続プロセスの coding (cp932) で返るので UTF-8 に
+# 直して出す。mac / Linux は最初から UTF-8。変換すると、たまたま cp932 として
+# 読めるバイト列（"ア" など）がエラーにならずに化ける。
+conv=$(printf '%s' "$out" | tr -d '\r')
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    conv=$(printf '%s' "$out" | tr -d '\r' | iconv -f CP932 -t UTF-8 2>/dev/null) \
+      || conv=$(printf '%s' "$out" | tr -d '\r') ;;
+esac
 
 if [ "$rc" != 0 ]; then
   printf '%s\n' "$conv" >&2
