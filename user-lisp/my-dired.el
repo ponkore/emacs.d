@@ -13,6 +13,17 @@
 ;; dired-k は 2021 年から更新が止まり emacsorphanage に移されていた。
 ;; ファイルサイズ・更新日時の色分けは diff-hl には無いので失われる。
 
+;; macOS でも一覧は ls-lisp で作る。/bin/ls は BSD 版で --dired を持たず、
+;; 起動後最初の dired で "ls does not support --dired" が出ていた。
+;; あわせて ls-lisp-dirs-first が mac でも効くようになり、表示が Windows と
+;; 揃う。子プロセスを起こさない分むしろ速い (89 件 4.4 → 0.5 ms、
+;; 5000 件 54.8 → 34.2 ms)。ロードしないと差し替わらないので :demand t。
+(use-package ls-lisp
+  :if (eq system-type 'darwin)
+  :demand t
+  :custom
+  (ls-lisp-use-insert-directory-program nil))
+
 (use-package dired
   :commands dired-vc-status
   :preface
