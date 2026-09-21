@@ -24,6 +24,28 @@
   :custom
   (ls-lisp-use-insert-directory-program nil))
 
+;; タイムスタンプを "月 2026-09-21 00:00:00" の形にする (Windows / macOS とも
+;; ls-lisp)。ロケールが C 以外だと ls-lisp は ls-lisp-format-time-list を無視して
+;; ISO 風の固定書式を使うので ls-lisp-use-localized-time-format が要る。
+;; 6 か月以内 / それより前の 2 つの書式は揃える (年も時刻も常に出す)。
+;; %a は system-time-locale 次第で英語になるので、曜日は my:day-of-week-name で
+;; そのファイルの時刻から求めて書式に埋め込む。
+(defun my:ls-lisp-format-time-japanese-dow (orig file-attr &optional time-index)
+  "ORIG (`ls-lisp-format-time') の書式の %a を日本語の曜日に置き換えて呼ぶ。"
+  (let* ((dow (my:day-of-week-name (nth (or time-index 5) file-attr)))
+         (ls-lisp-format-time-list
+          (mapcar (lambda (fmt) (string-replace "%a" dow fmt))
+                  ls-lisp-format-time-list)))
+    (funcall orig file-attr time-index)))
+
+(use-package ls-lisp
+  :defer t
+  :custom
+  (ls-lisp-use-localized-time-format t)
+  (ls-lisp-format-time-list '("%a %Y-%m-%d %H:%M:%S" "%a %Y-%m-%d %H:%M:%S"))
+  :config
+  (advice-add 'ls-lisp-format-time :around #'my:ls-lisp-format-time-japanese-dow))
+
 (use-package dired
   :commands dired-vc-status
   :preface
