@@ -932,6 +932,15 @@ gopls は大文字のドライブレターで返す（§1「Windows 固有」）
   入り切りをこの関数がやっているので、直に `setf` すると点が止まらなくなる。
   ミニバッファで待つ区間は `my:claude--with-asking` で包む（`C-g` で
   `asking` が残ると、そのセッションは以後ずっと点が止まったままになる）
+- **【重要】コミットメッセージの生成（`C-c a g`）で `git diff --cached` を
+  決め打ちしない**（2026-09-23）。`commit --all`（magit の `-a`）は**一時 index**
+  を使うので **`--cached` は 0 バイトを返す**。エラーは出ないので、そのまま渡すと
+  「空の差分から書かれたもっともらしいメッセージ」が出てくる。差分は
+  ①バッファのカット行（`------ >8 ------`）より下 → ②`magit-commit-diff--args` が
+  計算した範囲 → ③`git diff HEAD` の順に取る。①のときは**カット行の次の 2 行も
+  コメント**なので飛ばす → [docs](docs/claude/my-claude.md)
+- **コミットバッファの `default-directory` は `.git/`。** claude を起こす cwd は
+  `magit-toplevel` で取り直す（ずれると claude が `CLAUDE.md` を見つけられない）
 
 ## `my-pty`
 

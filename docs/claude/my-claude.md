@@ -4,7 +4,7 @@
 
 Windows の Emacs には PTY が無いので、双方向のストリーミング JSON を素のパイプで駆動する。会話バッファ・ヘッダ行・許可プロンプト・画像添付・逐次表示の設計と実測。
 
-最終更新: 2026-09-15 ｜ [README.md](../../README.md) ｜ [CLAUDE.md](../../CLAUDE.md)
+最終更新: 2026-09-23 ｜ [README.md](../../README.md) ｜ [CLAUDE.md](../../CLAUDE.md)
 
 
 Windows の Emacs には PTY が無いので claude の対話 TUI は動かない
@@ -32,6 +32,7 @@ Windows の Emacs には PTY が無いので claude の対話 TUI は動かな�
 | `C-c a s` | リージョンを送る（**レイアウトは変えない**） |
 | `C-c a k` | 中断 |
 | `C-c a q` | セッション終了 |
+| `C-c a g` | いま書きかけのコミットのメッセージを書かせる（下記。コミットバッファでは `C-c C-g` でも） |
 | `C-c a M` | MCP サーバを名前と状態で一覧する（下記。`/mcp` では分からない） |
 
 `*claude(PROJ)*` の中では、**確定した会話の側と入力エリアでキーが変わる**
@@ -1527,6 +1528,124 @@ face も overlay に載せる。`markdown-mode` の font-lock は `[...]` を
 API の上限は**base64 にしたあとで 5 MB** なので、生バイトではその 3/4 が
 天井（`my:claude-image-max-bytes`）。超えたら `user-error` で断る。黙って
 送っても API がリクエストごと弾くだけで、理由の分からないエラーが返る。
+
+## コミットメッセージを書かせる（`C-c a g`、2026-09-23）
+
+magit のコミットメッセージバッファ（`COMMIT_EDITMSG`）で `C-c a g`（バッファの
+中では `C-c C-g` でも同じ）を押すと、そのコミットの差分を claude に渡して
+メッセージを書かせ、**本文の位置に入れる**。コメント行には触らないので、
+そのまま `C-c C-d` で差分を見ることも `C-c C-c` でコミットすることもできる。
+
+| | |
+|---|---|
+| 本文が空 | そのまま入れる |
+| 本文が書きかけ | 「下書き」として渡して**置き換える**（確認を 1 度取る）。戻すのは `C-/` 1 回 |
+| `C-u C-c a g` | 追加の指示をミニバッファで聞く（「英語で」「1 行だけ」など） |
+| 生成中 | モードラインに `[claude]`。その間も Emacs は使える |
+| 待っている間にコミットしてしまった | 書かせたものを kill-ring に入れる |
+
+実測（2026-09-23、mac / プロンプト 9.0 KB）: **6.6 秒**。
+
+### 会話セッションは使わない（`claude -p` を 1 回起こす）
+
+`claude -p --output-format text` にプロンプトを**標準入力で**渡し、
+テキストを 1 つ受け取るだけ。理由は 3 つ。
+
+- 差分を会話に流すと、以後のやり取りがコミットの話に引きずられる（文脈も食う）
+- 会話バッファのテキストには markdown 装飾も折りたたみも載るので、
+  メッセージとして取り出すのに向かない
+- セッションを起こしていなくても使えるほうがよい
+
+環境（アカウント）は、そのプロジェクトでセッションが動いていればそれに合わせ、
+無ければ前回選んだもの。**聞かない**（コミットの途中に選択を挟みたくない）。
+
+### 【重要】`git diff --cached` を決め打ちしてはいけない
+
+`commit --all`（magit の `-a`）は**一時 index** を使うので、実 index は
+変わらない。つまり `git diff --cached` は **0 バイトを返す**。
+
+実測（2026-09-23、`git commit --all --verbose` の途中で）:
+
+```
+$ git status --short
+ M ideco_client/get-ideco.ps1     ← ワークツリーに変更がある
+ M ideco_client/get_ideco.py
+$ git diff --cached | wc -c
+0                                 ← それでも --cached は空
+```
+
+**エラーにならない。** そのまま渡せば「空の差分から書かれたもっともらしい
+メッセージ」が出てくる。差分は次の順に取る。
+
+| | |
+|---|---|
+| 1 | バッファのカット行（`------ >8 ------`）より下の差分。`--verbose` のときだけ入っているが、**git 自身がこのコミットに対して出したもの**なので最も確か（amend でも `--all` でも正しい） |
+| 2 | `magit-commit-diff--args` が計算した範囲での `git diff`。amend / reword / rebase 中の squash / `--all` を見分ける |
+| 3 | それが空なら `git diff HEAD`（magit が無いときの `--all` の保険） |
+
+2 の関数は末尾に「別の差分を出すか」を決める枝を持つが、そこは
+`this-command` が `magit-diff-while-committing` のときしか通らないので、
+ここから呼べば `pcase` が決めた値がそのまま返る（実測で `("HEAD" nil nil)`）。
+
+### 【重要】カット行の次の行は差分ではない
+
+git はカット行のあとに 2 行のコメントを置く。
+
+```
+# ------------------------ >8 ------------------------
+# Do not modify or remove the line above.
+# Everything below it will be ignored.
+diff --git a/...
+```
+
+`forward-line 1` だけで切り出すと **「削除するなと書かれた行」が差分の先頭に
+混ざる**（最初の実装がそうなっていた）。コメント行が尽きるまで飛ばす。
+
+### 【重要】`default-directory` は `.git/` を指している
+
+git は `COMMIT_EDITMSG` を `.git/` の中に置くので、そこで claude を起こすと
+**cwd が 1 階層ずれる**。claude は cwd の `CLAUDE.md` を自分で読むので、
+ずれるとリポジトリ固有の書き方（言語・語調・trailer の有無）が効かない。
+リンクされた worktree では `.git/worktrees/NAME/` なので文字列で削るだけでは
+足りず、`magit-toplevel` に聞くのが確実。
+
+### 渡すもの
+
+```
+指示文（my:claude-commit-message-instruction）
+## 書きかけの下書き        ← あれば
+## 直近のコミット（文体の参考）   git log --no-merges -n12 --pretty=format:%s
+## git が付けたコメント     バッファのコメント行（ブランチ・対象ファイルの一覧）
+## 差分                    ```diff … ```（60000 文字で打ち切る）
+```
+
+直近のログを渡すのは**言語と語調を合わせるため**。このリポジトリのように
+`CLAUDE.md` に規約が書いてあればそちらも効くが、書いていないリポジトリでも
+履歴から推測できる。
+
+### 出力の後始末
+
+- 全体を包むコードフェンスだけ剥がす（付けるなと書いても付いてくることがある）
+- 挿入は `combine-change-calls` でまとめる。**`C-/` 1 回で元に戻る**
+  （実測で下書きを含む本文が完全に復元されることを確認した）
+- stderr は別のパイプで受ける。`make-pipe-process` の既定のセンチネルは
+  終了時に「Process … finished」をバッファに書き込むので `#'ignore` にする
+
+### キーは 2 つ
+
+| | |
+|---|---|
+| `C-c a g` | グローバル。コミットバッファが**1 つだけ**あればそれに書く（magit の status や diff から押せる）。2 つ以上あるときは選ばない — どちらのコミットに書くか間違えると気づきにくい |
+| `C-c C-g` | `git-commit-mode-map`。コミット中に押しやすいほう |
+
+`C-c C-g` は git-commit / with-editor / magit のどれも使っていない（生きた
+Emacs の `COMMIT_EDITMSG` で `key-binding` を見て確認。埋まっているのは
+`C-c C-a/C-d/C-i/C-o/C-p/C-r/C-s/C-t/C-w` と `C-c M-s/M-i/M-p/M-n`）。
+
+**バッファの判定に `git-commit-mode` だけを見てはいけない。** `C-c a g` は
+グローバルなので magit を一度もロードしていないセッションからでも押せ、
+素の `buffer-local-value` では `void-variable` になる。`boundp` で見て、
+無ければファイル名（`COMMIT_EDITMSG` / `MERGE_MSG` / `TAG_EDITMSG`）で拾う。
 
 ## セッションの再開とモデルの変更
 

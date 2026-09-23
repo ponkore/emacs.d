@@ -189,6 +189,8 @@ Windows の Emacs には PTY が無いので、双方向のストリーミング
 プロジェクトごとに持て、アカウント（`CLAUDE_CONFIG_DIR`）もセッションごとに選べる。
 逐次表示、画像添付（`M-v`）、許可プロンプト、AskUserQuestion への応答、
 markdown 装飾、ヘッダ行のステータス表示。
+**コミットメッセージを書かせる**こともできる（`C-c a g`。magit の
+コミットバッファで差分を渡し、本文の位置に入れる）。
 → [docs/claude/my-claude.md](docs/claude/my-claude.md)
 
 ### 対話 TUI（`M-x my:pty-run` / `M-x my:claude-term`）
@@ -282,6 +284,7 @@ Excel ブックは OS の関連付けに渡す、`C-c x` で exceldiff、`C-c m`
 | `m` | モデルを変える（会話は継続） |
 | `i` / `s` | 入力エリアへ / リージョンを送る |
 | `k` / `q` | 中断 / セッション終了 |
+| `g` | 書きかけのコミットのメッセージを書かせて入れる（コミットバッファでは `C-c C-g` でも） |
 | `M` | MCP サーバを名前と状態で一覧する（`/mcp` は要約しか返さない） |
 
 会話バッファ `*claude(PROJ)*` の中では `C-c C-c` 送信、`C-c C-k` 書きかけを捨てる、

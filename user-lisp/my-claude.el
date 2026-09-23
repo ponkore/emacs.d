@@ -3759,6 +3759,400 @@ in the terminal for details.」という要約しか返さず、詳細は端末�
       (my:claude--show-mcp-servers (my:claude-session-label session) servers))))
 
 ;;; --------------------------------------------------
+;;; コミットメッセージを書かせる (C-c a g / コミットバッファの C-c C-g)
+;;; --------------------------------------------------
+;;
+;; magit のコミットメッセージバッファ (COMMIT_EDITMSG) で押すと、そのコミットの
+;; 差分を claude に渡してメッセージを書かせ、本文の位置に入れる。
+;;
+;; **会話セッションは使わない。** `claude -p --output-format text' を 1 回
+;; 起こし、プロンプトは標準入力で渡してテキストを 1 つ受け取るだけ。理由は 3 つ。
+;;
+;; - 差分を会話に流すと以後のやり取りが引きずられる (文脈も食う)
+;; - 会話バッファのテキストには markdown 装飾も折りたたみも載るので、
+;;   メッセージとして取り出すのに向かない
+;; - セッションを起こしていなくても使えるほうがよい
+;;
+;; 作業ディレクトリは **リポジトリのルート**にする (`my:claude--commit-toplevel')。
+;; claude は cwd の CLAUDE.md を自分で読むので、リポジトリ固有の書き方
+;; (言語・語調・trailer の有無) はそこに書いてあればそれに従う。
+;;
+;; 実測 (2026-09-23、mac / 11 KB のプロンプト): 6.6 秒。非同期で走らせるので
+;; その間も Emacs は使える。
+
+(defcustom my:claude-commit-message-model nil
+  "コミットメッセージを書かせるときのモデル。nil なら claude の既定。
+
+会話の `my:claude-model' とは独立にしてある。要約は安いモデルでも十分
+なので、`\"haiku\"' のように書いておける。"
+  :type '(choice (const :tag "既定" nil) string))
+
+(defcustom my:claude-commit-message-args nil
+  "コミットメッセージの生成で追加で渡す引数のリスト (例 (\"--effort\" \"low\"))。"
+  :type '(repeat string))
+
+(defcustom my:claude-commit-message-log-count 12
+  "文体の参考として渡す直近のコミットの件数。0 なら渡さない。"
+  :type 'integer)
+
+(defcustom my:claude-commit-message-max-chars 60000
+  "プロンプトに載せる差分の上限 (文字)。超えたぶんは切って断り書きを入れる。"
+  :type 'integer)
+
+(defcustom my:claude-commit-message-instruction
+  "次のコミットに付けるコミットメッセージだけを出力してください。
+
+書き方:
+- 1 行目は要約。50 文字程度に収め、末尾に句点を付けない
+- 必要なら空行を 1 つ挟んで本文。何をしたかではなく、なぜそうしたかを書く
+- 直近のコミットと同じ言語・文体に合わせる
+- Co-authored-by などの trailer は付けない
+
+出力の決まり:
+- コミットメッセージ本文だけを出力する。前置き・後置き・見出し・
+  コードフェンス・引用符を付けない
+- ツールは使わず、以下に渡した情報だけで書く"
+  "コミットメッセージを書かせるときの指示文。"
+  :type 'string)
+
+(defvar-local my:claude--commit-process nil
+  "そのコミットメッセージバッファで走っている生成プロセス。
+二重起動を止めるためだけに持つ。")
+
+(defconst my:claude--commit-file-regexp
+  "\\`\\(COMMIT_EDITMSG\\|MERGE_MSG\\|TAG_EDITMSG\\)\\'"
+  "コミットメッセージのファイル名。`git-commit-mode' が無いときの目印。")
+
+(defun my:claude--commit-buffer-p (&optional buffer)
+  "BUFFER がコミットメッセージのバッファか。
+
+`git-commit-mode' で見るのが本筋だが、**変数が存在しない可能性がある**。
+`C-c a g' はグローバルなので、magit を一度もロードしていない
+セッションからでも押せてしまい、素の `buffer-local-value' では
+`void-variable' になる (CLAUDE.md 「イベント処理の経路に magit の関数を
+書かない」と同じ踏み方)。その場合はファイル名で拾う。"
+  (with-current-buffer (or buffer (current-buffer))
+    (or (and (boundp 'git-commit-mode) (symbol-value 'git-commit-mode))
+        (and buffer-file-name
+             (string-match-p my:claude--commit-file-regexp
+                             (file-name-nondirectory buffer-file-name))
+             t))))
+
+(defun my:claude--commit-buffer ()
+  "対象のコミットメッセージバッファ。無ければ nil。
+
+このバッファがそれならそれ。そうでなければ**生きているものが 1 つだけ
+なら**それを使う (magit の status や diff から `C-c a g' を押せる)。
+**2 つ以上あるときは選ばない** — どちらのコミットに書くかを間違えると
+気づきにくい。"
+  (if (my:claude--commit-buffer-p)
+      (current-buffer)
+    (let ((bufs (seq-filter #'my:claude--commit-buffer-p (buffer-list))))
+      (and (null (cdr bufs)) (car bufs)))))
+
+(defun my:claude--commit-comment-start ()
+  "コミットメッセージのコメント文字。
+`core.commentChar' を変えていると `#' ではない。`git-commit-setup' が
+`comment-start' に入れてくれるので、それを見る。"
+  (or (and (stringp comment-start)
+           (let ((s (string-trim comment-start)))
+             (and (not (string-empty-p s)) s)))
+      "#"))
+
+(defun my:claude--commit-body-end ()
+  "本文の末尾 (最初のコメント行の行頭)。コメントが無ければ `point-max'。"
+  (save-excursion
+    (goto-char (point-min))
+    (if (re-search-forward
+         (format "^%s" (regexp-quote (my:claude--commit-comment-start))) nil t)
+        (line-beginning-position)
+      (point-max))))
+
+(defun my:claude--commit-comments ()
+  "git が書いたコメント (ブランチと対象ファイルの一覧)。無ければ nil。
+カット行 (`------ >8 ------') より下は差分なので含めない。"
+  (save-excursion
+    (let* ((cs (regexp-quote (my:claude--commit-comment-start)))
+           (beg (my:claude--commit-body-end))
+           (end (progn (goto-char (point-min))
+                       (if (re-search-forward
+                            (format "^%s -\\{8,\\} >8 -\\{8,\\}$" cs) nil t)
+                           (line-beginning-position)
+                         (point-max))))
+           (text (string-trim (buffer-substring-no-properties beg end))))
+      (and (not (string-empty-p text)) text))))
+
+(defun my:claude--commit-verbose-diff ()
+  "バッファのカット行より下にある差分。無ければ nil。
+
+`commit --verbose' (または `commit.verbose') のときだけ入っている。
+**入っているならこれが最も確かな差分** — git 自身がこのコミットに対して
+出したものなので、amend でも `--all' でも取り違えない。
+
+**カット行の次の行から始まるのではない。** git はそのあとに
+
+  # Do not modify or remove the line above.
+  # Everything below it will be ignored.
+
+の 2 行を置く。切り出しを 1 行ずらすだけだとこれが差分の先頭に混ざり、
+モデルには「削除するなと書かれた行」として読めてしまう (最初の実装が
+そうなっていた)。コメント行が尽きるまで飛ばす。"
+  (save-excursion
+    (goto-char (point-min))
+    (when (re-search-forward
+           (format "^%s -\\{8,\\} >8 -\\{8,\\}$"
+                   (regexp-quote (my:claude--commit-comment-start)))
+           nil t)
+      (forward-line 1)
+      (let ((cs (format "^%s" (regexp-quote (my:claude--commit-comment-start)))))
+        (while (and (not (eobp)) (looking-at-p cs))
+          (forward-line 1)))
+      (let ((text (string-trim (buffer-substring-no-properties
+                                (point) (point-max)))))
+        (and (not (string-empty-p text)) text)))))
+
+(defun my:claude--commit-toplevel ()
+  "このコミットメッセージバッファのリポジトリのルート。
+
+**`default-directory' をそのまま使ってはいけない。** git は
+COMMIT_EDITMSG を `.git/' の中に置くので、そこで claude を起こすと
+cwd が 1 階層ずれ、リポジトリの CLAUDE.md も履歴も見つからない。
+リンクされた worktree では `.git/worktrees/NAME/' なので、
+文字列で削るだけでは足りず magit に聞くのが確実。"
+  (or (and (fboundp 'magit-toplevel) (ignore-errors (magit-toplevel)))
+      (let ((dir (expand-file-name default-directory)))
+        (and (string-match "\\`\\(.*/\\)\\.git/" dir) (match-string 1 dir)))
+      (expand-file-name default-directory)))
+
+(defun my:claude--git-string (dir &rest args)
+  "DIR で git ARGS を実行して標準出力を返す。失敗したら空文字列。
+
+`magit-git-*' は使わない。読み取り 1 回に magit のロードを要求する
+理由が無い (CLAUDE.md 「イベント処理の経路に magit の関数を書かない」と
+同じ判断)。"
+  (with-temp-buffer
+    (let ((default-directory (file-name-as-directory (expand-file-name dir))))
+      (ignore-errors
+        (apply #'call-process (or (executable-find "git") "git")
+               nil t nil "--no-pager" args)))
+    (string-trim (buffer-string))))
+
+(defun my:claude--commit-range ()
+  "コミット対象の差分を取る git の引数。(REV ARG) を返す。
+
+magit の `magit-commit-diff--args' をそのまま借りる。amend / reword /
+rebase 中の squash / `--all' を見分けており、自分で書き直すとどれかで
+必ず外す。あの関数の末尾には「別の差分を出すか」を決める枝があるが、
+そこは `this-command' が `magit-diff-while-committing' のときしか
+通らないので、ここから呼べば pcase が決めた値がそのまま返る (実測)。"
+  (or (and (fboundp 'magit-commit-diff--args)
+           (ignore-errors (seq-take (magit-commit-diff--args) 2)))
+      '(nil "--cached")))
+
+(defun my:claude--commit-diff (dir)
+  "コミット対象の差分を返す。取れなければ nil。
+
+【重要】`git diff --cached' を決め打ちしてはいけない。`commit --all'
+\(magit の `-a') は一時 index を使うので **`--cached' は空を返す**。
+エラーにはならないので、そのまま渡すと「空の差分から書かれた
+もっともらしいメッセージ」が出てくる (2026-09-23 に実測。ワークツリーに
+2 ファイルの変更があるのに `git diff --cached' は 0 バイト)。
+
+順に、
+  1. バッファのカット行より下の差分 (`--verbose' のとき。最も確か)
+  2. magit が計算した範囲での `git diff'
+  3. それが空なら `git diff HEAD' (magit が無いときの `--all' の保険)"
+  (or (my:claude--commit-verbose-diff)
+      (pcase-let* ((`(,rev ,arg) (my:claude--commit-range))
+                   (diff (apply #'my:claude--git-string dir "diff"
+                                (append (and arg (list arg))
+                                        (and rev (list rev))))))
+        (if (string-empty-p diff)
+            (let ((d (my:claude--git-string dir "diff" "HEAD")))
+              (and (not (string-empty-p d)) d))
+          diff))))
+
+(defun my:claude--commit-truncate (diff)
+  "DIFF が長すぎたら切って、切ったことを書き添える。"
+  (if (<= (length diff) my:claude-commit-message-max-chars)
+      diff
+    (concat (substring diff 0 my:claude-commit-message-max-chars)
+            (format "\n…(差分が長いので %d 文字で切った。残り %d 文字)"
+                    my:claude-commit-message-max-chars
+                    (- (length diff) my:claude-commit-message-max-chars)))))
+
+(defun my:claude--commit-prompt (dir diff comments draft extra)
+  "claude に渡すプロンプトを組む。"
+  (let ((log (and (> my:claude-commit-message-log-count 0)
+                  (my:claude--git-string
+                   dir "log" "--no-merges"
+                   (format "-n%d" my:claude-commit-message-log-count)
+                   "--pretty=format:%s"))))
+    (concat
+     my:claude-commit-message-instruction "\n"
+     (and extra (format "\n追加の指示: %s\n" extra))
+     (and draft (concat "\n## 書きかけの下書き (言いたいことの芯。拾って書き直す)\n"
+                        draft "\n"))
+     (and log (not (string-empty-p log))
+          (concat "\n## 直近のコミット (文体の参考)\n" log "\n"))
+     (and comments (concat "\n## git が付けたコメント\n" comments "\n"))
+     "\n## 差分\n```diff\n" (my:claude--commit-truncate diff) "\n```\n")))
+
+(defun my:claude--commit-command ()
+  "ワンショットで起こす claude の引数リスト。"
+  (append (list my:claude-executable "-p" "--output-format" "text")
+          (when my:claude-commit-message-model
+            (list "--model" my:claude-commit-message-model))
+          my:claude-commit-message-args))
+
+(defun my:claude--commit-environment (dir)
+  "DIR で使う環境 (アカウント) のラベル。
+
+そのプロジェクトでセッションが動いていればそれに合わせる。無ければ
+前回選んだもの、それも無ければ一覧の先頭。**聞かない** — コミットの
+途中で選択を挟みたくない。"
+  (or (when-let* ((s (my:claude--session-for-directory dir)))
+        (my:claude-session-name s))
+      my:claude--last-environment
+      (car (car my:claude-environments))))
+
+(defun my:claude--commit-clean (text)
+  "claude の出力からコミットメッセージだけを取り出す。
+
+指示しても ```-``` で囲んで返してくることがあるので、全体を包む
+コードフェンスだけ剥がす。"
+  (let ((s (string-trim text)))
+    (when (string-match "\\````[^\n]*\n\\(\\(?:.\\|\n\\)*\\)\n```\\'" s)
+      (setq s (match-string 1 s)))
+    (string-trim s)))
+
+(defun my:claude--commit-done (buffer proc out err)
+  "生成が終わったときの後始末と挿入。"
+  (let ((code (process-exit-status proc))
+        (text (my:claude--commit-clean
+               (with-current-buffer out (buffer-string))))
+        (stderr (string-trim (with-current-buffer err (buffer-string)))))
+    (kill-buffer out)
+    (kill-buffer err)
+    (when (buffer-live-p buffer)
+      (with-current-buffer buffer
+        (setq my:claude--commit-process nil
+              mode-line-process nil)
+        (force-mode-line-update)))
+    (cond
+     ((not (zerop code))
+      (message "claude が失敗した (終了コード %d): %s" code
+               (if (string-empty-p stderr) "(stderr は空)"
+                 (car (last (split-string stderr "\n" t))))))
+     ((string-empty-p text)
+      (message "claude が何も返さなかった"))
+     ;; コミットが済んでいる / 中止された場合。書かせたものは捨てない。
+     ((not (buffer-live-p buffer))
+      (kill-new text)
+      (message "コミットメッセージバッファが無いので kill-ring に入れた"))
+     (t
+      (my:claude--commit-insert buffer text)))))
+
+(defun my:claude--commit-insert (buffer text)
+  "BUFFER の本文を TEXT で置き換える。
+
+コメント行 (git が書いた説明・カット行より下の差分) には触らない。
+1 回の undo で元に戻せるよう、削除と挿入をまとめる。"
+  (with-current-buffer buffer
+    (let ((end (my:claude--commit-body-end)))
+      (combine-change-calls (point-min) end
+        (delete-region (point-min) end)
+        (goto-char (point-min))
+        (insert text "\n\n")))
+    (goto-char (point-min)))
+  (unless (get-buffer-window buffer)
+    (display-buffer buffer))
+  (message "コミットメッセージを入れた (C-c C-c でコミット、C-/ で元に戻す)"))
+
+;;;###autoload
+(defun my:claude-commit-message (&optional arg)
+  "いま書きかけのコミットに付けるメッセージを claude に書かせて入れる。
+
+コミットメッセージバッファ (COMMIT_EDITMSG) で使う。差分・直近のログ・
+git が書いたコメントを渡し、返ってきたテキストを本文の位置に入れる。
+**コメント行には触らない**ので、`C-c C-d' で差分を見ることも
+`C-c C-c' でそのままコミットすることもできる。
+
+本文が既に書かれているときは、それを「下書き」として渡してから
+置き換える (確認を 1 度取る)。戻すのは `C-/' 1 回。
+
+ARG (`C-u') を付けると追加の指示をミニバッファで聞く
+\(\"英語で\" \"1 行だけ\" など)。
+
+claude は非同期に走るので、その間も Emacs は使える。待っている間に
+コミットを済ませてしまった場合は、書かせたものを kill-ring に入れる。"
+  (interactive "P")
+  (let ((buffer (or (my:claude--commit-buffer)
+                    (user-error "コミットメッセージバッファが見つからない"))))
+    (unless (file-executable-p my:claude-executable)
+      (user-error "claude が見つからない: %s" my:claude-executable))
+    (with-current-buffer buffer
+      (when (process-live-p my:claude--commit-process)
+        (user-error "このバッファではもう claude が書いている"))
+      (let* ((dir (my:claude--commit-toplevel))
+             (draft (let ((s (string-trim
+                              (buffer-substring-no-properties
+                               (point-min) (my:claude--commit-body-end)))))
+                      (and (not (string-empty-p s)) s)))
+             (extra (and arg (read-string "追加の指示: ")))
+             diff prompt)
+        (when (and draft
+                   (not (y-or-n-p
+                         "本文がある。下書きとして渡して書き換える? ")))
+          (user-error "中止した"))
+        (setq diff (or (my:claude--commit-diff dir)
+                       (user-error "コミット対象の差分が取れない")))
+        (setq prompt (my:claude--commit-prompt dir diff
+                                               (my:claude--commit-comments)
+                                               draft extra))
+        (setq my:claude--commit-process
+              (my:claude--commit-run buffer dir prompt)
+              mode-line-process " [claude]")
+        (force-mode-line-update)
+        (message "claude にコミットメッセージを書かせている (%d 文字渡した)…"
+                 (length prompt))))))
+
+(defun my:claude--commit-run (buffer dir prompt)
+  "DIR で claude を 1 回起こし、PROMPT を標準入力で渡す。プロセスを返す。
+
+標準入力に日本語が乗るので `default-process-coding-system' を utf-8 に
+束縛する (Windows では cdr が cp932 なので、束縛しないと化ける。
+`my:claude--start' と同じ)。"
+  (let* ((env (my:claude--commit-environment dir))
+         (out (generate-new-buffer " *claude-commit-out*" t))
+         (err (generate-new-buffer " *claude-commit-err*" t))
+         ;; stderr を分けて受ける。既定のセンチネルは終了時に
+         ;; 「Process … finished」をバッファに書くので黙らせる。
+         (stderr (make-pipe-process :name "claude-commit-stderr"
+                                    :buffer err :noquery t
+                                    :sentinel #'ignore))
+         (proc (let ((default-process-coding-system '(utf-8-unix . utf-8-unix))
+                     (default-directory dir)
+                     (process-environment
+                      (my:claude--process-environment
+                       (my:claude--config-dir env))))
+                 (make-process
+                  :name "claude-commit"
+                  :buffer out
+                  :connection-type 'pipe
+                  :noquery t
+                  :stderr stderr
+                  :command (my:claude--wrap-command
+                            dir (my:claude--commit-command))
+                  :sentinel
+                  (lambda (p _event)
+                    (when (memq (process-status p) '(exit signal))
+                      (my:claude--commit-done buffer p out err)))))))
+    (process-send-string proc prompt)
+    (process-send-eof proc)
+    proc))
+
+;;; --------------------------------------------------
 ;;; 画像の添付
 ;;; --------------------------------------------------
 ;;
@@ -4456,7 +4850,24 @@ org バッファで `my:org-yank-image' に潰しているのと同じ流儀。�
          ("C-c a s" . my:claude-send-region)
          ("C-c a k" . my:claude-interrupt)
          ("C-c a q" . my:claude-quit)
+         ("C-c a g" . my:claude-commit-message)
          ("C-c a M" . my:claude-list-mcp-servers)))
+
+;; コミットメッセージバッファでは C-c C-g でも呼べるようにする
+;; (押しやすいほう。`C-c a g' もそのまま効く)。
+;;
+;; **`git-commit-mode-map' に張る。** あそこは magit 由来のマイナーモードの
+;; マップなので、`:bind' (グローバル) では同じ場所に置けない。`git-commit' は
+;; 実在する feature なので `:defer t' + `:config' がそのまま効く
+;; (CLAUDE.md 「名前は実在する feature にする」)。
+;;
+;; `C-c C-g' は git-commit / with-editor / magit のどれも使っていない
+;; (2026-09-23 に生きた Emacs の COMMIT_EDITMSG で `key-binding' を見て確認。
+;; 埋まっているのは C-c C-a/C-d/C-i/C-o/C-p/C-r/C-s/C-t/C-w と C-c M-s/M-i/M-p/M-n)。
+(use-package git-commit
+  :defer t
+  :config
+  (define-key git-commit-mode-map (kbd "C-c C-g") #'my:claude-commit-message))
 
 (provide 'my-claude)
 ;;; my-claude.el ends here
