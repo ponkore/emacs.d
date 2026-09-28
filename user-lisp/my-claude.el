@@ -22,8 +22,9 @@
 ;; **入力は会話バッファの末尾で行う。** バッファは区切り
 ;; (`my:claude-prompt-string') で 2 つに分かれる。
 ;;
-;;   区切りより前  確定した会話。read-only で、1 文字キー (i / p / n / TAB / z / q) が
-;;                 効く (`my:claude-view-map' をテキストプロパティで載せてある)
+;;   区切りより前  確定した会話。read-only で、1 文字キー (i / p / n / TAB / z / q)
+;;                 と RET (リンクを開く) が効く (`my:claude-view-map' を
+;;                 テキストプロパティで載せてある)
 ;;   区切りより後  入力エリア。markdown として編集できる。C-c C-c で送る
 ;;
 ;; 応答は区切りの**前**に挿さる (`my:claude--at-end') ので、読みながら次を
@@ -240,6 +241,18 @@ stat 0.043 ms で済む) なので、端末の TUI に合わせて速めにし�
 
 コードブロックと行中のコードの中は触らない
  (`my:claude--render-emphasis')。"
+  :type 'boolean)
+
+(defcustom my:claude-render-links t
+  "非 nil なら markdown の `[文字列](URL)' をリンクとして見せる。
+
+**記号と URL ごと消すのは `**強調**' と同じ理由。** URL は本文より
+長いことが多く、表のセルの中ではその桁数がそのまま列幅に乗る。
+URL は `my:claude-url' テキストプロパティに退避し、RET / mouse-1
+ (`my:claude-browse-link') で開く。
+
+コードブロックと行中のコードの中は触らない
+ (`my:claude--render-link')。"
   :type 'boolean)
 
 (defcustom my:claude-table-max-width nil
@@ -471,6 +484,17 @@ Windows の `play-sound-file' は WAV しか鳴らせない。"
 唯一重なりうる見出しでは、`my:claude--render-emphasis' が
 **記号だけ落として face は載せない**ようにしてある (載せると
 見出しの色が白で潰れる)。")
+
+(defface my:claude-link-face
+  '((t :inherit link))
+  "markdown の `[文字列](URL)' の文字列。
+
+`link' から継ぐ。テーマが決めた色と下線をそのまま使うので、Emacs の
+他のリンク (help バッファ、`goto-address-mode') と同じ見え方になる。
+
+`my:claude-bold-face' と同じく、`my:claude--add-face' が地の face の
+**前**に積むので色が勝つ。見出しの中では face を載せない
+ (`my:claude--render-link')。")
 
 (defface my:claude-subagent-face
   '((t :inherit font-lock-doc-face))
@@ -2288,33 +2312,107 @@ face がまだ載っていないと `` `**a**` `` の `**' まで消してしま
             (my:claude--add-face mbeg (+ mbeg len) 'my:claude-bold-face))
           (goto-char (+ mbeg len)))))))
 
+;;; markdown のリンク
+
+(defconst my:claude--link-regexp
+  "!?\\[\\([^][\n]+\\)\\]([ \t]*\\([^ \t\n()]+\\)[ \t]*)"
+  "markdown の `[文字列](URL)'。1 番目が文字列、2 番目が URL。
+
+画像 (`![alt](URL)') も同じ形で拾う。URL には空白と括弧を認めない
+ (`](URL \"title\")' の title 付きも拾わない)。claude はどちらも
+書かないので、拾えなければ原文のまま残るだけ。
+
+**文字列の側に `[' `]' は認めない。** 入れ子にすると
+`[Image #1]' のようなただの角括弧と `](' が離れた場所で組になる。")
+
+(defun my:claude--render-link (beg end)
+  "BEG..END の `[文字列](URL)' から記号と URL を落とし、文字列をリンクにする。
+
+載せるプロパティは 5 つ。
+
+  font-lock-face  `my:claude-link-face'
+  my:claude-url   URL (`my:claude-browse-link' が読む)
+  follow-link     mouse-1 を mouse-2 に読み替えさせる (`mouse-on-link-p')
+  mouse-face      マウスを載せたときの強調
+  help-echo       落とした URL。どこへ行くかはこれで確かめる
+
+【重要】**`keymap' テキストプロパティは使えない。** 確定した会話には
+`my:claude--protect' が `my:claude-view-map' を載せてあるので、リンクの
+上に別のキーマップを置くと 1 文字キー (i / p / n / TAB / z / q) が
+そこだけ効かなくなる。キーは `my:claude-view-map' の側に置き、
+コマンドが point の `my:claude-url' を見る形にしてある。
+
+コードブロックと行中のコードの中は触らない。見出しの中は**記号だけ
+落として face は載せない** (見出しの色を保つため。リンクとしては
+開ける)。
+
+**`my:claude--render-emphasis' より後、表より前に呼ぶ。** 前者は
+`[**a**](URL)' の `**' を先に落としてもらうため、後者は 1 セルが
+必ず 1 行に収まっているうちに `](' の対を見つけるため。"
+  (when my:claude-render-links
+    (goto-char beg)
+    (while (re-search-forward my:claude--link-regexp end t)
+      (let* ((mbeg (match-beginning 0))
+             (tbeg (match-beginning 1))
+             (tend (match-end 1))
+             (mend (match-end 0))
+             (url (match-string-no-properties 2))
+             (len (- tend tbeg))
+             (heading (my:claude--heading-face-p mbeg)))
+        (if (or (my:claude--code-face-p mbeg)
+                (memq 'my:claude-inline-code-face
+                      (my:claude--face-list
+                       (get-text-property mbeg 'font-lock-face))))
+            (goto-char mend)
+          ;; 後ろから消す (先に消すと前の位置がずれる)。
+          (delete-region tend mend)
+          (delete-region mbeg tbeg)
+          (unless heading
+            (my:claude--add-face mbeg (+ mbeg len) 'my:claude-link-face))
+          (add-text-properties mbeg (+ mbeg len)
+                               `( my:claude-url ,url
+                                  follow-link t
+                                  mouse-face highlight
+                                  help-echo ,url))
+          (goto-char (+ mbeg len)))))))
+
 ;;; markdown の表を罫線に組み直す
 
+(defconst my:claude--cell-props
+  '(font-lock-face my:claude-url follow-link mouse-face help-echo)
+  "表のセルに持ち越すテキストプロパティ。
+
+`font-lock-face' が装飾、残りの 4 つがリンク (`my:claude--render-link')。
+**`read-only' / `keymap' / `front-sticky' を入れてはいけない**
+ (`my:claude--line-face-string' の docstring)。")
+
 (defun my:claude--line-face-string ()
-  "いまの行を、`font-lock-face' **だけ**を持つ文字列にして返す。
+  "いまの行を、`my:claude--cell-props' **だけ**を持つ文字列にして返す。
 
 表のセルは装飾が済んだあとのバッファから取り出す。どちらの極端も
 まずい。
 
   `buffer-substring-no-properties'  見出し・行中のコード・強調の face が
-                                    落ちる。**折り返した先の色が消える**
+                                    落ちる。**折り返した先の色が消える**。
+                                    リンクも死ぬ
   `buffer-substring'                `read-only' / `keymap' /
                                     `front-sticky' まで連れてくる。
                                     `insert' した先で保護が二重になり、
                                     `my:claude--protect' の張り直しと
                                     噛み合わない
 
-そこで `font-lock-face' だけを写す。"
+そこで写すプロパティを名指しする。"
   (let* ((beg (line-beginning-position))
          (end (line-end-position))
-         (s (buffer-substring-no-properties beg end))
-         (pos beg))
-    (while (< pos end)
-      (let ((next (next-single-property-change pos 'font-lock-face nil end))
-            (f (get-text-property pos 'font-lock-face)))
-        (when f
-          (put-text-property (- pos beg) (- next beg) 'font-lock-face f s))
-        (setq pos next)))
+         (s (buffer-substring-no-properties beg end)))
+    (dolist (prop my:claude--cell-props)
+      (let ((pos beg))
+        (while (< pos end)
+          (let ((next (next-single-property-change pos prop nil end))
+                (v (get-text-property pos prop)))
+            (when v
+              (put-text-property (- pos beg) (- next beg) prop v s))
+            (setq pos next)))))
     s))
 
 (defun my:claude--table-row-p ()
@@ -2640,16 +2738,18 @@ ALIGNS は列ごとの寄せ方、HEADER は見出し行の数、INDENT は行�
  (`my:claude--fontify-region' が font-lock を入力エリアだけに限っているのは
 このため)。ブロックが確定した時点で一度だけ塗る。
 
-やることは 4 つ。**この順でなければならない。**
+やることは 5 つ。**この順でなければならない。**
 
   1. ``` のブロックを塗る (言語指定があればその言語として着色する)
   2. 見出しと行中のコード。行中のコードは `` ` `` を落として色だけ
      残す。1 の結果を見てコードブロックの中を避ける
   3. `**強調**' の `**' を落として太字にする。2 の結果を見て
      行中のコードの中を避ける
-  4. `|' の表を罫線に組み直す。1〜3 が載せた face ごと組み直す
+  4. `[文字列](URL)' から記号と URL を落としてリンクにする。3 に
+     `[**a**](URL)' の `**' を先に落としてもらう
+  5. `|' の表を罫線に組み直す。1〜4 が載せた face とリンクごと組み直す
 
-【重要】**表は最後。** 2 と 3 は `` `…` `` や `**…**' を
+【重要】**表は最後。** 2〜4 は `` `…` `` / `**…**' / `](' を
 **行の中で**探すので、先に表を組んでセルが折り返されると、開きと
 閉じが別の行に分かれて対にならない。隣の記号と誤って組になり、
 色が半端な位置から始まったり終わったりする (実際にそうなっていた)。
@@ -2698,7 +2798,9 @@ delta が来ないスラッシュコマンドの `assistant')。**片方だけ�
             (my:claude--render-inline-code beg end)
             ;; [3] **強調**
             (my:claude--render-emphasis beg end)
-            ;; [4] パイプ表を罫線に。2 と 3 が載せた face ごと組み直す。
+            ;; [4] [文字列](URL)
+            (my:claude--render-link beg end)
+            ;; [5] パイプ表を罫線に。2〜4 が載せた face とリンクごと組み直す。
             (my:claude--render-tables beg end))
           (set-marker end nil))))))
 
@@ -4679,6 +4781,66 @@ overlay とは別物だが、範囲を広げる理由が無い。"
         (display-buffer buf))
     (user-error "ここには折りたたまれた出力が無い")))
 
+(defun my:claude--url-at-point (&optional pos)
+  "POS (既定は `point') にあるリンクの URL。無ければ nil。
+
+**1 つ前の位置も見る。** リンクが行末にあるとき `C-e' が止まるのは
+最後の文字の**後ろ**なので、そこで空振りすると理由が分からない。"
+  (let ((pos (or pos (point))))
+    (or (get-text-property pos 'my:claude-url)
+        (and (> pos (point-min))
+             (get-text-property (1- pos) 'my:claude-url)))))
+
+(defun my:claude--follow-url (url)
+  "URL を開く。スキームが無ければファイルとして開く。
+
+claude は `[docs/README.md](docs/README.md)' のような相対リンクも書く。
+それをブラウザに渡しても意味が無いので、セッションの作業ディレクトリ
+からの相対パスとして開く。`#' より後ろ (アンカー) は捨てる。
+
+**ファイルは別ウィンドウに出す。** `find-file' だと会話バッファの
+ウィンドウが潰れ、`C-c a l' で組み直すことになる。
+
+開いた URL は `message' に残す。ブラウザは別のウィンドウで開くので、
+**Emacs の側には何が起きたか分かるものが何も残らない**。
+
+【重要】**スキームは 2 文字以上。** 1 文字を許すと Windows の絶対パス
+ (`C:/tmp/a.txt') がスキーム付きに見えてブラウザへ流れる。実在する
+スキームはどれも 2 文字以上 (`ftp' `file' `http' `mailto')。"
+  (if (string-match-p "\\`[a-zA-Z][a-zA-Z0-9+.-]+:" url)
+      (progn
+        (message "%s" url)
+        (browse-url url))
+    (let* ((dir (if my:claude--session
+                    (my:claude-session-directory my:claude--session)
+                  default-directory))
+           (path (car (split-string url "#")))
+           (file (and (not (string-empty-p path))
+                      (expand-file-name path dir))))
+      (cond
+       ((null file) (user-error "アンカーだけのリンクは開けない (%s)" url))
+       ((file-exists-p file) (find-file-other-window file))
+       (t (user-error "リンク先が見つからない: %s" file))))))
+
+(defun my:claude-browse-link (&optional pos)
+  "POS (既定は `point') のリンクをブラウザで開く。
+
+マウスで呼ばれたときは POS がイベントになる。`posn-set-point' で
+クリックした位置に point を移してから見る (button.el の
+`push-button' と同じ)。
+
+`my:claude-view-map' の `RET' と `mouse-2' から呼ぶ。mouse-1 でも
+開けるのは `follow-link' プロパティのおかげで、`mouse-on-link-p' が
+mouse-1 を mouse-2 に読み替える (`mouse-1-click-follows-link')。"
+  (interactive (list (if (integerp last-command-event) (point) last-command-event)))
+  (when (and pos (not (integerp pos)))
+    (posn-set-point (event-start pos))
+    (setq pos (point)))
+  (let ((url (my:claude--url-at-point pos)))
+    (unless url
+      (user-error "ここにはリンクが無い"))
+    (my:claude--follow-url url)))
+
 ;;; --------------------------------------------------
 ;;; メジャーモード
 ;;; --------------------------------------------------
@@ -4718,6 +4880,8 @@ org バッファで `my:org-yank-image' に潰しているのと同じ流儀。�
     (define-key map (kbd "TAB") #'my:claude-toggle-fold)
     (define-key map (kbd "z") #'my:claude-toggle-maximize)
     (define-key map (kbd "q") #'quit-window)
+    (define-key map (kbd "RET") #'my:claude-browse-link)
+    (define-key map [mouse-2] #'my:claude-browse-link)
     map)
   "確定した会話に `keymap' テキストプロパティで載せるキーマップ。
 
@@ -4728,7 +4892,12 @@ org バッファで `my:org-yank-image' に潰しているのと同じ流儀。�
 
 `TAB' の意味が場所で変わる (ここでは畳んだ出力を開く、入力エリアでは
 `markdown-cycle')。1 つのバッファで両立させるためにテキストプロパティを
-使っている。")
+使っている。
+
+【重要】**リンクのキーはここに置く。** リンクの上に `keymap' テキスト
+プロパティで別のマップを置くと、このマップが隠れて 1 文字キーが
+そこだけ効かなくなる (`my:claude--render-link')。`RET' も `mouse-2' も
+確定領域では他に使い道が無い (read-only なので編集も yank もできない)。")
 
 (defun my:claude--fontify-region (beg end loudly)
   "BEG..END のうち**入力エリアだけ**を markdown として着色する。
@@ -4757,6 +4926,7 @@ org バッファで `my:org-yank-image' に潰しているのと同じ流儀。�
                 i    入力エリアへ移動
                 p/n  前後の自分の発言へ移動
                 TAB  折りたたんだツール出力の全体を別バッファに出す
+                RET  リンクをブラウザで開く (mouse-1 でも開ける)
                 z    このウィンドウを最大化 (もう一度で元のレイアウト)
                 q    ウィンドウを閉じる
   区切りより後  入力エリア。markdown として書ける

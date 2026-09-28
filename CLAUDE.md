@@ -927,6 +927,13 @@ gopls は大文字のドライブレターで返す（§1「Windows 固有」）
   （`my:claude--buffer-p` はメジャーモードで見る）
 - **セッションの生死はプロセスとバッファの両方**で見る（`:buffer` が nil なので
   会話バッファを kill してもプロセスは生き残る）
+- **【重要】確定した会話に `keymap` テキストプロパティを載せてはいけない**
+  （2026-09-28）。`my:claude--protect` が全域に `my:claude-view-map` を
+  載せてあるので、上にもう 1 つ置くと**そこだけ 1 文字キー（`i` / `p` / `n` /
+  `TAB` / `z` / `q`）が効かなくなる**。リンク（`[文字列](URL)`）は button.el の
+  流儀を採らず、キーを `my:claude-view-map` に置いて `my:claude-url`
+  プロパティを見る形にした。mouse-1 は `follow-link` プロパティだけで
+  mouse-2 に読み替わる（keymap は要らない） → [docs](docs/claude/my-claude.md)
 - **応答待ち（`busy`）は `my:claude--set-busy` でしか変えない。** nil / `t` /
   `asking` の 3 値で、**真偽値ではない**。ヘッダ行の点を動かすタイマーの
   入り切りをこの関数がやっているので、直に `setf` すると点が止まらなくなる。

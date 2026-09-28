@@ -1077,7 +1077,7 @@ wav の長さも実測してある。`chimes.wav` 1.23 秒、
 
 ## 会話バッファの markdown 装飾
 
-`my:claude--fontify-markdown` が 4 つを順に行う。**この順でなければ
+`my:claude--fontify-markdown` が 5 つを順に行う。**この順でなければ
 ならない。**
 
 1. ``` のブロックを塗る。言語指定があればその言語として着色する
@@ -1085,11 +1085,13 @@ wav の長さも実測してある。`chimes.wav` 1.23 秒、
    1 の結果を見てコードブロックの中を避ける
 3. `**強調**` の `**` を落として太字にする。2 の結果を見て行中のコードの
    中を避ける
-4. `|` の表を罫線に組み直す。1〜3 が載せた face ごと組み直す
+4. `[文字列](URL)` から記号と URL を落としてリンクにする。3 に
+   `[**a**](URL)` の `**` を先に落としてもらう
+5. `|` の表を罫線に組み直す。1〜4 が載せた face とリンクごと組み直す
 
 #### 【重要】表は最後（2026-09-17）
 
-2 と 3 は `` `…` `` や `**…**` を**行の中で**探す（`[^`\n]+` のように
+2〜4 は `` `…` `` / `**…**` / `](` を**行の中で**探す（`[^`\n]+` のように
 改行を除いてある）。**先に表を組んでセルが折り返されると、開きと閉じが
 別の行に分かれて対にならない。** 隣の記号と誤って組になり、色が半端な
 位置から始まったり終わったりする。
@@ -1283,8 +1285,13 @@ face が載っていればの話で、そこに 2 つ仕掛けが要る。
 
 | | |
 |---|---|
-| `buffer-substring-no-properties` | 見出し・行中のコード・強調の face が落ちる。**折り返した先の色が消える** |
+| `buffer-substring-no-properties` | 見出し・行中のコード・強調の face が落ちる。**折り返した先の色が消える**。リンクも死ぬ |
 | `buffer-substring` | `read-only` / `keymap` / `front-sticky` まで連れてくる。`insert` した先で保護が二重になり、`my:claude--protect` の張り直しと噛み合わない |
+
+そこで**写すプロパティを名指しする**（`my:claude--cell-props`）。
+`font-lock-face` が装飾、残りの 4 つ（`my:claude-url` / `follow-link` /
+`mouse-face` / `help-echo`）がリンク。表のセルの中のリンクも
+そのまま開ける（実測）。
 
 #### 【重要】`my:claude--split-row` は `substring` で切る
 
@@ -1352,6 +1359,94 @@ face がまだ載っていないと `` `**a**` `` の `**` まで消してしま
 `my:claude-heading-face` で塗ってあるので、そこに色付きの face を
 重ねると見出しの色が途切れる。`**強調**` も同じ扱いにしてある
 （`my:claude--heading-face-p`）。
+
+### `[文字列](URL)` はリンクにする（2026-09-28）
+
+`my:claude-render-links`（既定 t）。claude は
+
+```
+[ESC_WEB-170](https://no-sinker.backlog.com/view/ESC_WEB-170) に完了報告をコメントし、…
+```
+
+のように書いてくるので、**記号と URL を落として文字列だけを残し**、
+`RET` / `mouse-1` でブラウザを開く（`my:claude--render-link`）。
+
+消す理由は `**強調**` と同じで、**URL は本文より長い**。表のセルの中では
+その桁数がそのまま列幅に乗る。落とした URL は `help-echo` に入れてある
+ので、開く前に行き先を確かめられる。
+
+載せるプロパティは 5 つ。
+
+| | |
+|---|---|
+| `font-lock-face` | `my:claude-link-face`（`link` から継ぐ） |
+| `my:claude-url` | 落とした URL。`my:claude-browse-link` が読む |
+| `follow-link` | mouse-1 を mouse-2 に読み替えさせる |
+| `mouse-face` | マウスを載せたときの強調 |
+| `help-echo` | URL |
+
+#### 【重要】`keymap` テキストプロパティは使えない
+
+確定した会話には `my:claude--protect` が `my:claude-view-map` を
+`keymap` プロパティで載せてある。**リンクの上にもう 1 つ keymap を
+置くと、そこだけ 1 文字キー（`i` / `p` / `n` / `TAB` / `z` / `q`）が
+効かなくなる。** button.el の流儀（`button-map` を keymap プロパティで
+載せる）をそのまま持ち込むとこれを踏む。
+
+キーは `my:claude-view-map` の側に置き、コマンドが point の
+`my:claude-url` を見る形にした。`RET` も `mouse-2` も確定領域では他に
+使い道が無い（read-only なので編集も yank もできない）。
+
+mouse-1 で開けるのは `follow-link` プロパティのおかげ。
+`mouse-on-link-p` がそれを見て mouse-1 を mouse-2 に読み替える
+（`mouse-1-click-follows-link`、既定 450 ms）。**keymap プロパティは
+要らない。**
+
+```elisp
+;; リンクの上での実測（GUI）
+(:ret my:claude-browse-link :mouse2 my:claude-browse-link
+ :i my:claude-goto-input :tab my:claude-toggle-fold   ; 1 文字キーは生きている
+ :on-link t :follows 450)
+```
+
+#### スキームが無ければファイルとして開く
+
+claude は `[docs/README.md](docs/README.md)` のような相対リンクも書く。
+ブラウザに渡しても意味が無いので、セッションの作業ディレクトリからの
+相対パスとして `find-file-other-window` する（`#` より後ろは捨てる）。
+`find-file` だと会話バッファのウィンドウが潰れ、`C-c a l` で組み直す
+ことになる。
+
+**【重要】スキームは 2 文字以上に限る。** 1 文字を許すと Windows の
+絶対パス `C:/tmp/a.txt` がスキーム付きに見えてブラウザへ流れる。実在
+するスキームはどれも 2 文字以上（`ftp` `file` `http` `mailto`）。
+
+| リンク先 | |
+|---|---|
+| `https://…` / `mailto:…` / `file:///…` | `browse-url`。開いた URL は `message` に残す（ブラウザは別ウィンドウなので Emacs 側に痕跡が残らない） |
+| `README.md` / `README.md#top` / `C:/tmp/a.txt` | ファイルとして別ウィンドウに開く |
+| `#x`（アンカーだけ） | 開けないと言う。`expand-file-name` すると**ディレクトリに化けて dired が開く** |
+
+#### 拾わないもの
+
+| 書いたもの | |
+|---|---|
+| `[a](URL)` / `![alt](URL)` | リンクにする（画像も同じ扱い） |
+| `` `[a](b)` `` / ``` の中 | **拾わない**（`**強調**` と同じ判定） |
+| `[Image #1]` | **拾わない**（`](` が無い） |
+| `[題](URL "title")` | **拾わない**（URL に空白を認めない）。原文のまま残る |
+| `[a [b] c](URL)` | **拾わない**（文字列に `[` `]` を認めない） |
+
+文字列の側に角括弧を認めないのは、入れ子を許すと `[Image #1]` のような
+ただの角括弧が、離れた場所の `](` と組になるため。
+
+**見出しの中では記号だけ落として face は載せない**（`**強調**` と同じ。
+リンクとしては開ける）。実測:
+
+```
+("見出しの中" "https://example.com/h" my:claude-heading-face t highlight)
+("強調リンク" "https://example.com/b" (my:claude-link-face my:claude-bold-face) t highlight)
+```
 
 ### 地の色は落とし、強調で上げる（2026-09-18）
 
