@@ -2542,10 +2542,29 @@ face がまだ載っていないと `` `**a**` `` の `**' まで消してしま
 
 ウィンドウに出ていなければ `my:claude--table-fallback-width'。
 表を組むのは応答が確定した時点なので普通は出ているが、別のフレームに
-送ったあとなどは見つからないことがある。"
+送ったあとなどは見つからないことがある。
+
+【重要】**`save-excursion' で包む。`window-max-chars-per-line' は
+`point' を動かす。** 中で `window-font-width' を呼び、それが
+`with-selected-window' を使っている。**ウィンドウを選ぶと、そのバッファの
+`point' はウィンドウの `point' に飛ぶ。** `with-selected-window' が戻すのは
+選択ウィンドウと window-point で、`save-current-buffer' はバッファを戻すだけ
+なので **`point' は戻らない**。
+
+これを知らずに `my:claude--render-table-at-point' が幅を measure したあとで
+`(point)' を読んでいたため、削除範囲の終端が**ウィンドウの `point'
+ (= 入力エリアの末尾)** になり、**表より後ろの応答・区切り・入力エリアを
+まとめて消していた**。2026-09〜10 に 4 回起きた「応答が表の直後で切れる」は
+すべてこれ。
+
+**会話バッファがウィンドウに出ていないと再現しない** (`get-buffer-window'
+が nil なら `with-selected-window' を通らない)。イベント列を再生しても
+出なかったのはこのためで、CLAUDE.md「batch では確かめられないもの」の
+典型例。"
   (or my:claude-table-max-width
-      (let ((win (get-buffer-window (current-buffer) t)))
-        (and win (max 20 (1- (window-max-chars-per-line win)))))
+      (save-excursion
+        (let ((win (get-buffer-window (current-buffer) t)))
+          (and win (max 20 (1- (window-max-chars-per-line win))))))
       my:claude--table-fallback-width))
 
 (defun my:claude--cap-widths (widths budget floor)
@@ -2739,7 +2758,11 @@ ALIGNS は列ごとの寄せ方、HEADER は見出し行の数、INDENT は行�
 `my:claude--at-end' が載せた `read-only' / `keymap' / `front-sticky' を
 失う。**確定した会話のはずの表の中だけが編集でき、1 文字キーも効かない**
 という壊れ方をしていた。表の前後の行は元のテキストのままなので、
-見た目には何の手がかりも無い。"
+見た目には何の手がかりも無い。
+
+**削る範囲は END で頭打ちにする。** 確定した会話の外 (区切りと入力
+エリア) を消すと境界が逆転し、以後の応答が失われる。下の 【重要】 を
+参照。"
   (let* ((start (line-beginning-position))
          (indent (progn (goto-char start) (looking-at "[ \t]*") (match-string 0)))
          (lines nil))
@@ -2751,11 +2774,35 @@ ALIGNS は列ごとの寄せ方、HEADER は見出し行の数、INDENT は行�
                               (lambda (l _) (my:claude--table-separator-p l))))
            (rows (mapcar #'my:claude--split-row lines)))
       (when sep
-        (let* ((aligns (my:claude--table-align (nth sep rows)))
+        (let* (;; 【重要】**`finish' は何よりも先に取る。**
+               ;; 削除範囲の終端は「行を数え終えた直後の `point'」。
+               ;; 下の `my:claude--table-string' は幅を measure するために
+               ;; `point' を動かすことがある (`my:claude--table-width' の
+               ;; docstring)。先に取っておけば、将来また誰かが point を
+               ;; 動かしても削除範囲は巻き込まれない。
+               (finish (point))
+               (aligns (my:claude--table-align (nth sep rows)))
                (body (append (seq-take rows sep) (seq-drop rows (1+ sep))))
                (text (my:claude--table-string body aligns sep indent))
-               (finish (point)))
-          (delete-region start finish)
+               (limit (if (markerp end) (marker-position end) end)))
+          ;; 【重要】**確定した会話の外は消さない。**
+          ;;
+          ;; ここの `delete-region' が END を越えると、区切りと入力エリアを
+          ;; まとめて消す。`my:claude--input-marker' (insertion-type nil) は
+          ;; 削除範囲の先頭へ潰れ、`my:claude--output-marker' (同 t) は挿し
+          ;; 直した表の末尾まで進むので**必ず逆転し、以後の応答が静かに
+          ;; 失われる** (`my:claude--repair-input-area' の docstring)。
+          ;;
+          ;; 真因は `my:claude--table-width' が `point' を飛ばすことで、
+          ;; そちらは直してある。ここは**安全網**として残す。実際、
+          ;; この警告が出たおかげで真因に辿り着けた (越えた幅 64 が
+          ;; 詰め物 + 区切り行の長さと一致し、`point' が入力エリアへ
+          ;; 飛んでいると分かった)。越えた事実は黙って直さず残すこと。
+          (when (> finish limit)
+            (message "my:claude: %s の表の組み直しが確定出力を越えた (start=%d finish=%d end=%d)"
+                     (buffer-name) start finish limit)
+            (setq finish limit))
+          (delete-region start (max start finish))
           (goto-char start)
           (insert text)
           (my:claude--protect start (point)))))))
@@ -2820,6 +2867,12 @@ delta が来ないスラッシュコマンドの `assistant')。**片方だけ�
     (when (and (buffer-live-p buf) (markerp beg) (marker-position beg))
       (with-current-buffer buf
         (let ((inhibit-read-only t)
+              ;; 【重要】**ここは `my:claude--at-end' を通らない唯一の
+              ;; 書き込み経路。** つまり `my:claude--repair-input-area' の
+              ;; 見張りが無い区間で、境界が壊れても次の書き込みまで誰も
+              ;; 気づかない (実測で復旧ログは必ず 1 手遅れて出ていた)。
+              ;; 前後で境界を見て、壊した当事者をその場で名指しする。
+              (sane (my:claude--markers-sane-p))
               ;; 表の組み直しで長さが変わるのでマーカーで持つ。
               (end (copy-marker (my:claude--output-end) t)))
           (save-excursion
@@ -2860,7 +2913,12 @@ delta が来ないスラッシュコマンドの `assistant')。**片方だけ�
             (my:claude--render-link beg end)
             ;; [5] パイプ表を罫線に。2〜4 が載せた face とリンクごと組み直す。
             (my:claude--render-tables beg end))
-          (set-marker end nil))))))
+          (set-marker end nil)
+          (when (and sane (not (my:claude--markers-sane-p)))
+            (message "my:claude: %s の境界が装飾で壊れた (out=%S in=%S)"
+                     (buffer-name)
+                     (marker-position my:claude--output-marker)
+                     (marker-position my:claude--input-marker))))))))
 
 (defun my:claude--mark-text-start (session)
   "いまの確定した会話の末尾に本文の開始位置を記録する。

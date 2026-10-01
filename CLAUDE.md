@@ -71,6 +71,7 @@ emacs --batch --debug-init -l early-init.el -l init.el --eval '(message "OK")'
 | `cua--select-keymaps` | `pre-command-hook` で走るので、`key-binding` は `cua-mode` 有効化時点の値のまま |
 | `use-cjk-char-width-table` | `initial-window-system` が nil だと ambiguous を幅 1 に倒す分岐に入る |
 | `line-move-visual` の効き | バッファをウィンドウに出さないと折り返しが再現できない |
+| `window-max-chars-per-line` の**副作用** | ウィンドウが無いと `with-selected-window` を通らないので **`point` が飛ばない**。出していれば飛ぶ（§3 `my-claude`）。**「ウィンドウに出ていないと再現しないバグ」がある** |
 
 ### 【重要】`emacs -Q` で再現しないものがある
 
@@ -923,8 +924,22 @@ gopls は大文字のドライブレターで返す（§1「Windows 固有」）
   側に積まれ、`C-c C-c` / `C-c C-k` が確定した会話を消しにいく（`Text is read-only` で
   落ちるのが唯一の痕跡）。`my:claude--repair-input-area` が `my:claude--at-end` と
   `my:claude--clear-input` の両方で直す。**判定は `<=` ではなく `<`**（区切りには必ず
-  改行が 1 つ入るので、`<=` だと消えた瞬間を見逃す）。**区切りを消した犯人はまだ
-  特定できていない** → [docs](docs/claude/my-claude.md)
+  改行が 1 つ入るので、`<=` だと消えた瞬間を見逃す）
+- **【重要】`window-max-chars-per-line` は `point` を動かす**（2026-10-01、4 回の
+  「応答が表の直後で切れる」の真因）。中で `window-font-width` →
+  `with-selected-window` を通り、**ウィンドウを選ぶとそのバッファの `point` が
+  ウィンドウの `point` へ飛ぶ**。`with-selected-window` が戻すのは選択ウィンドウと
+  window-point だけで、**`point` は戻らない**。`my:claude--table-width` が幅を測った
+  あとに `my:claude--render-table-at-point` が `(point)` を読んでいたため、削除範囲の
+  終端が**入力エリアの末尾**になり、表より後ろの応答・区切り・入力エリアを
+  まとめて消していた。`save-excursion` で包み、`finish` は measure より先に取る
+  → [docs](docs/claude/my-claude.md)
+- **【重要】`my:claude--fontify-markdown` は `my:claude--at-end` を通らない**。
+  会話バッファに書く経路で**ここだけ `my:claude--repair-input-area` の見張りが無い**ので、
+  境界を壊しても次の書き込みまで誰も気づかない（復旧ログが必ず 1 手遅れて出ていた）。
+  **装飾の中で `delete-region` を書くときは必ず `end` で頭打ちにすること**（安全網。
+  真因に辿り着けたのはこの警告のおかげ）。前後で `my:claude--markers-sane-p` を
+  見る検知器も入れてある
 - **起動オプションは 4 つとも省略できない。** とくに
   `--permission-prompt-tool stdio` が無いと**許可要求が黙って自動拒否される**
   （ツールが動かないときの第一容疑者）
@@ -1101,16 +1116,6 @@ fringe のマーカーを最新にしたいときは手で `g` を押す。
 原因は未調査。`my-gitd` はこれを迂回するだけで直してはいない。magit 以外
 （`vc` / `grep` / `projectile`）にも効いているはずなので、原因が分かれば影響範囲は
 広い。ただし Emacs 本体の問題である可能性が高く、手元で解消できる見込みは薄い。
-
-### claude の会話バッファから区切りが消えることがある（2026-10-01、原因未特定）
-
-3 回起きた。消えると `my:claude--output-marker` と `my:claude--input-marker` が
-逆転し、**応答の途中から先が会話バッファに残らない**。検出と自己修復、
-`my:claude--clear-input` のガードは入れた（§3「`my-claude`」）ので実害は止まるが、
-**区切りを消している当事者は分かっていない。** `my-claude.el` の `delete-region` は
-すべて検証済みでどれも届かず、本文を 1 文字刻みの delta として再生しても再現しない。
-`my:claude-log` を既定 `t` にしたので、次の発生で生のイベント列が残る。
-→ [docs](docs/claude/my-claude.md)
 
 ### `★` と `※` は端末で桁が揃わない（2026-09、未解決）
 
