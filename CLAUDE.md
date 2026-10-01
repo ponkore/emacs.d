@@ -912,11 +912,19 @@ gopls は大文字のドライブレターで返す（§1「Windows 固有」）
 
 → [docs/claude/my-claude.md](docs/claude/my-claude.md)
 
-1400 行あるので、触る前にそちらを読むこと。ここには入口だけ。
+5000 行あるので、触る前にそちらを読むこと。ここには入口だけ。
 
 - **会話バッファへの書き込みは必ず `my:claude--at-end` を通す。** 挿入位置
   （`my:claude--output-end`。`point-max` ではない）・read-only 化・undo の 3 つを
   引き受けている。`insert` を直接書くと**書きかけの入力を壊す**
+- **【重要】区切りが消えると会話が静かに失われる**（2026-10-01、3 回発生）。
+  `my:claude--output-marker`（insertion-type t）と `my:claude--input-marker`（nil）が
+  同じ位置に並ぶと、**次の出力で前者だけが前進して逆転する**。以後、出力は入力エリアの
+  側に積まれ、`C-c C-c` / `C-c C-k` が確定した会話を消しにいく（`Text is read-only` で
+  落ちるのが唯一の痕跡）。`my:claude--repair-input-area` が `my:claude--at-end` と
+  `my:claude--clear-input` の両方で直す。**判定は `<=` ではなく `<`**（区切りには必ず
+  改行が 1 つ入るので、`<=` だと消えた瞬間を見逃す）。**区切りを消した犯人はまだ
+  特定できていない** → [docs](docs/claude/my-claude.md)
 - **起動オプションは 4 つとも省略できない。** とくに
   `--permission-prompt-tool stdio` が無いと**許可要求が黙って自動拒否される**
   （ツールが動かないときの第一容疑者）
@@ -1093,6 +1101,16 @@ fringe のマーカーを最新にしたいときは手で `g` を押す。
 原因は未調査。`my-gitd` はこれを迂回するだけで直してはいない。magit 以外
 （`vc` / `grep` / `projectile`）にも効いているはずなので、原因が分かれば影響範囲は
 広い。ただし Emacs 本体の問題である可能性が高く、手元で解消できる見込みは薄い。
+
+### claude の会話バッファから区切りが消えることがある（2026-10-01、原因未特定）
+
+3 回起きた。消えると `my:claude--output-marker` と `my:claude--input-marker` が
+逆転し、**応答の途中から先が会話バッファに残らない**。検出と自己修復、
+`my:claude--clear-input` のガードは入れた（§3「`my-claude`」）ので実害は止まるが、
+**区切りを消している当事者は分かっていない。** `my-claude.el` の `delete-region` は
+すべて検証済みでどれも届かず、本文を 1 文字刻みの delta として再生しても再現しない。
+`my:claude-log` を既定 `t` にしたので、次の発生で生のイベント列が残る。
+→ [docs](docs/claude/my-claude.md)
 
 ### `★` と `※` は端末で桁が揃わない（2026-09、未解決）
 

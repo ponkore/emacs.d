@@ -128,10 +128,16 @@ Windows のファイルシステムが同じ場所を指すため、そちらは
   "起動時に追加で渡す引数のリスト。"
   :type '(repeat string))
 
-(defcustom my:claude-log nil
+(defcustom my:claude-log t
   "非 nil なら受信した生の JSON Lines を *claude-log(PROJ)* に残す。
-上流のイベント種別が変わったときに気づける唯一の手掛かりなので、
-様子がおかしいときは真にすること。"
+上流のイベント種別が変わったときに気づける唯一の手掛かり。
+
+**既定で真にしてある** (2026-10-01)。会話が黙って消える事象が 3 回あり、
+`.jsonl' に残る確定版からは delta の並びが判らないので原因を追えなかった
+ (`my:claude--repair-input-area' 参照)。原因が分かるまでは残す。
+
+ログバッファはセッションを起こした時点で決まるので、**この値を変えても
+動いているセッションには効かない**。"
   :type 'boolean)
 
 (defcustom my:claude-auto-approve nil
@@ -1505,6 +1511,54 @@ Nerd Font は **ピクセルサイズと ascent + descent が一致する** (実
           (setq my:claude--output-marker (copy-marker beg t)
                 my:claude--input-marker (copy-marker end nil)))))))
 
+(defun my:claude--markers-sane-p ()
+  "確定した会話と入力エリアの境界が壊れていなければ非 nil。
+
+見るのは 2 つのマーカーの順序だけ。`my:claude--output-marker' の
+insertion-type は t、`my:claude--input-marker' は nil なので、
+**区切りのテキストが失われて両者が同じ位置に並ぶと、以後の出力は
+前者だけを前進させ、必ず逆転する**。
+
+【重要】**同じ位置は正常ではない (`<=' ではなく `<')。** 区切りには
+`my:claude--setup-input-area' が必ず改行を 1 つ入れるので、健全なら
+両者の間には最低 1 文字ある。`<=' にすると**区切りが消えた瞬間を
+見逃し、実際に逆転してからでないと気づけない** (実測で 1 手遅れた)。"
+  (let ((o (and (markerp my:claude--output-marker)
+                (marker-position my:claude--output-marker)))
+        (i (and (markerp my:claude--input-marker)
+                (marker-position my:claude--input-marker))))
+    (and o i (< o i))))
+
+(defun my:claude--repair-input-area ()
+  "境界が壊れていたら区切りを置き直す。直したときだけ非 nil。
+
+【重要】**区切りが消えると、黙って会話が失われる。** 2026-09〜10 に
+3 回起きた。逆転したバッファでは次の 2 つが同時に起こる。
+
+  - `my:claude--output-end' が入力エリアの末尾を返すので、出力が
+    入力エリアの側に積まれる
+  - `my:claude--input-start' が確定した会話の途中を指すので、
+    `my:claude--clear-input' (`C-c C-c' / `C-c C-k') が確定した会話を
+    まるごと消す
+
+**区切りを消した原因はまだ特定できていない。** 分かるまでの間、壊れたら
+その場で直す。書きかけの入力は確定した会話の側に取り込まれるが、
+**境界が壊れている以上どこからが書きかけなのか判らないので、消すより
+取り込むほうを採る。**
+
+直したことは *Messages* に残す。黙って直すと何度起きても気づけない。"
+  (unless (my:claude--markers-sane-p)
+    (let ((o (and (markerp my:claude--output-marker)
+                  (marker-position my:claude--output-marker)))
+          (i (and (markerp my:claude--input-marker)
+                  (marker-position my:claude--input-marker))))
+      (my:claude--setup-input-area)
+      (message "my:claude: %s の入力エリアを復旧しました (out=%S in=%S → out=%S in=%S)"
+               (buffer-name) o i
+               (marker-position my:claude--output-marker)
+               (marker-position my:claude--input-marker))
+      t)))
+
 (defmacro my:claude--at-end (session &rest body)
   "SESSION の会話バッファの**確定した会話の末尾**で BODY を評価する。
 
@@ -1524,12 +1578,16 @@ BODY は `inhibit-read-only' の下で走り、書いたぶんは
 
 undo は入力エリアのためだけにある。**出力は `buffer-undo-list' を t に
 束縛して記録しない**。加えて、前方に挿すと既存の undo エントリの位置が
-ずれる (Emacs は調整しない) ので、実際に書いたときは履歴ごと捨てる。"
+ずれる (Emacs は調整しない) ので、実際に書いたときは履歴ごと捨てる。
+
+書く前に毎回 `my:claude--repair-input-area' を通す。**ここが会話バッファへ
+書き込む唯一の入口**なので、境界が壊れたまま出力が積まれることはない。"
   (declare (indent 1) (debug (form body)))
   (let ((buf (gensym "buf")) (beg (gensym "beg")) (before (gensym "before")))
     `(let ((,buf (my:claude-session-buffer ,session)))
        (when (buffer-live-p ,buf)
          (with-current-buffer ,buf
+           (my:claude--repair-input-area)
            (let* ((inhibit-read-only t)
                   ;; BODY は末尾を削り直すことがある (`my:claude--end-paragraph')。
                   ;; マーカーで持たないと保護する範囲を見失う。
@@ -4616,11 +4674,23 @@ overlay とは別物だが、範囲を広げる理由が無い。"
   (buffer-substring-no-properties (my:claude--input-start) (point-max)))
 
 (defun my:claude--clear-input ()
-  "入力エリアを空にする。添付とプレビューも捨てる。"
+  "入力エリアを空にする。添付とプレビューも捨てる。
+
+【重要】**消す範囲は必ず確定した会話より後ろに限る。**
+`my:claude--input-start' は `my:claude--input-marker' をそのまま返すので、
+区切りが失われてマーカーが逆転していると
+ (`my:claude--repair-input-area' 参照)、`C-c C-c' / `C-c C-k' の 1 押しで
+**確定した会話をまるごと消す**。実際にそうなる状態のバッファができていた。
+
+`my:claude--at-end' を通らない入口なので、ここでも自分で直してから消す。
+直したあとは入力エリアが空になる (書きかけは確定した会話の側に
+取り込まれる) ので、結果として何も消さない。"
   ;; overlay を外すのは削除より先。
   (my:claude--input-clear-images)
+  (my:claude--repair-input-area)
   (let ((start (my:claude--input-start)))
-    (when (< start (point-max))
+    (when (and (>= start (my:claude--output-end))
+               (< start (point-max)))
       (delete-region start (point-max)))))
 
 ;;;###autoload
