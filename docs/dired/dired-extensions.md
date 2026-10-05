@@ -428,6 +428,81 @@ GUI プローブでの実測（200 ファイルのディレクトリで `f005.tx
 
 ---
 
+## 【重要】貼り替えた行だけ桁が 1 つずれる（2026-10-05 に対処）
+
+自動更新が走ったあと、**その行だけ `drwxrwxrwx` の前に空白が 1 つ増える**。
+エラーは出ず、`g` を押せば直るので原因に辿り着きにくい。
+
+### 原因は ls-lisp の桁幅がグローバル変数であること
+
+`ls-lisp-insert-directory` は一覧を作るたびに、**そのディレクトリの最大値**から
+桁幅を決めて `ls-lisp-filesize-d-fmt` / `-uid-*` / `-gid-*` に `setq` する
+（`ls-lisp.el` の 410〜423 行）。グローバル変数で、**バッファごとではない**。
+
+ところが 1 ファイルだけを出す経路（`ls -ld` 相当。`dired-add-entry` →
+`dired-insert-directory` が `file-list` に 1 件だけ渡す）は
+`ls-lisp-insert-directory` の別の枝に入り、**幅を計算せずに
+`ls-lisp-format` を直接呼ぶ**（473〜480 行）。つまり**最後に一覧した
+よそのディレクトリの幅**がそのまま使われる。
+
+決定的な再現（B は最大 1 桁、A は 7 桁）:
+
+```
+--- B 初回 ---
+  drwxrwxrwx  1 masao masao 0 月 2026-10-05 17:14:36 sub
+fmt=" %1d"
+--- A を開いた後 fmt=" %7d"
+--- B で sub を relist した後 ---
+   drwxrwxrwx  1 masao masao       0 月 2026-10-05 17:14:36 sub
+```
+
+### 字下げまでずれるのは `dired-align-file` が諦めるから
+
+`dired-insert-directory` の 1 ファイル経路は、**わざと空白を 1 つだけ**入れて
+おき（`(unless (looking-at " ") (insert " "))`）、残りは `dired-align-file` が
+周りの行に合わせて足す前提になっている。GNU ls の `ls -ld FILE` が最小幅で
+出すので、これで辻褄が合う。
+
+`dired-align-file` は**空白を足すことしかできない**（`dired-move-to-filename`
+を壊さないための自己制約）。行が周りより**広い**と `(> other-col file-col)` が
+偽になり、**何もせずに戻る**。すると字下げが 1 桁のまま残り、最後の
+
+```elisp
+(unless (save-excursion (goto-char opoint) (looking-at-p "  "))
+  (indent-rigidly opoint (point) 2))
+```
+
+がさらに 2 桁足して **3 桁**になる。**1 桁ずれて見えるのはこれ。**
+
+### 対処は 2 つ
+
+| | |
+|---|---|
+| `my:ls-lisp-narrow-single-entry`（`my-dired.el`） | `dired-insert-directory` への `:around`。**`file-list` が 1 件のときだけ** `ls-lisp-*-fmt` を最小幅（`" %d"` / `" %s"`）に束縛する。GNU ls に揃えるだけなので、足りない分は `dired-align-file` が埋める |
+| `my:dired-watch--aligned-p`（`my-dired-watch.el`） | 貼り替えたあと `^. [^ ]` で字下げを検算し、合わなければ**全体 revert に倒す** |
+
+後者が要るのは、**そのファイル自身が列に収まらなくなった**ときは桁幅を
+最小にしても揃わないため（2 バイト → 999999 バイトなど）。列の幅が変わった
+のだから周りの行も出し直すしかない。実測:
+
+```
+update-line sub      => relisted     (よそのディレクトリの幅に汚染されていた行)
+update-line tiny.txt => relisted
+999999 バイトにして update-line => misaligned -> revert
+```
+
+判定を「先頭の空白が 2 つか」ではなく `^. [^ ]`（マーク 1 桁 + 空白 1 桁）に
+してあるのは、**マークの付いた行を誤検知しないため**（`* -rw-...`）。
+
+### 影響は自動更新だけではない
+
+`dired-add-entry` を通る操作はすべて同じ経路なので、リネームやディレクトリ
+作成でも起きる。`my:ls-lisp-narrow-single-entry` は `dired-insert-directory`
+に張ってあるのでそちらも直る。**ls-lisp を使っているときだけ**当てる
+（`use-package ls-lisp` の `:config`。GNU ls には要らない）。
+
+---
+
 ## commit しても diff-hl のマークが消えない（段階 1、2026-09-17 に対処）
 
 `diff-hl-dired` の VC マーク（行頭の帯）が、commit したあとも `g` を押すまで

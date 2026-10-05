@@ -733,6 +733,21 @@ dired のロード時に張られるので、あとから `dired-x` が読まれ
 あわせて、**ディレクトリの mtime は遅れて更新される**。0.4 秒空ければ作成も
 削除も必ず反映されるが、通知の直後に測ると落ちることがある（実測）。
 
+### 【重要】1 行だけ貼り替えると、その行の桁が 1 つずれる
+
+`ls-lisp` の桁幅は**グローバル変数**（`ls-lisp-filesize-d-fmt` ほか）で、
+一覧を作るたびにそのディレクトリの最大値で `setq` される。ところが 1 ファイル
+だけを出す経路（`dired-add-entry` → `dired-insert-directory`）は**幅を計算せず、
+最後に一覧したよそのディレクトリの値を使う**。広くなった行は
+`dired-align-file`（空白を足すことしかできない）が諦めるので、字下げが 1 桁の
+まま残り、最後の `indent-rigidly ... 2` がさらに 2 桁足して **3 桁**になる。
+
+`my:ls-lisp-narrow-single-entry`（`my-dired.el`）が `file-list` 1 件のときだけ
+桁幅を最小に束縛して直す。**それでも揃わないとき（そのファイル自身が列に
+収まらなくなった）は全体 revert に倒す**（`my:dired-watch--aligned-p`）。
+**リネームやディレクトリ作成でも同じ経路を通る。**
+→ [docs](docs/dired/dired-extensions.md)
+
 ### サイズ・日時の追従は `my-dired-watch`（別モジュール）
 
 autorevert が拾うのは**行が増減する変化だけ**（`created` / `renamed` /

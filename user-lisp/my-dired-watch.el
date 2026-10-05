@@ -277,8 +277,26 @@ revert とサブディレクトリの挿入の両方でここに来る。**貼�
               (nerd-icons-dired--add-overlay
                pos (concat icon nerd-icons-dired-infix-string)))))))))
 
+(defun my:dired-watch--aligned-p (file)
+  "FILE の行が周りと桁が揃っていれば非 nil。
+
+dired の行は必ず**マーク 1 桁 + 空白 1 桁**で始まる
+(`dired-insert-directory' の `indent-rigidly')。3 桁になっているのは
+`dired-align-file' が「空白を足すだけでは揃えられない」と諦めた印で、
+そのとき**列の幅そのものが変わっている** (サイズが桁上がりしたなど)。
+1 行の貼り替えでは直せないので、呼び出し側は全体 revert に倒す。
+
+幅がずれる原因のうち、ls-lisp のグローバルな桁幅が他ディレクトリの
+値のまま使われる件は `my-dired.el' の
+`my:ls-lisp-narrow-single-entry' で潰してある。ここに残るのは
+「そのファイル自身が列に収まらなくなった」場合だけ。"
+  (save-excursion
+    (and (dired-goto-file file)
+         (progn (beginning-of-line) (looking-at-p "^. [^ ]")))))
+
 (defun my:dired-watch--update-line (file)
-  "FILE の行だけを貼り替える。貼り替えたら非 nil。
+  "FILE の行だけを貼り替える。
+`relisted' (貼り替えた) / `misaligned' (桁が揃わなかった) / nil を返す。
 
 **行が無ければ何もしない。** `dired-relist-entry' は行が無ければ
 `dired-add-entry' で作ってしまうが、それは新規ファイルの追加であって
@@ -293,8 +311,10 @@ revert とサブディレクトリの挿入の両方でここに来る。**貼�
               (progn
                 (let ((dired-after-readin-hook nil))
                   (dired-relist-entry file))
-                (my:dired-watch--annotate file)
-                t)))))
+                (if (my:dired-watch--aligned-p file)
+                    (progn (my:dired-watch--annotate file) 'relisted)
+                  ;; アイコンは付け直さない。どうせ revert で引き直される
+                  'misaligned))))))
 
 (defun my:dired-watch--fire (buffer)
   "デバウンスタイマーから呼ばれる。"
@@ -323,10 +343,18 @@ revert とサブディレクトリの挿入の両方でここに来る。**貼�
                   (cl-incf (plist-get my:dired-watch--stats :reverted))
                   ;; ここはアイコンが要るのでフックを外さない
                   (revert-buffer))
-              (dolist (f files)
-                (if (my:dired-watch--update-line f)
-                    (cl-incf (plist-get my:dired-watch--stats :relisted))
-                  (cl-incf (plist-get my:dired-watch--stats :missing))))))))))))
+              ;; 桁が揃わなかった行が 1 つでもあれば、最後にまとめて
+              ;; 読み直す。列の幅が変わったのだから、周りの行も含めて
+              ;; 出し直すしかない。
+              (let (widened)
+                (dolist (f files)
+                  (pcase (my:dired-watch--update-line f)
+                    ('relisted (cl-incf (plist-get my:dired-watch--stats :relisted)))
+                    ('misaligned (setq widened t))
+                    (_ (cl-incf (plist-get my:dired-watch--stats :missing)))))
+                (when widened
+                  (cl-incf (plist-get my:dired-watch--stats :reverted))
+                  (revert-buffer)))))))))))
 
 (defun my:dired-watch--arm (buffer delay)
   (with-current-buffer buffer

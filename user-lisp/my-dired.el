@@ -38,13 +38,50 @@
                   ls-lisp-format-time-list)))
     (funcall orig file-attr time-index)))
 
+;;; 【重要】1 行だけ貼り替えると桁が 1 つずれる (ls-lisp の桁幅はグローバル)
+;;
+;; `ls-lisp-insert-directory' は一覧を作るたびに、そのディレクトリの最大値から
+;; 桁幅を決めて `ls-lisp-filesize-d-fmt' などの**グローバル変数**に `setq' する。
+;; ところが 1 ファイルだけを出す経路 (`-d'。`dired-add-entry' が使う) は幅を
+;; 計算せず、**最後に一覧したディレクトリの値をそのまま使う**。
+;;
+;; そのため「大きなファイルのあるディレクトリを開いたあと、小さなファイルしか
+;; 無いディレクトリの 1 行を貼り替える」と、その行だけサイズ欄が広くなる。
+;; 実測 (B は 1 桁、A は 7 桁):
+;;
+;;   drwxrwxrwx  1 masao masao 0 月 ... sub        <- 一覧で出た行
+;;    drwxrwxrwx  1 masao masao       0 月 ... sub <- 貼り替えた行
+;;
+;; **字下げまで 1 桁ずれるのが分かりにくい。** `dired-insert-directory' は
+;; 1 ファイル経路で空白を 1 つだけ入れておき、残りは `dired-align-file' が
+;; 周りに合わせて足す前提になっている。ところがあの関数は**空白を足すことしか
+;; できない**ので、行が周りより広いと何もせずに諦める。すると字下げが 1 桁の
+;; まま残り、最後の `(indent-rigidly ... 2)' がさらに 2 桁足して**3 桁**になる。
+;;
+;; GNU ls の `ls -ld FILE' は最小幅で出すのでこの状態にならない。ls-lisp を
+;; それに合わせる。足りない分は `dired-align-file' が周りを見て埋めてくれる。
+(defun my:ls-lisp-narrow-single-entry (orig dir switches &optional file-list wildcard hdr)
+  "ORIG (`dired-insert-directory') を呼ぶ。1 ファイルだけなら桁幅を最小にする。"
+  (if (and (consp file-list) (null (cdr file-list)))
+      (let ((ls-lisp-filesize-d-fmt " %d")
+            (ls-lisp-filesize-f-fmt " %.0f")
+            (ls-lisp-filesize-b-fmt "%.0f ")
+            (ls-lisp-uid-d-fmt " %d")
+            (ls-lisp-uid-s-fmt " %s")
+            (ls-lisp-gid-d-fmt " %d")
+            (ls-lisp-gid-s-fmt " %s"))
+        (funcall orig dir switches file-list wildcard hdr))
+    (funcall orig dir switches file-list wildcard hdr)))
+
 (use-package ls-lisp
   :defer t
   :custom
   (ls-lisp-use-localized-time-format t)
   (ls-lisp-format-time-list '("%a %Y-%m-%d %H:%M:%S" "%a %Y-%m-%d %H:%M:%S"))
   :config
-  (advice-add 'ls-lisp-format-time :around #'my:ls-lisp-format-time-japanese-dow))
+  (advice-add 'ls-lisp-format-time :around #'my:ls-lisp-format-time-japanese-dow)
+  ;; 一覧を ls-lisp で作っているときだけ当てる (GNU ls には要らない)。
+  (advice-add 'dired-insert-directory :around #'my:ls-lisp-narrow-single-entry))
 
 (use-package dired
   :commands dired-vc-status
