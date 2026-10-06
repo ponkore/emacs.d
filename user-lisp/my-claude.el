@@ -1263,12 +1263,50 @@ RESUME は `my:claude--command' に渡す (t で --continue、文字列で --res
 
 画像 1 枚で数百 KB になり、そのまま残すとログが読めなくなるうえ
 `*claude-log(PROJ)*' のフォントロックが詰まる。200 文字以上続く
-base64 だけを対象にするので、本文に出てくる短い文字列は潰さない。"
-  (replace-regexp-in-string
-   "\"data\":\"\\([A-Za-z0-9+/]\\{200,\\}=*\\)\""
-   ;; マッチ全体は "data":"…" (前後の 9 文字を除いたぶんが base64)。
-   (lambda (m) (format "\"data\":\"<%d 文字>\"" (- (length m) 9)))
-   line t t))
+base64 だけを対象にするので、本文に出てくる短い文字列は潰さない。
+
+**正規表現の繰り返しで書いてはいけない。** 長さに比例して失敗点を
+積むので、大きい画像で `Stack overflow in regexp matcher' になる。
+ここは `my:claude--send-json' が `process-send-string' の **前** に
+呼ぶので、落ちると**送信そのものが起きない**。詳細は下のコメント。"
+  ;; かつては文字クラスの 200 回以上の繰り返し (regexp の {200,}) で
+  ;; "data":"…" を 1 発で掴んでいた。これが base64 の長さに比例して
+  ;; 失敗点を積み、実測で 26 万文字 ok / 28 万文字で
+  ;; `Stack overflow in regexp matcher' になる (画像の実体で 200 KB
+  ;; 前後)。エコーは会話バッファに書けていて `busy' も立っているので、
+  ;; **送ったようにしか見えないまま送信されない**という壊れ方をした。
+  ;;
+  ;; `string-search' で境界を探し、長さと文字種だけを見る。文字種の
+  ;; 判定も否定クラスの 1 文字探索なので、繰り返しを積まない。
+  (let ((key "\"data\":\"")
+        (pos 0)
+        (parts nil)
+        (done nil))
+    (while (not done)
+      (let ((k (string-search key line pos)))
+        (if (null k)
+            (setq done t)
+          (let* ((beg (+ k (length key)))
+                 (end (string-search "\"" line beg)))
+            (if (null end)
+                ;; 閉じ引用符が無い。JSON として壊れているが、ログは
+                ;; 壊れた行こそ見たいので残りはそのまま通す。
+                (setq done t)
+              (let ((n (- end beg)))
+                (if (and (>= n 200)
+                         (not (string-match-p "[^A-Za-z0-9+/=]"
+                                              (substring line beg end))))
+                    (progn
+                      (push (substring line pos k) parts)
+                      (push (format "\"data\":\"<%d 文字>\"" n) parts)
+                      (setq pos (1+ end)))
+                  ;; 対象外。キーの直後から探し直す (pos は必ず前進する)。
+                  (push (substring line pos beg) parts)
+                  (setq pos beg))))))))
+    (if (null parts)
+        line
+      (push (substring line pos) parts)
+      (apply #'concat (nreverse parts)))))
 
 (defun my:claude--send-json (session obj)
   "OBJ を 1 行の JSON にして SESSION に送る。"
@@ -1276,10 +1314,19 @@ base64 だけを対象にするので、本文に出てくる短い文字列は�
     (unless (process-live-p proc)
       (user-error "claude のプロセスが生きていない"))
     (let ((line (concat (json-serialize obj) "\n")))
-      (when-let* ((log (my:claude-session-log-buffer session)))
-        (with-current-buffer log
-          (goto-char (point-max))
-          (insert ">>> " (my:claude--log-line line))))
+      ;; **ログの都合で送信を落とさない。** ログは記録でしかないのに、
+      ;; `process-send-string' より前にあるので、ここでエラーが出ると
+      ;; 送信そのものが起きない。しかもエコーは会話バッファに書けていて
+      ;; `busy' も立っているので、送ったようにしか見えない。
+      ;; (実例: `my:claude--log-line' の正規表現がスタックを溢れさせた)
+      (condition-case err
+          (when-let* ((log (my:claude-session-log-buffer session)))
+            (with-current-buffer log
+              (goto-char (point-max))
+              (insert ">>> " (my:claude--log-line line))))
+        (error
+         (message "claude: ログへの書き込みに失敗 (%s)"
+                  (error-message-string err))))
       (process-send-string proc line))))
 
 (defun my:claude--filter (session str)
