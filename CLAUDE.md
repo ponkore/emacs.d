@@ -983,10 +983,19 @@ gopls は大文字のドライブレターで返す（§1「Windows 固有」）
   プロパティを見る形にした。mouse-1 は `follow-link` プロパティだけで
   mouse-2 に読み替わる（keymap は要らない） → [docs](docs/claude/my-claude.md)
 - **応答待ち（`busy`）は `my:claude--set-busy` でしか変えない。** nil / `t` /
-  `asking` の 3 値で、**真偽値ではない**。ヘッダ行の点を動かすタイマーの
-  入り切りをこの関数がやっているので、直に `setf` すると点が止まらなくなる。
+  `asking` の 3 値で、**真偽値ではない**。点を動かすタイマーの入り切りを
+  この関数がやっているので、直に `setf` すると点が止まらなくなる。
   ミニバッファで待つ区間は `my:claude--with-asking` で包む（`C-g` で
   `asking` が残ると、そのセッションは以後ずっと点が止まったままになる）
+- **【重要】点は区切りの帯の中に overlay で出す**（2026-10-06。ヘッダ行から
+  移した）。帯は read-only な確定領域で、両端に `my:claude--output-marker` と
+  `my:claude--input-marker` がいるので、**0.1 秒ごとにテキストを書き換えては
+  いけない**（undo とマーカーの前後関係に毎回触る = 会話が静かに失われる経路）。
+  overlay のプロパティはバッファを変更しないので read-only も undo も
+  マーカーも無関係。**貼る位置は数えずに face で見つける**
+  （`my:claude--band-start`。詰め物と `my:claude-prompt-begin-string` の有無で
+  2 文字ぶんずれる）。前景は点の face、**背景は帯の face から**取るので、
+  点の face に背景を書かない → [docs](docs/claude/my-claude.md)
 - **【重要】コミットメッセージの生成（`C-c a g`）で `git diff --cached` を
   決め打ちしない**（2026-09-23）。`commit --all`（magit の `-a`）は**一時 index**
   を使うので **`--cached` は 0 バイトを返す**。エラーは出ないので、そのまま渡すと

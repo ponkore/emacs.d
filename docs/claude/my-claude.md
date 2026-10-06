@@ -704,8 +704,9 @@ Emacs 側で再現してある。**`statusLine` は端末 TUI の機能で、`-p
 | 6 | レート上限とリセット時刻 | シアン | `rate_limit_event` の `unifiedWindows` |
 | 7 | 累計コスト | dim | `result` の `total_cost_usd` |
 
-先頭にもう 1 桁、**応答待ち**（回る点 / 確認待ちは `?`）を置いてある（後述）。
-列ではないので区切りを出さず、待っていないときも桁だけ空ける。
+**応答待ちはここには出さない**（2026-10-06）。かつては先頭にもう 1 桁
+置いていたが、区切りの帯の中（`` と 🤖 のあいだ）へ移した。打っている場所の
+すぐ上にあるほうが目を動かさずに済む。→ 下の「応答待ちは 3 値」
 
 face は `my:claude-header-{plan,dir,branch,model,context,limit,cost}-face`。
 **`:foreground` だけを指定する。** ヘッダ行では `header-line` face が
@@ -883,7 +884,7 @@ GUI 実測（`format-mode-line` を通した実表示。末尾だけ抜粋）:
 
 `busy` は真偽値ではない。**増やすときは `eq` で見ること。**
 
-| 値 | 意味 | ヘッダ行の先頭 |
+| 値 | 意味 | 区切りの帯の中 |
 |---|---|---|
 | `nil` | 待っていない | 空白（**桁は空ける**） |
 | `t` | claude が動いている | 回る点 `⠋⠙⠹…`（青） |
@@ -904,62 +905,108 @@ AskUserQuestion も `result` が来る**前**に聞くので、区別しない�
 - **色も分ける**（点は青 `my:claude-header-busy-face`、`?` はイエロー
   `my:claude-header-asking-face`）。動きだけでなく色でも区別が付くように
 
-#### なぜ末尾ではなく先頭か（2026-09-17）
+#### 置き場所は 3 回動いた（末尾 → ヘッダ行の先頭 → 区切りの帯、2026-10-06）
 
-最初は 7 列目（累計コストの隣）に出していたが、**末尾は見ない場所**で、
-しかもブランチ名やディレクトリ名が伸びるとウィンドウの右で切れて
-消えてしまう。先頭なら必ず目に入り、何が伸びても位置が変わらない。
+| | | |
+|---|---|---|
+| ヘッダ行の 7 列目（累計コストの隣） | 2026-09 | **末尾は見ない場所**で、ブランチ名やディレクトリ名が伸びるとウィンドウの右で切れて消える |
+| ヘッダ行の先頭 | 2026-09-17 | 必ず目に入り、何が伸びても位置が変わらない |
+| **区切りの帯の中（`` と 🤖 のあいだ）** | **2026-10-06** | **打っている場所のすぐ上**。入力エリアと点のあいだで目を動かさずに済む |
 
-**待っていないときも桁を空ける。** 出したり消したりすると、後ろの列が
-まるごと 1 桁動く。
+いまはヘッダ行には出していない（`my:claude--busy-segment` /
+`my:claude--busy-column` / `my:claude--redraw-header` は削除）。
+
+#### 【重要】帯にはテキストではなく overlay で出す
+
+帯は `my:claude--protect` が read-only にした確定領域で、その両端に
+`my:claude--output-marker` と `my:claude--input-marker` がいる。**0.1 秒ごとに
+テキストを書き換えてはいけない。**
+
+- `inhibit-read-only` を立て続けることになる
+- undo とマーカーの前後関係に毎回触る。**区切りが消えると会話が静かに
+  失われる**（上の「区切りが消えると会話が静かに失われる」）
+
+overlay のプロパティはバッファを変更しないので、read-only も undo も
+マーカーも無関係に、その行だけが再描画される。
+
+```elisp
+(move-overlay ov beg (1+ beg))
+(overlay-put ov 'before-string (my:claude--band-spinner-string))
+```
+
+- **位置は数えずに face で見つける**（`my:claude--band-start`）。
+  `my:claude--output-marker` は帯の手前を指すが、
+  `my:claude--pad-before-prompt` の詰め物で 1 文字、
+  `my:claude-prompt-begin-string` の有無でもう 1 文字ずれる。数えると
+  どちらかを変えたときに静かに 1 桁ずれる
+- **face は帯のものと並べたリストにする。** 前景は点の face から、
+  **背景は帯から**来る。点の face には背景を書かない（書くと帯の中で
+  そこだけ色が変わる）
+- `my:claude--setup-input-area` は貼り直す前に
+  `(remove-overlays nil nil 'my:claude-band-spinner t)` を通す。
+  `my:claude-mode` を手で呼び直すと `kill-all-local-variables` で
+  参照だけが失われ、**止まった点が残る**（overlay はモードの
+  切り替えでは消えない）
+- **エラーを投げない**（`with-demoted-errors`）。0.1 秒のタイマーから
+  呼ばれるので、signal すると GUI の Emacs が固まったようにしか見えない
+
+**待機中に `` と 🤖 のあいだが 3 桁ぶん（24 px）空いて見えるのは、点の桁を
+予約しているから**（overlay 2 桁 + 帯自身の内側の余白 1 桁）。`C-f` で辿ると
+空白は 1 つしか無いように見えるが、それは実在するのが帯自身の余白だけで、
+**`before-string` はバッファのテキストではないので point を置けない**ため。
+出したり消したりすると、ターンの切り替わりのたびに 🤖 と案内文が 2 桁動く。
+
+1 回の更新は **0.011 ms**（`my:claude--band-start` が 0.004 ms。
+25 KB のバッファで実測）。tick は 100 ms なので数える意味が無い。
 
 #### 【重要】ブレイルは HackGen に無い（9 px / ASCII は 8 px）
 
 点は `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`。**フォントは HackGen ではなく Cascadia Code に
-落ちている**（`font-at` で実測）。`char-width` は 1 なのに
-`string-pixel-width` は **9 px** で、HackGen の ASCII（8 px）と 1 px ずれる。
+落ちている**（`font-at` / `char-displayable-p` で実測）。`char-width` は
+1 なのに `string-pixel-width` は **9 px** で、HackGen の ASCII（8 px）と
+1 px ずれる。10 面とも 9 px なので回っている間は揺れないが、`?`（8 px）や
+空白（8 px）と入れ替わるところで右が 1 px 動く。
 
-10 面とも 9 px なので回っている間は揺れないが、`?`（8 px）や空白（8 px）と
-入れ替わるところで後ろが 1 px 動く。**後ろの空白に
-`(space :align-to 2)` を載せて桁を固定してある。**
+**ヘッダ行のときは `(space :align-to 2)` で埋めて桁を固定していたが、
+帯では使えない。** 帯の中はもともと桁に乗っていない（GUI 実測）。
 
-| | 素のまま | `:align-to 2` |
+| | 実描画 | 桁（8 px）換算 |
 |---|---|---|
-| `"⠋ "` | 17 px | **16 px** |
-| `"⠀ "`（ブレイル空白） | 17 px | **16 px** |
-| `"? "` | 16 px | **16 px** |
-| `"  "` | 16 px | **16 px** |
+| `` (`my:claude-prompt-begin-string`) | **15 px** | 1.875 桁（`:height` 1.33 倍が効いている） |
+| 🤖 | **21 px** | 2.625 桁 |
+| 点 | 9 px | 1.125 桁 |
+| 空白 / `?` | 8 px | 1 桁 |
 
-**埋める空白にも大きさの face を載せること。** 行の高さは行内でいちばん
-高いグリフで決まるので、1 か所でも素のままだとヘッダ行が縮まない
-（区切りの `" | "` と同じ話）。
+`:align-to` は桁単位なので、どの桁に合わせても 1 px は吸収できない。
+**動くのはターンの切り替わりの 1 回だけ**なので、1 px は残してある。
+
+3 つの状態（`my:claude--band-spinner-string` の実測）:
+
+```
+nil      #("  " 0 2 (face (my:claude-prompt-face)))                              16 px
+t        #(" ⠼" 0 2 (face (my:claude-header-busy-face my:claude-prompt-face)))   17 px
+asking   #(" ?" 0 2 (face (my:claude-header-asking-face my:claude-prompt-face))) 16 px
+```
+
+帯の実描画（`⟦⟧` が overlay の `before-string`）:
+
+```
+⟦ ⠼⟧ 🤖 (C-c C-c 送信 / C-c a k 中断 / C-c C-k 破棄 / M-p 履歴 / M-v 画像) 
+```
 
 #### 点は `run-at-time` で回す
 
-`:eval` は再描画のたびに評価されるが、**再描画のきっかけが無い**。出力が
-届いたときとコマンドの後しか動かないので、`my:claude--spinner-tick` が
-`my:claude-spinner-interval`（既定 0.1 秒）ごとに
-`force-mode-line-update` を呼ぶ。
+再描画のきっかけが無い（出力が届いたときとコマンドの後しか動かない）ので、
+`my:claude--spinner-tick` が `my:claude-spinner-interval`（既定 0.1 秒）ごとに
+`my:claude--redraw-busy` を呼ぶ。
 
 - **タイマーは `busy` が `t` のセッションがある間だけ回る**
   （`my:claude--spinner-refresh`）。確認待ちの間も、誰も待っていない間も
   止まる。**止め忘れると Emacs が永久に 0.1 秒ごとに起きる**
-- 描き直すのは待っているセッションのバッファだけ。`force-mode-line-update`
-  に ALL は渡さない
-
-GUI 実測（0.11 秒ごとにヘッダ行の先頭 10 桁を採った）:
-
-```
-"⠹ jighead(" "⠸ jighead(" "⠸ jighead(" "⠼ jighead(" "⠼ jighead(" "⠴ jighead("
-```
-
-3 つの状態（先頭 26 桁。**2 桁目から後ろが 1 桁も動いていない**）:
-
-```
-nil      "  jighead(max) v2.1.263 | "
-asking   "? jighead(max) v2.1.263 | "
-t        "⠴ jighead(max) v2.1.263 | "
-```
+- 描き直すのは待っているセッションのバッファだけ
+- **`force-mode-line-update` は呼ばない**（2026-10-06）。点がヘッダ行から
+  消えたので要らなくなった。ブランチの列（`:eval`）は出力の挿入やキー入力の
+  たびに起きる通常の再描画で評価される
 
 確認待ちへの出入り（実測）:
 

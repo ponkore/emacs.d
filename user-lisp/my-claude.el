@@ -572,19 +572,25 @@ Windows の `play-sound-file' は WAV しか鳴らせない。"
 (defface my:claude-header-busy-face
   '((((background dark))  :foreground "deep sky blue" :weight bold)
     (((background light)) :foreground "blue" :weight bold))
-  "ヘッダ行の先頭に出す応答待ちの点 (`⠋')。
+  "区切りの帯の中に出す応答待ちの点 (`⠋')。
 
 **暗い背景で `\"blue\"' と書かない。** ANSI の blue (#0000ff) は
 modus-vivendi のような黒い背景では読めない。目に入ることがこの桁の
-役割なので、明るい側に振ってある。")
+役割なので、明るい側に振ってある。
+
+**背景は書かない。** `my:claude-prompt-face' と並べたリストで使うので、
+背景は帯から来る (`my:claude--band-spinner-string')。ここに書くと帯の中で
+そこだけ色が変わる。")
 
 (defface my:claude-header-asking-face
   '((((background dark))  :foreground "yellow" :weight bold)
     (((background light)) :foreground "dark goldenrod" :weight bold))
-  "ヘッダ行の先頭に出す確認待ちの `?'。
+  "区切りの帯の中に出す確認待ちの `?'。
 
 **点と色を変えてある。** 止まっていることに加えて色でも分かるように。
-待っているのは claude ではなく自分なので、青のままだと見分けが付かない。")
+待っているのは claude ではなく自分なので、青のままだと見分けが付かない。
+
+背景を書かない理由は `my:claude-header-busy-face' と同じ。")
 
 (defface my:claude-prompt-face
   '((t :background "dark slate blue" :foreground "light steel blue"))
@@ -705,7 +711,7 @@ read-only なのでそれは起こらない。**区切りを挟むのはこの�
 ;; `busy' は 3 値。**真偽値ではない**ので `eq' で見ること。
 ;;
 ;;   nil       待っていない
-;;   t         claude が動いている      -> ヘッダ行の先頭の点が回る
+;;   t         claude が動いている      -> 区切りの帯の中の点が回る
 ;;   `asking'  ミニバッファで返事待ち   -> 止まった `?' になる
 ;;
 ;; 分けているのは、この 2 つで**待っている側が逆**だから。点が動いて
@@ -719,11 +725,8 @@ read-only なのでそれは起こらない。**区切りを挟むのはこの�
 **HackGen には無い。** 手元では Cascadia Code に落ちて描かれる (実測)。
 `char-width' は 1 だが **実描画は 9 px** で、HackGen の ASCII (8 px) と
 1 px ずれる。10 面とも同じ 9 px なので回っている間は揺れないが、
-`?' や空白と入れ替わるところでは揃わない。後ろを `:align-to' で
-埋めて桁を固定してある (`my:claude--busy-segment')。")
-
-(defconst my:claude--busy-column 2
-  "ヘッダ行の先頭に空ける桁数 (点 1 桁 + 区切りの空白 1 桁)。")
+`?' や空白と入れ替わるところでは 1 px だけ動く
+ (`my:claude--band-spinner-string')。")
 
 (defvar my:claude--spinner-index 0
   "いま出している `my:claude--spinner-frames' の添字。")
@@ -741,14 +744,92 @@ read-only なのでそれは起こらない。**区切りを挟むのはこの�
   (seq-filter (lambda (s) (eq (my:claude-session-busy s) t))
               my:claude--sessions))
 
-(defun my:claude--redraw-header (session)
-  "SESSION の会話バッファのヘッダ行を描き直す。
+(defvar-local my:claude--band-spinner-overlay nil
+  "区切りの帯の中に応答待ちを出す overlay。バッファごとに 1 つ。
 
-`force-mode-line-update' に ALL を渡さないのは、動いているバッファだけで
-足りるため。表示されていなければ何も起きない。"
+**テキストではなく overlay の `before-string' で出す。** 帯は
+`my:claude--protect' が read-only にした確定領域なので、0.1 秒ごとに
+書き換えると (1) `inhibit-read-only' を立て続けることになり
+(2) undo と `my:claude--output-marker' / `my:claude--input-marker' の
+前後関係に毎回触る。区切りが消えると会話が静かに失われる
+ (`my:claude--repair-input-area') ため、**ここは絶対にテキストを
+触らない**。overlay のプロパティはバッファを変更しないので、
+read-only も undo もマーカーも無関係に、その行だけ再描画される。")
+
+(defun my:claude--band-start ()
+  "帯 (`my:claude-prompt-face' が載った部分) の先頭。無ければ nil。
+
+**位置を数えずに face で見つける。** `my:claude--output-marker' は帯の
+手前を指すが、`my:claude--pad-before-prompt' の詰め物で 1 文字、
+`my:claude-prompt-begin-string' の有無でもう 1 文字ずれる。数えると
+どちらかを変えたときに静かに 1 桁ずれる。"
+  (let ((pos (and (markerp my:claude--output-marker)
+                  (marker-position my:claude--output-marker))))
+    (when pos
+      (save-excursion
+        (goto-char pos)
+        (when-let* ((m (text-property-search-forward
+                        'font-lock-face 'my:claude-prompt-face t)))
+          (prop-match-beginning m))))))
+
+(defun my:claude--band-spinner-string ()
+  "帯の中に出す応答待ち (空白 1 桁 + 点)。
+
+face は**帯のものと並べたリスト**にする。リストは先に書いたほうが勝つので
+前景は点の face から、**背景は帯から**来る (`my:claude--header-segment'
+と同じ流儀)。帯だけ背景を持つので、ここに書く色は前景だけでよい。
+
+**待っていないときも空白で桁を空ける。** 出したり消したりすると 🤖 と
+案内文が 2 桁ずつ動く。点 (9 px) と空白 (8 px) の 1 px だけは残るが、
+動くのはターンの切り替わりの 1 回で、帯の中は `' が 15 px、🤖 が
+21 px と**もともと桁に乗っていない**ので `:align-to' では埋められない。"
+  (let* ((busy (and my:claude--session
+                    (my:claude-session-busy my:claude--session)))
+         (cell (pcase busy
+                 ('nil (cons " " nil))
+                 ('asking (cons "?" 'my:claude-header-asking-face))
+                 (_ (cons (my:claude--spinner-string)
+                          'my:claude-header-busy-face)))))
+    (propertize (concat " " (car cell))
+                'face (delq nil (list (cdr cell) 'my:claude-prompt-face)))))
+
+(defun my:claude--update-band-spinner (&optional buffer)
+  "BUFFER (既定は current) の帯の中の応答待ちを描き直す。
+
+**エラーを投げない。** 0.1 秒のタイマーから呼ばれるので、ここで
+signal すると GUI の Emacs が固まったようにしか見えない
+ (CLAUDE.md「プローブの作法」)。"
+  (with-current-buffer (or buffer (current-buffer))
+    (with-demoted-errors "my:claude: 帯の応答待ち: %S"
+      (if-let* ((beg (my:claude--band-start)))
+          (let ((ov my:claude--band-spinner-overlay))
+            (unless (overlayp ov)
+              (setq ov (make-overlay beg (1+ beg) nil t nil)
+                    my:claude--band-spinner-overlay ov)
+              ;; 取り残されたものを見つけて消すための目印
+              ;; (`my:claude--setup-input-area')。
+              (overlay-put ov 'my:claude-band-spinner t))
+            ;; 出力は帯の手前に挿さるので overlay はテキストと一緒に動くが、
+            ;; 帯を置き直した (`my:claude--repair-input-area') ときのために
+            ;; 毎回位置を合わせ直す。
+            (move-overlay ov beg (1+ beg))
+            (overlay-put ov 'before-string (my:claude--band-spinner-string)))
+        ;; 帯が無い。`my:claude--repair-input-area' が直すまで何も出さない。
+        (when (overlayp my:claude--band-spinner-overlay)
+          (delete-overlay my:claude--band-spinner-overlay))))))
+
+(defun my:claude--redraw-busy (session)
+  "SESSION の応答待ちを描き直す。
+
+**ヘッダ行は触らない** (2026-10-06)。点を帯だけに出すようにしたので、
+0.1 秒ごとに `force-mode-line-update' を呼ぶ必要が無くなった。ブランチの
+列 (`:eval') は出力の挿入やキー入力のたびに起きる通常の再描画で評価される。
+
+表示されていないバッファでも overlay は更新する (次に出したときに
+正しい桁から始まる)。コストは 0.011 ms なので測る意味が無い。"
   (let ((buf (my:claude-session-buffer session)))
     (when (buffer-live-p buf)
-      (with-current-buffer buf (force-mode-line-update)))))
+      (my:claude--update-band-spinner buf))))
 
 (defun my:claude--spinner-tick ()
   "点を 1 つ進めて、待っているバッファだけ描き直す。"
@@ -757,7 +838,7 @@ read-only なのでそれは起こらない。**区切りを挟むのはこの�
         ;; 誰も待っていない。取りこぼしたときの保険で、ここでも止める。
         (my:claude--spinner-refresh)
       (setq my:claude--spinner-index (1+ my:claude--spinner-index))
-      (mapc #'my:claude--redraw-header sessions))))
+      (mapc #'my:claude--redraw-busy sessions))))
 
 (defun my:claude--spinner-refresh ()
   "待っているセッションの有無に合わせてタイマーを入れ切りする。
@@ -783,7 +864,7 @@ read-only なのでそれは起こらない。**区切りを挟むのはこの�
 ここでまとめて引き受けている。"
   (setf (my:claude-session-busy session) state)
   (my:claude--spinner-refresh)
-  (my:claude--redraw-header session))
+  (my:claude--redraw-busy session))
 
 (defmacro my:claude--with-asking (session &rest body)
   "BODY を実行する間、SESSION を確認待ちにする。
@@ -1525,6 +1606,11 @@ Nerd Font は **ピクセルサイズと ascent + descent が一致する** (実
 マーカーの insertion-type が肝 (`my:claude--output-marker' の説明を参照)。"
   (let ((inhibit-read-only t)
         (buffer-undo-list t))
+    ;; 置き直すときは前の帯の overlay を捨てる。`my:claude-mode' を手で
+    ;; 呼び直すと `kill-all-local-variables' で参照だけが失われ、止まった
+    ;; 点が残る (overlay はモードの切り替えでは消えない)。
+    (remove-overlays nil nil 'my:claude-band-spinner t)
+    (setq my:claude--band-spinner-overlay nil)
     (save-excursion
       (goto-char (point-max))
       (unless (bolp) (insert "\n"))
@@ -1556,7 +1642,13 @@ Nerd Font は **ピクセルサイズと ascent + descent が一致する** (実
           ;; (「このテキストの全プロパティを継承させない」の意味)。
           (put-text-property (1- end) end 'rear-nonsticky t)
           (setq my:claude--output-marker (copy-marker beg t)
-                my:claude--input-marker (copy-marker end nil)))))))
+                my:claude--input-marker (copy-marker end nil))
+          ;; **マーカーを置いたあとで。** `my:claude--band-start' が
+          ;; `my:claude--output-marker' から探す。この時点では
+          ;; `my:claude--session' がまだ nil のことがある
+          ;; (`my:claude-mode' の中から呼ばれる) が、そのときは
+          ;; 待っていない桁 = 空白が出るだけでよい。
+          (my:claude--update-band-spinner))))))
 
 (defun my:claude--markers-sane-p ()
   "確定した会話と入力エリアの境界が壊れていなければ非 nil。
@@ -1956,34 +2048,6 @@ size face から来る。大きさを 1 か所で決めるためにこうして�
   (apply #'propertize (replace-regexp-in-string "%" "%%" text)
          'face (list face 'my:claude-header-size-face) props))
 
-(defun my:claude--busy-segment ()
-  "ヘッダ行の先頭に出す応答待ち。`header-line-format\' の `:eval\' から呼ぶ。
-
-**末尾ではなく先頭に置く。** 末尾はブランチ名やディレクトリ名が伸びると
-ウィンドウの右で切れて見えなくなるうえ、いちばん見ない場所でもある。
-
-**待っていないときも桁を空ける。** 出したり消したりすると、その左右に
-ある列が 1 桁ずつ動いてしまう。後ろの空白を `:align-to\' で
-`my:claude--busy-column\' 桁目まで伸ばすので、中身が点 (9 px) でも
-`?\' (8 px) でも空白 (8 px) でも、2 列目以降の位置は変わらない。
-
-face は 3 通り。**色だけでなく動きでも分かるようにしてある。**
-
-  claude が動いている  回る点     青
-  確認待ち             止まる `?\' イエロー
-  待っていない         空白"
-  (concat
-   (pcase (and my:claude--session (my:claude-session-busy my:claude--session))
-     ('nil (my:claude--header-segment " " 'default))
-     ('asking (my:claude--header-segment "?" 'my:claude-header-asking-face))
-     (_ (my:claude--header-segment (my:claude--spinner-string)
-                                   'my:claude-header-busy-face)))
-   ;; 【重要】埋める空白にも face を載せる (`my:claude--header-segment' が
-   ;; 大きさの face を足す)。行の高さは行内でいちばん高いグリフで決まるので、
-   ;; 1 か所でも素のままだとヘッダ行が縮まない。
-   (my:claude--header-segment " " 'default
-                              'display `(space :align-to ,my:claude--busy-column))))
-
 (defun my:claude--cost-segment ()
   "ヘッダ行の最後の列。セッションの累計コスト。
 
@@ -2008,11 +2072,14 @@ face は 3 通り。**色だけでなく動きでも分かるようにしてあ�
 (defun my:claude--header (session)
   "会話バッファのヘッダ行。
 
-**表示はここに集約する。** 先頭に応答待ちの 1 桁を置き、その後ろを
-7 列に分けて色を付けてある (`~/.claude/statusline-command.sh\' が端末の
-TUI で使っている ANSI 色に合わせた)。モードラインには何も出さない。
+**表示はここに集約する。** 7 列に分けて色を付けてある
+ (`~/.claude/statusline-command.sh\' が端末の TUI で使っている ANSI 色に
+合わせた)。モードラインには何も出さない。
 
-  0 応答待ち (回る点 / 確認待ちは `?\')          青 / イエロー
+**応答待ちはここには出さない** (2026-10-06)。区切りの帯の中、`' と 🤖 の
+あいだに出る (`my:claude--band-spinner-string\')。入力エリアのすぐ上なので、
+打っている場所から目を動かさずに見える。
+
   1 アカウント (プラン) と claude のバージョン   マゼンタ
   2 プロジェクト名 (フルパスは help-echo)        シアン
   3 git ブランチ                                 グリーン
@@ -2021,13 +2088,10 @@ TUI で使っている ANSI 色に合わせた)。モードラインには何も
   6 レート上限とリセット時刻                     シアン
   7 累計コスト                                   dim
 
-**戻り値は文字列ではなくリスト** (mode-line 構文)。0 / 3 / 7 列目は
+**戻り値は文字列ではなくリスト** (mode-line 構文)。3 / 7 列目は
 `:eval\' で、再描画のたびに評価される。ブランチの切り替えは Emacs の
-外でも起き、応答待ちは送信した時点で立つので、どちらもターンごとの
-更新 (`my:claude--update-header\') では追随できないため。
-
-**0 列目は区切りを出さず、待っていなくても桁を空ける**
- (`my:claude--busy-segment\')。消すと後ろの列がまるごと 1 桁動く。
+外でも起きるので、ターンごとの更新 (`my:claude--update-header\') では
+追随できないため。
 
 **7 列目は区切りも自分で出す** (`my:claude--cost-segment\')。末尾なので、
 出すものが無いときに区切りだけが残らないようにする必要がある。
@@ -2108,9 +2172,8 @@ settings.json から求める (`my:claude--effort')。"
     ;; **`mapconcat' で 1 つの文字列にはしない。** `(:eval ...)' の列を
     ;; 活かすため、mode-line 構文のリストのまま返す。
     ;;
-    ;; [0] と [7] は区切り込みで自分を出すので、ここで挟む対象には入れない。
-    (append (list '(:eval (my:claude--busy-segment)))
-            (cdr (mapcan (lambda (seg) (list my:claude--header-separator seg))
+    ;; [7] は区切り込みで自分を出すので、ここで挟む対象には入れない。
+    (append (cdr (mapcan (lambda (seg) (list my:claude--header-separator seg))
                          (nreverse segs)))
             (list '(:eval (my:claude--cost-segment))))))
 
