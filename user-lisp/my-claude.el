@@ -2908,9 +2908,20 @@ ALIGNS は列ごとの寄せ方、HEADER は見出し行の数、INDENT は行�
           ;; この警告が出たおかげで真因に辿り着けた (越えた幅 64 が
           ;; 詰め物 + 区切り行の長さと一致し、`point' が入力エリアへ
           ;; 飛んでいると分かった)。越えた事実は黙って直さず残すこと。
+          ;;
+          ;; **ただし詰め物の改行 1 文字だけは例外**(2026-10-07)。応答が
+          ;; 表で終わると、最終行を読んだ `forward-line' が
+          ;; `my:claude--pad-before-prompt' の詰め物をまたいで必ず
+          ;; `limit' + 1 に着く。詰め物はマーカーの後ろ = 確定出力の外に
+          ;; あるためで、`point' はどこへも飛んでいない。丸めるだけで
+          ;; 損失も無い (実測: 表は全行組まれ、帯も境界も無傷)。
+          ;; **毎回出る警告は見なくなる**ので、ここだけは黙って丸める。
+          ;; 見分けは「越えた幅がちょうど 1」かつ「`limit' の文字が改行」。
+          ;; 本物の飛び方 (64 文字) はどちらの条件も満たさない。
           (when (> finish limit)
-            (message "my:claude: %s の表の組み直しが確定出力を越えた (start=%d finish=%d end=%d)"
-                     (buffer-name) start finish limit)
+            (unless (and (= finish (1+ limit)) (eq (char-after limit) ?\n))
+              (message "my:claude: %s の表の組み直しが確定出力を越えた (start=%d finish=%d end=%d)"
+                       (buffer-name) start finish limit))
             (setq finish limit))
           (delete-region start (max start finish))
           (goto-char start)
