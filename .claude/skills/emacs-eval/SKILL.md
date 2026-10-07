@@ -32,9 +32,34 @@ server を立てるので、Emacs を起動すれば自動で繋がる。
 
 - この設定が入る前に起動した Emacs がまだ動いている（`M-x server-start` で立つ）
 - **別の Emacs が先に待ち受けている。** `my:server-start-maybe` は
-  `server-running-p` が nil のときだけ起動するのでソケットを奪わない。その代わり、
+  `(eq t (server-running-p))` が偽のときだけ起動するのでソケットを奪わない。その代わり、
   2 つ目以降の Emacs には emacsclient が届かない。繋がった先が意図した Emacs か
   怪しいときは `(emacs-pid)` と `(buffer-list)` で確かめる。
+- **magit を使ったセッションは `server` ではなく `server<PID>` で待っている。**
+  下記。
+
+### 【重要】Windows では `~/.emacs.d/server/` を見てから諦める（2026-10-07）
+
+`ec.sh` は既定の名前（`server`）で探すが、**待ち受けている名前がそれとは
+限らない**。`server-auth-dir`（`~/.emacs.d/server/`）に `server<PID>` が
+あり、その PID が生きていれば、そこへ繋げばよい。
+
+```bash
+ls ~/.emacs.d/server/
+EMACS_SERVER_FILE="C:/Users/masao/.emacs.d/server/server32700" bash .claude/skills/emacs-eval/ec.sh '(emacs-pid)'
+```
+
+名前が変わる経路は magit。`with-editor--setup` が、server が立っていないと
+判断すると `server-name` を `server<PID>` に付け替えて `server-start` する
+（`with-editor.el:527`）。
+
+**そうなる引き金は、死んだ Emacs が残したサーバファイル。** Windows は
+`server-use-tcp` が t なので `server-running-p` はファイルに書かれた PID の
+生死を見るが、**死んでいると nil ではなく `:other`（非 nil）を返す**。
+`my:server-start-maybe` が `(eq t ...)` で見るようになったのはこのため
+（それ以前は非 nil で見ていたので、**残骸がある限り二度と server が
+立たなかった**）。いまは起動時に残骸を消すので再発しないが、**古い設定で
+動いている Emacs には効かない**ので、上の手順は残しておく。
 
 ## 使い方
 

@@ -219,15 +219,58 @@
   ;; (with-eval-after-load 'server ...) に包まれるので、server.el が
   ;; ロードされるまで定義されない。それでは emacs-startup-hook から
   ;; 呼ばれた時点で void-function になる。
+  (defun my:server--stale-files ()
+    "`server-auth-dir' に残っている、死んだ Emacs のサーバファイル。
+
+TCP 版のサーバファイルは 1 行目が `HOST:PORT PID' なので、書いてある
+PID が生きていないものは残骸と判る。**PID が生きているものは返さない**
+(別の Emacs が待ち受けているかもしれない)。
+
+Unix ソケットを使う環境ではファイルに PID が書かれないので何も返さない。"
+    (when (and server-use-tcp (file-directory-p server-auth-dir))
+      (seq-filter
+       (lambda (f)
+         (and (file-regular-p f)         ; `.' / `..' はこれで落ちる
+              (with-temp-buffer
+                (and (ignore-errors (insert-file-contents-literally f) t)
+                     (looking-at "127\\.0\\.0\\.1:[0-9]+ \\([0-9]+\\)")
+                     ;; `server-running-p' が生死を見るのと同じ判定。
+                     (not (assq 'comm (process-attributes
+                                       (string-to-number (match-string 1)))))))))
+       ;; MATCH に先頭アンカー付きの正規表現は書かない (CLAUDE.md)。
+       (directory-files server-auth-dir t nil t))))
+
   (defun my:server-start-maybe ()
     "サーバが動いていなければ起動する。"
     ;; server-start は autoload されているが `server-running-p' はされて
     ;; いない (実測: emacs -Q で fboundp が nil)。判定より先に require する。
     (require 'server)
-    ;; server-running-p は「動いている」(t)、「動いていない」(nil) のほかに
-    ;; 「すぐには判定できない」(それ以外) を返す。nil のときだけ起動すれば、
-    ;; 既に別の Emacs が同じ名前で待ち受けている場合にソケットを奪わない。
-    (unless (server-running-p)
+    ;; 【重要】**判定は `(eq t ...)'。非 nil で見てはいけない** (2026-10-07)。
+    ;;
+    ;; server-running-p は 3 値を返す。「動いている」(t)、「動いていない」
+    ;; (nil)、「すぐには判定できない」(それ以外) で、**Windows の既定
+    ;; (server-use-tcp が t) では 3 つ目に落ちる経路がある**。
+    ;; `server-auth-dir' のファイルを読み、書いてある PID が死んでいると
+    ;; `:other' を返す (実測)。前のセッションが異常終了してファイルが
+    ;; 残っていると、**以後どのセッションも「動いている」と誤判定して
+    ;; server を立てない**。エラーも警告も出ないので、emacsclient が
+    ;; 繋がらなくなって初めて気づく。実際に何日も立っていなかった。
+    ;;
+    ;; `server-start' 自身も `server-stop' の中で `(eq t (server-running-p
+    ;; server-name))' と書いている。別の Emacs がソケットを握っている
+    ;; ときに奪わない、という元の意図は `(eq t ...)' でも変わらない。
+    (unless (eq t (server-running-p))
+      ;; 残骸を先に消す。`server-start' は `server-name' のぶんだけは自分で
+      ;; 消すが、**他の名前のファイルは消さない**。magit (with-editor) が
+      ;; `server-running-p' の誤判定を受けて `server<PID>' へ逃げるため、
+      ;; 放っておくと死んだ PID のファイルが何年ぶんも溜まる (実測で 6 個、
+      ;; 最古は 2020 年)。
+      ;;
+      ;; ごみ箱には入れない (`server-stop' も同じ束縛をしている)。中身は
+      ;; 死んだサーバの認証鍵なので、残す意味が無い。
+      (let ((delete-by-moving-to-trash nil))
+        (dolist (f (my:server--stale-files))
+          (ignore-errors (delete-file f))))
       (server-start))))
 
 ;;; [3] 自分の Blog (myblog-hugo) 用のものは削除した
