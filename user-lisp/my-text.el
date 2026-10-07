@@ -321,9 +321,15 @@ overlay があること自体は「畳まれている」ことを意味しない
   ;; M-v (scroll-down-command) を org-mode でだけ潰す。
   ;; スクロールは my-keybind.el の C-z が使える。
   ;; C-c C-x h は org では空いている (C-c C-x - は org-timer-item)。
+  ;;
+  ;; hydra の入口は C-c h。markdown と同じ C-c . は使えない
+  ;; (org-mode-map で org-timestamp。C-c , も org-priority、C-c / も
+  ;; org-sparse-tree で埋まっている)。C-c h / C-c m / C-c o / C-c q /
+  ;; C-c z が空いていることを実測して h を採った。
   :bind (:map org-mode-map
               ("M-v" . my:org-yank-image)
-              ("C-c C-x h" . my:org-fold-region-toggle))
+              ("C-c C-x h" . my:org-fold-region-toggle)
+              ("C-c h" . hydra-org/body))
   :custom
   ;; クリップボード画像 (と D&D した画像) の保存先。
   ;; 既定の attach (org-attach 管理下) ではなくバッファの隣に置く。
@@ -413,7 +419,75 @@ overlay があること自体は「畳まれている」ことを意味しない
                (percent (/ (* 100 a) b)))
           (insert "<" (number-to-string a) "/" (number-to-string b) "=" (number-to-string percent) "%>")))
       (goto-char saved-point))
-    nil))
+    nil)
+  ;; leaf の :hydra は init 時にインライン展開されるので :init に置く。
+  ;;
+  ;; 色は dired と同じ pink (:foreign-keys warn)。昇格/降格・移動・cycle は
+  ;; 連続して押すものなので hydra を維持し、ミニバッファやカレンダーで入力を
+  ;; 取るもの (schedule / deadline / refile / link / export など) と別バッファへ
+  ;; 移るものだけ個別に :exit t を付ける。ヒントとミニバッファの読み取りが
+  ;; 同じ場所を使うため、入力を取るコマンドを pink のままにするとちらつく。
+  ;;
+  ;; 画像の表示は org-toggle-inline-images ではなく org-link-preview。
+  ;; 前者は org 9.8 で obsolete になっている (実測で byte-obsolete-info 有り)。
+  ;; 素で呼ぶとカレントエントリだけが対象。バッファ全体は C-u C-u C-c C-x C-v。
+  ;;
+  ;; g (consult-org-heading) だけ consult の関数。autoload されたコマンドなので
+  ;; org だけロードされた状態でも押せば consult が読まれる。org 標準の C-c C-j
+  ;; (org-goto) より vertico で絞り込めるぶん速い。
+  :init
+  (defhydra hydra-org (:hint nil :color pink)
+    "
+^Todo/Tag^    ^Date/Clock^      ^Structure^         ^Insert/Export^ ^View/Move^
+------------------------------------------------------------------------------
+_t_odo        _s_chedule        _h_/_l_ promote       _u_ link        _TAB_/_Z_ cycle
+_,_ priority  _d_eadline        _H_/_L_ subtree       _c_ structure   _N_arrow
+_T_ags        _._ timestamp     _k_/_j_ move          _|_ table       _i_ indirect
+_P_roperty    _!_ inactive      _y_/_p_ copy/paste    _n_ote          _/_ sparse tree
+_C_heckbox    clock _I_n/_O_ut    _x_ cut             _e_xport        _g_oto heading
+^^            ^^                _w_ refile          ^^              _v_ image preview
+^^            ^^                _A_rchive _S_ort      ^^              _f_old region  _q_uit
+"
+    ("t" org-todo)
+    ("," org-priority)
+    ("T" org-set-tags-command :exit t)
+    ("P" org-set-property :exit t)
+    ("C" org-toggle-checkbox)
+    ("s" org-schedule :exit t)
+    ("d" org-deadline :exit t)
+    ("." org-timestamp :exit t)
+    ("!" org-time-stamp-inactive :exit t)
+    ("I" org-clock-in)
+    ("O" org-clock-out)
+    ;; 昇格/降格と移動は org の M-left / M-S-left / M-up に当たるもの。
+    ;; 見出しの上なら subtree、リストの上ならリスト項目に効く dwim なので、
+    ;; org-promote-subtree ではなくこちらを呼ぶ。
+    ("h" org-metaleft)
+    ("l" org-metaright)
+    ("H" org-shiftmetaleft)
+    ("L" org-shiftmetaright)
+    ("k" org-metaup)
+    ("j" org-metadown)
+    ("x" org-cut-subtree)
+    ("y" org-copy-subtree)
+    ("p" org-paste-subtree)
+    ("w" org-refile :exit t)
+    ("A" org-archive-subtree)
+    ("S" org-sort :exit t)
+    ("u" org-insert-link :exit t)
+    ("c" org-insert-structure-template :exit t)
+    ("|" org-table-create-or-convert-from-region :exit t)
+    ("n" org-add-note :exit t)
+    ("e" org-export-dispatch :exit t)
+    ("TAB" org-cycle)
+    ("Z" org-shifttab)
+    ("N" org-toggle-narrow-to-subtree)
+    ("i" org-tree-to-indirect-buffer :exit t)
+    ("/" org-sparse-tree :exit t)
+    ("g" consult-org-heading :exit t)
+    ("v" org-link-preview)
+    ("f" my:org-fold-region-toggle)
+    ("q" nil)))
 
 (use-package ox-pandoc
   ;; https://taipapamotohus.com/post/org-mode_paper_4/
