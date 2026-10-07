@@ -799,6 +799,34 @@ vc-git の `dir-status-files` はプロセスを 6 回前後リレーし、Windo
 `diff-hl-dired-clear` がバッファ全体を消すところから始まるので**できない**。
 → [docs](docs/dired/dired-extensions.md)
 
+## `my-dired-k` — 更新日時とサイズの色分け
+
+→ [docs](docs/dired/dired-extensions.md)
+
+旧 `dired-k` の色分けだけを引き継いだもの（git の状態は `diff-hl-dired` の担当）。
+実装は別物で、**overlay を張らず stat も増やさない**。一覧を作る ls-lisp に
+advice を当てて桁に「元の値」をテキストプロパティで載せ、色は font-lock が塗る。
+
+- **【重要】face をテキストプロパティで載せてはいけない。** `dired-mode` は
+  KEYWORDS-ONLY が t なのに、`font-lock-default-fontify-region` は先頭で
+  `font-lock-unfontify-region` を**無条件に**呼ぶ。`face` と `font-lock-face` が
+  `remove-list-of-text-properties` で消えるので、**jit-lock がその行を最初に
+  表示した瞬間に色が消える**（「最初は付いていてスクロールすると消える」という
+  形で外れる）。載せるのは face ではない自前のプロパティにして、`face` は
+  font-lock に塗らせる。`dired-k` が overlay を使っていた理由もこれだと思われる
+- **`font-lock-add-keywords` に `dired-mode` を渡してはいけない。** docstring に
+  あるとおり**派生モードに効かない**（`dired-sidebar-mode` が外れる）。
+  `dired-mode-hook` から MODE に `nil` で呼ぶ
+- **印はサイズの数字だけに付ける。** `ls-lisp-format-file-size` の戻り値は
+  右詰めで先頭に空白が並ぶが、`dired-align-file` は桁を揃えるためにその空白を
+  足したり削ったりする。印に空白を含めると巻き込まれる
+- **効くのは ls-lisp が一覧を作っているときだけ**（Windows / macOS）。Linux は
+  GNU ls なので色が付かない（エラーにはならない）。行をパースして一般化する
+  案は、**サイズの桁を数字の並びで探すと日時の中の数字に当たる**ので安くない
+  （`12:34:56` の `34` は `\_<34\_>` に一致する）
+- 1 行の貼り替え（`my-dired-watch`）・`dired-subtree`・`dired-add-entry` は
+  どれも同じ ls-lisp を通るので、**追加の手当ては要らない**
+
 ## `my-text` — org / markdown
 
 → [docs/text/org-extensions.md](docs/text/org-extensions.md) / [docs/text/markdown.md](docs/text/markdown.md)

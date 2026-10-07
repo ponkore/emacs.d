@@ -2,9 +2,9 @@
 
 # dired の拡張
 
-外部アプリ起動 (Excel)、exceldiff / MarkText、短くリネームできない問題、自動更新と diff-hl-dired の再入、中身の変化への追従 (my-dired-watch)、消えた行が残るレース。
+外部アプリ起動 (Excel)、exceldiff / MarkText、短くリネームできない問題、自動更新と diff-hl-dired の再入、中身の変化への追従 (my-dired-watch)、消えた行が残るレース、更新日時とサイズの色分け (my-dired-k)。
 
-最終更新: 2026-09-15 ｜ [README.md](../../README.md) ｜ [CLAUDE.md](../../CLAUDE.md)
+最終更新: 2026-10-07 ｜ [README.md](../../README.md) ｜ [CLAUDE.md](../../CLAUDE.md)
 
 ## dired で外部アプリを起動する
 
@@ -806,3 +806,124 @@ vim で踏みやすいのは、3 段の書き込みと dired の一覧読み込�
 
 **「ディレクトリの mtime を見れば増減が分かる」は、間隔を空けて測ったときの
 話。** 通知の直後に測ると取りこぼす。
+
+## 更新日時とサイズの色分け（`my-dired-k`、2026-10-07）
+
+長く使っていた `dired-k`（syohex、zsh の `k` の移植）を 2026-08-30 に
+diff-hl へ統合して外した。そのとき引き継げたのは **git の状態だけ**で、
+`dired-k` のもう 1 つの仕事だった**サイズと更新日時の色分け**は落ちていた。
+それを `my-dired-k.el` で取り戻した。
+
+色の表と段階は `dired-k` のものをそのまま使っている（`emacsorphanage/dired-k`
+の `dired-k-date-colors` / `dired-k-size-colors`）。
+
+| 更新日時 | 色 | | サイズ | 色 |
+|---|---|---|---|---|
+| 未来 | red | | 〜1 KiB | chartreuse4 |
+| 〜1 分 | white | | 〜2 KiB | chartreuse3 |
+| 〜1 時間 | grey90 | | 〜3 KiB | chartreuse2 |
+| 〜1 日 | grey80 | | 〜5 KiB | chartreuse1 |
+| 〜1 週 | grey65 | | 〜10 KiB | yellow3 |
+| 〜4 週 | grey65 | | 〜20 KiB | yellow2 |
+| 〜半年 | grey50 | | 〜40 KiB | yellow |
+| 〜1 年 | grey45 | | 〜100 KiB | orange3 |
+| 〜2 年 | grey35 | | 〜256 KiB | orange2 |
+| それ以上 | grey50 | | 〜512 KiB | orange |
+| | | | それ以上 | red |
+
+「2 年より古い」が grey35 より明るい grey50 に戻るのは upstream もそうで、
+意図的に揃えてある（`my:dired-k-date-colors` の末尾、car が `nil` の
+エントリ）。古い順に暗くしたければそこを変える。
+
+### 実装は dired-k と別物にした
+
+`dired-k` は `dired-after-readin-hook` から全行を舐め、1 行ごとに
+`file-attributes` を叩いて overlay を 2 つ張っていた。4862 件なら stat が
+4862 回、overlay が 9724 個になる。ここでは張らない。
+
+| | 担当 |
+|---|---|
+| **ls-lisp への advice** | サイズと日時の文字列に「元の値」をテキストプロパティで載せる |
+| **font-lock のキーワード** | そのプロパティを探し、**その場で色を計算して塗る** |
+
+`ls-lisp-format-file-size` は整形済みのサイズ文字列を、
+`ls-lisp-format-time` は日時文字列を返す。**桁の位置は ls-lisp 自身が
+知っている**ので、行をパースしなくてよい。属性もあちらが既に持っている
+ので stat も増えない。
+
+得るものが 3 つある。
+
+- **overlay が 0 個。** 色が付くのは jit-lock が実際に表示した行だけなので、
+  大きなディレクトリでも代金を払わない
+- **1 行の貼り替え（`my-dired-watch`）、`dired-subtree`、`dired-add-entry`
+  のどれも同じ ls-lisp を通る**ので、追加の手当てが要らない。
+  `nerd-icons` のアイコンを自分で付け直しているのとは対照的
+- 色は塗るときに計算するので、`font-lock-flush` で今の時刻に揃う
+
+### 【重要】face をテキストプロパティで載せてはいけない
+
+一覧を作るときに `face` を直接載せる案は**動かない**。しかも
+「最初は色が付いていて、スクロールすると消える」という分かりにくい形で
+外れる。
+
+`dired-mode` の `font-lock-defaults` は
+`(dired-font-lock-keywords t nil nil beginning-of-line)` で、2 番目の
+**KEYWORDS-ONLY が t**。それでも `font-lock-default-fontify-region` は
+先頭で `font-lock-unfontify-region` を**無条件に**呼ぶ（font-lock.el）。
+
+```elisp
+     ;; Now do the fontification.
+     (font-lock-unfontify-region beg end)
+```
+
+`font-lock-default-unfontify-region` は `face` と `font-lock-face` を
+`remove-list-of-text-properties` で消すので、**jit-lock が最初にその行を
+表示した瞬間に消える**。`dired-k` が overlay を使っていた理由はこれだと思う。
+
+そこで載せるのは **face ではない自前のプロパティ**（`my:dired-k-size` /
+`my:dired-k-time`）にして、`face` は font-lock に塗らせる。font-lock が
+付けた face は font-lock が管理するので消えない。非 face のプロパティは
+unfontify の対象外なので、何度塗り直しても印は残る。
+
+### マッチャが印の途中から始まらないことの根拠
+
+font-lock の領域は `font-lock-extend-region-functions` の既定値に
+`font-lock-extend-region-wholelines` が入っているため**行単位に丸められる**。
+したがって `my:dired-k--search` は常に行頭から走り、日時の途中（たとえば
+`火 2026-10-07 1` まで）で切れた範囲を塗ることはない。
+
+### `font-lock-add-keywords` に MODE を渡さない
+
+`dired-mode` を渡すと**派生モードに効かない**（docstring に明記がある）。
+`dired-sidebar-mode` が外れるので、`dired-mode-hook` から MODE に `nil` で
+呼ぶ。この形なら内側で `font-lock-set-defaults` まで済ませてくれるので、
+`dired-mode-hook` の時点で `font-lock-mode` がまだ off（`global-font-lock-mode`
+は `after-change-major-mode-hook` で入る）でも問題ない。
+
+### 効くのは ls-lisp が一覧を作っているときだけ
+
+Windows は ls-lisp が既定、macOS は `my-dired.el` が
+`ls-lisp-use-insert-directory-program` を nil にしている。**Linux は GNU ls**
+なので印が付かず、色も付かない（エラーにはならない）。
+
+行をパースする経路を足せば GNU ls でも効かせられるが、安くない。
+桁の構成が `ls-lisp-verbosity` と switches で変わり、サイズの桁を
+「数字の並び」で探すと**日時の中の数字に当たる**（`12:34:56` の `34` は
+`\_<34\_>` に一致するので、サイズが 34 のファイルで誤爆する）。
+
+### 実測（batch、使い捨てディレクトリ）
+
+サイズと日時を散らした 5 ファイルで、`font-lock-ensure` のあとに
+`face` プロパティを読んだ。
+
+| ファイル | サイズ | 付いた face | 更新日時 | 付いた face |
+|---|---|---|---|---|
+| `tiny.txt` | 500 | chartreuse4 | 今 | white |
+| `hour.txt` | 1500 | chartreuse3 | 2 時間前 | grey80 |
+| `week.txt` | 30000 | yellow | 10 日前 | grey65 |
+| `old.txt` | 600000 | red | 1 年半前 | grey35 |
+| `future.txt` | 100 | chartreuse4 | 1 日後 | **red** |
+
+`dired-relist-entry` で 1 行だけ貼り替えたあと（30000 → 300000 バイト）も
+`orange` / `white` に更新された。`my:dired-k-mode -1` のあとは両方 nil に
+なる。

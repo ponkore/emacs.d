@@ -114,6 +114,7 @@ git clone git@github.com:ponkore/emacs.d.git ~/.emacs.d
 | `my-editor` | hydra、symbol-overlay、smartparens、whitespace、yasnippet、recentf、editorconfig、tab-bar ほか |
 | `my-dired` | dired、hydra-dired、dired-sidebar（`F8`）、dired-x の上書き対策、exceldiff / MarkText の起動 |
 | `my-dired-watch` | ファイルのサイズ・日時・属性の変化で dired の行を貼り替える。Windows のみ |
+| `my-dired-k` | dired の更新日時とサイズを色分けする（旧 `dired-k` の色を引き継ぎ） |
 | `my-text` | text-mode、org-mode、ox-pandoc、markdown、rst、adoc |
 | `my-lang-lisp` | Emacs Lisp、Clojure（cider）、Common Lisp（slime） |
 | `my-lang-python` | Python（python-ts-mode、pyvenv、py-isort、blacken） |
@@ -207,6 +208,8 @@ Excel ブックは OS の関連付けに渡す、`C-c x` で exceldiff、`C-c m`
 追従する（`my-dired-watch`。行が増減しないので、その行だけを貼り替える）。
 **VC マーク（diff-hl）も commit / stage に追従する**（ターミナルや Claude Code から
 コミットした場合も含む）。
+**更新日時とサイズは色分けされる**（`my-dired-k`。新しいものほど明るく、
+大きいものほど赤い。色は旧 `dired-k` の表をそのまま使っている）。
 → [docs/dired/dired-extensions.md](docs/dired/dired-extensions.md)
 
 ### org / markdown

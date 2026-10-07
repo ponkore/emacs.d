@@ -11,7 +11,8 @@
 
 ;; dired-k は diff-hl に統合した (my-vc.el の diff-hl-dired-mode)。
 ;; dired-k は 2021 年から更新が止まり emacsorphanage に移されていた。
-;; ファイルサイズ・更新日時の色分けは diff-hl には無いので失われる。
+;; ファイルサイズ・更新日時の色分けは diff-hl には無いので、
+;; `my-dired-k.el' で取り戻してある (色の表は dired-k のまま)。
 
 ;; macOS でも一覧は ls-lisp で作る。/bin/ls は BSD 版で --dired を持たず、
 ;; 起動後最初の dired で "ls does not support --dired" が出ていた。
