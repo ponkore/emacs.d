@@ -1059,6 +1059,21 @@ gopls は大文字のドライブレターで返す（§1「Windows 固有」）
 - **曜日は `format-time-string` の `%a` に頼らない**（`system-time-locale` 次第で英語）
 - **`defvar-local` の世代カウンタは `permanent-local` にする。**
   `define-derived-mode` は `kill-all-local-variables` を通る
+- **【重要】非同期では 4xx / 5xx が `status` の `:error` で来る**（2026-10-08、
+  投稿を `url-retrieve` にした）。`url-http-parse-headers` が
+  `(:error (error http NNN))` を積むので、`:error` から先に分岐すると
+  **`peculiar error: 404` しか言えず、サーバが返した本文も捨てる**
+  （`*htnblog-error*` が空になる）。`url-http-response-status` を先に見ること
+- **【重要】タイムアウトのタイマーは、片付けより先にコールバックを呼ぶ。**
+  `url-retrieve` には TIMEOUT 引数が無いので `run-at-time` で見るが、
+  `delete-process` は url のセンチネルを**その場で**走らせ、それが
+  「接続が切れた」として先にコールバックを呼ぶ。順番を間違えると報告が
+  `peculiar error: "deleted\n"` に化ける（応答とタイムアウトは `done` で
+  閉じて 1 回しか通さない）
+- **投稿中はバッファを読み取り専用にする**（`my:htnblog--set-posting`）。
+  送るのは `C-c C-c` した時点の内容なので、待っている間に書けてしまうと
+  成功時の `kill-buffer` でその編集が黙って消える。札
+  （`my:htnblog--posting`）は二重送信と `C-u M-x htnblog` の入れ直しも断る
 
 ## `my-utils` — カレンダーの祝日
 

@@ -222,7 +222,8 @@ Excel ブックは OS の関連付けに渡す、`C-c x` で exceldiff、`C-c m`
 ### はてなブログへ投稿（`M-x htnblog`）
 
 カテゴリー・タイトル・本文 1 行目をプリセットしたバッファを開き、`C-c C-c` で公開。
-外部コマンドは要らない（AtomPub API を Basic 認証で叩くだけ）。
+外部コマンドは要らない（AtomPub API を Basic 認証で叩くだけ）。**投稿は非同期**
+なので待っている間も Emacs は止まらない（モードラインに `投稿中` が出る）。
 → [docs/htnblog/my-htnblog.md](docs/htnblog/my-htnblog.md)
 
 ### その他

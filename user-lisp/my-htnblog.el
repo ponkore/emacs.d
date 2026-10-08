@@ -27,6 +27,8 @@
 ;;
 ;; HTTP は組み込みの url.el で行う。子プロセスを起こさないので、この設定の
 ;; 持病である「Windows の call-process が遅い」(CLAUDE.md) とは無関係。
+;; 投稿も記事一覧の取得も非同期 (url-retrieve)。待っている間はバッファを
+;; 読み取り専用にし、モードラインに「投稿中」を出す。
 ;;; Code:
 
 (require 'seq)
@@ -315,27 +317,85 @@ CDATA は `xml-parse-region' が複数のノードに分けて返すことがあ
         (cons "Content-Type"
               "application/atom+xml; type=entry; charset=utf-8")))
 
-(defun my:htnblog--request (config method url body)
-  "CONFIG の認証情報で URL に METHOD で BODY を送り、応答の本文を返す。"
+(defun my:htnblog--request (config method url body callback)
+  "CONFIG の認証情報で URL に METHOD で BODY を送る。非同期。
+応答が来たら CALLBACK を 2 引数 (RESPONSE ERROR) で呼ぶ。成功なら RESPONSE が
+応答の本文の文字列で ERROR は nil、失敗なら RESPONSE が nil で ERROR が
+echo area に出す説明。CALLBACK は必ず 1 回だけ呼ばれる。
+
+同期にしない理由: 投稿の往復に 1 秒前後かかり、その間 Emacs が固まる。
+`url-retrieve-synchronously' は中で `accept-process-output' を回すだけなので、
+待っている間は何もできない。
+
+`url-retrieve' には `url-retrieve-synchronously' の TIMEOUT に当たる引数が
+ないので、`my:htnblog-timeout' は自前のタイマーで見る。応答とタイムアウトの
+どちらが先に来ても CALLBACK が 2 回呼ばれないよう DONE で閉じる。"
   (let* ((url-debug nil)                ; apikey をログに残さない
          (url-request-method method)
          (url-request-extra-headers (my:htnblog--auth-headers config))
          ;; url-request-data は unibyte でなければならない。ここを通さないと
          ;; 日本語がそのまま化ける。
          (url-request-data (and body (encode-coding-string body 'utf-8)))
-         (buffer (url-retrieve-synchronously url t t my:htnblog-timeout)))
-    (unless buffer
-      (user-error "htnblog: 応答がない (%s)" url))
-    (unwind-protect
-        (with-current-buffer buffer
-          (let ((status url-http-response-status)
-                (text (my:htnblog--response-body)))
-            (unless (and (integerp status) (<= 200 status) (< status 300))
-              (my:htnblog--show-error status text)
-              (user-error "htnblog: 失敗した (HTTP %s)。詳細は *htnblog-error*"
-                          (or status "?")))
-            text))
-      (kill-buffer buffer))))
+         ;; タイマーが起きるのは `my:htnblog-timeout' の束縛が解けた後なので、
+         ;; 待った秒数はここで捕まえておく。
+         (timeout my:htnblog-timeout)
+         (done nil)
+         (timer nil)
+         (finish (lambda (response error)
+                   (unless done
+                     (setq done t)
+                     (when (timerp timer)
+                       (cancel-timer timer))
+                     (funcall callback response error))))
+         (buffer
+          (url-retrieve
+           url
+           (lambda (status)
+             ;; 応答バッファを kill する前に要るものを全部取り出しておく。
+             (let ((http-status url-http-response-status)
+                   (text (my:htnblog--response-body))
+                   (err (plist-get status :error)))
+               (kill-buffer (current-buffer))
+               ;; STATUS の :error より HTTP のステータスを先に見る。url は
+               ;; 4xx / 5xx を :error (error http NNN) として渡してくるので、
+               ;; :error から先に分岐すると「peculiar error: 404」としか
+               ;; 言えなくなり、サーバが返した本文も捨ててしまう (実測)。
+               (cond
+                ((and (integerp http-status)
+                      (<= 200 http-status) (< http-status 300))
+                 (funcall finish text nil))
+                ((integerp http-status)
+                 (my:htnblog--show-error http-status text)
+                 (funcall finish nil
+                          (format "HTTP %s。詳細は *htnblog-error*" http-status)))
+                (err
+                 (funcall finish nil (error-message-string err)))
+                (t
+                 (funcall finish nil "応答が読めない")))))
+           nil t t)))
+    (cond
+     ((and (not done) (not buffer))
+      (funcall finish nil "応答がない"))
+     ((and (not done) (numberp timeout) (> timeout 0))
+      (setq timer
+            (run-at-time
+             timeout nil
+             (lambda ()
+               (unless done
+                 ;; 片付けより先に閉じる。`delete-process' は url の
+                 ;; センチネルをその場で走らせ、それが「接続が切れた」として
+                 ;; CALLBACK を呼ぶので、後にすると待った時間ではなく
+                 ;; 「peculiar error: deleted」が報告される (実測)。
+                 (funcall finish nil
+                          (format "%s 秒待っても応答がない" timeout))
+                 ;; url のセンチネルは (buffer-name (process-buffer proc)) で
+                 ;; 守られているので、ここで応答バッファを kill してよい。
+                 (when (buffer-live-p buffer)
+                   (when-let* ((proc (get-buffer-process buffer)))
+                     (delete-process proc))
+                   (let (kill-buffer-query-functions)
+                     (kill-buffer buffer)))))))))
+    buffer))
 
 (defun my:htnblog--post-url (config)
   "記事を POST する URL を返す。"
@@ -454,13 +514,39 @@ CDATA は `xml-parse-region' が複数のノードに分けて返すことがあ
 ;;; コマンド
 ;;; --------------------------------------------------
 
+(defvar-local my:htnblog--posting nil
+  "応答を待っている間だけ非 nil。
+二重送信と、送ったものとバッファの中身がずれるのを防ぐための札。")
+
+(defun my:htnblog--set-posting (buffer flag)
+  "BUFFER が投稿中かどうかの表示を FLAG で切り替える。
+
+待っている間は読み取り専用にする。送るのは送信した時点の内容なので、
+編集できてしまうと「送ったものと違うものが見えている」状態になり、
+しかも成功時にバッファを閉じるのでその編集が黙って消える。
+
+echo area のメッセージは次の操作で流れてしまうので、待っていることは
+モードライン (`mode-line-process') にも出す。"
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (setq my:htnblog--posting flag)
+      (setq buffer-read-only (and flag t))
+      (setq mode-line-process (and flag " 投稿中"))
+      (force-mode-line-update))))
+
 (defun my:htnblog-post ()
   "バッファの内容をはてなブログへ投稿する。
-送信前に一度だけ確認する。成功したらバッファを閉じ、記事の URL を
-kill-ring に入れて echo area に出す。"
+送信前に一度だけ確認する。
+
+送信は非同期なので、応答 (実測 1 秒前後) を待つ間も Emacs は止まらない。
+待っている間はバッファが読み取り専用になり、モードラインに `投稿中' が出る。
+成功したらバッファを閉じ、記事の URL を kill-ring に入れて echo area に
+出す。失敗したらバッファはそのまま残るので、直して送り直せる。"
   (interactive)
   (unless (derived-mode-p 'my:htnblog-mode)
     (user-error "htnblog: %s のバッファではない" 'my:htnblog-mode))
+  (when my:htnblog--posting
+    (user-error "htnblog: まだ投稿中"))
   (let* ((config (my:htnblog--config))
          (parsed (my:htnblog--parse))
          (title (plist-get parsed :title))
@@ -478,22 +564,33 @@ kill-ring に入れて echo area に出す。"
                                 "")
                               title action))
       (user-error "htnblog: 中止した"))
-    (let* ((response (my:htnblog--request
-                      config "POST" (my:htnblog--post-url config)
-                      (my:htnblog--entry-xml title body categories draft)))
-           (entry-url (my:htnblog--entry-url response))
-           (buffer (current-buffer)))
-      (when entry-url
-        (kill-new entry-url))
-      (set-buffer-modified-p nil)
-      (kill-buffer buffer)
-      (message "htnblog: %sしました%s" action
-               (if entry-url (concat ": " entry-url) "")))))
+    (let ((buffer (current-buffer)))
+      (my:htnblog--set-posting buffer t)
+      (message "htnblog: 投稿中...")
+      (my:htnblog--request
+       config "POST" (my:htnblog--post-url config)
+       (my:htnblog--entry-xml title body categories draft)
+       (lambda (response error)
+         (my:htnblog--set-posting buffer nil)
+         (if error
+             (message "htnblog: %sに失敗した (%s)" action error)
+           (let ((entry-url (my:htnblog--entry-url response)))
+             (when entry-url
+               (kill-new entry-url))
+             (when (buffer-live-p buffer)
+               (with-current-buffer buffer
+                 (set-buffer-modified-p nil))
+               (kill-buffer buffer))
+             (message "htnblog: %sしました%s" action
+                      (if entry-url (concat ": " entry-url) "")))))))))
 
 (defun my:htnblog-abort ()
-  "書きかけを捨ててバッファを閉じる。"
+  "書きかけを捨ててバッファを閉じる。
+投稿中に閉じても送信は止まらない (結果は echo area に出る)。"
   (interactive)
-  (when (y-or-n-p "書きかけを捨てますか? ")
+  (when (y-or-n-p (if my:htnblog--posting
+                      "投稿中です。送信は止まりませんが、閉じますか? "
+                    "書きかけを捨てますか? "))
     (set-buffer-modified-p nil)
     (kill-buffer (current-buffer))))
 
@@ -531,6 +628,11 @@ kill-ring に入れて echo area に出す。"
         (pop-to-buffer buffer)
       (setq buffer (get-buffer-create my:htnblog-buffer-name))
       (with-current-buffer buffer
+        ;; 投稿中に入れ直させない。モードを立て直すと投稿中の札 (読み取り
+        ;; 専用・モードライン) が kill-all-local-variables で消え、応答が
+        ;; 返ったときに入れ直したばかりのひな形を閉じてしまう。
+        (when my:htnblog--posting
+          (user-error "htnblog: まだ投稿中"))
         (when (and (> (buffer-size) 0)
                    (not (y-or-n-p "書きかけの内容を捨てますか? ")))
           (user-error "htnblog: 中止した"))

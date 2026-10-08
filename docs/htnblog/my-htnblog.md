@@ -4,7 +4,7 @@
 
 `M-x htnblog` でひな形を開き `C-c C-c` で公開する。AtomPub API を Basic 認証で叩くだけ。前日分の参考表示と、踏みやすい文字コード・XML の罠。
 
-最終更新: 2026-09-15 ｜ [README.md](../../README.md) ｜ [CLAUDE.md](../../CLAUDE.md)
+最終更新: 2026-10-08 ｜ [README.md](../../README.md) ｜ [CLAUDE.md](../../CLAUDE.md)
 
 毎日 1 記事、カテゴリー・タイトル・本文 1 行目が決まっているので、
 `M-x htnblog` でそれをプリセットしたバッファを開き、本文を書いて `C-c C-c`
@@ -13,7 +13,7 @@
 | キー | |
 |---|---|
 | `M-x htnblog` | 記事を書くバッファを開く（`C-u` で書きかけを捨ててひな形を入れ直す） |
-| `C-c C-c` | 確認して投稿。成功したらバッファを閉じ、記事 URL を kill-ring に入れる |
+| `C-c C-c` | 確認して投稿（非同期）。成功したらバッファを閉じ、記事 URL を kill-ring に入れる |
 | `C-c C-k` | 書きかけを捨てて閉じる |
 
 区切り（`--- 前日分 ---`）から下には最新の公開記事が参考として入る（後述）。
@@ -57,8 +57,9 @@ HTTP は組み込みの url.el。子プロセスを起こさないので、こ�
   英語になる。`my:htnblog--day-names` に自前で持つ（`decoded-time-weekday` は
   0 = 日曜）
 
-`apikey` を残さないため、`url-debug` を nil に束縛し、応答バッファは
-`unwind-protect` で必ず kill する。失敗した応答だけ `*htnblog-error*` に出す
+`apikey` を残さないため、`url-debug` を nil に束縛し、応答バッファは必ず
+kill する（コールバックの中で。応答が来ないときはタイムアウトのタイマーが
+kill する）。失敗した応答だけ `*htnblog-error*` に出す
 （本文に認証情報は含まれない）。
 
 ## 実測（2026-09-07）
@@ -74,6 +75,89 @@ batch では stdin を待つので `cl-letf` でスタブする。**
 
 なお既存の記事はタイトルが揺れていた（`9月7日の記録` / `9月05日(土)の記録`）。
 手で打っている限り避けられないので、ひな形を固定する動機はここにある。
+
+## 投稿も非同期にする（2026-10-08）
+
+`C-c C-c` の往復は 1 秒前後だが、`url-retrieve-synchronously` は中で
+`accept-process-output` を回すだけなので、その間 Emacs は何も受け付けない。
+`url-retrieve` に変え、応答が来たらコールバックで後片付けをする。
+
+| | 実測 |
+|---|---|
+| `my:htnblog--request` から戻るまで | **0.017〜0.027 秒** |
+| コールバックが発火するまで（GET、記事一覧 13 KB） | 0.18〜0.20 秒 |
+
+待っている間は echo area に `htnblog: 投稿中...` を出す。ただし**メッセージは
+次の操作で流れる**ので、モードライン（`mode-line-process` に ` 投稿中`）にも
+出す。doom-modeline は `process` セグメントを持っているので、そのまま出る
+（GUI で `format-mode-line` に `投稿中` が含まれることを確認）。
+
+### 待っている間はバッファを読み取り専用にする
+
+送るのは `C-c C-c` した時点の内容なので、待っている間に編集できてしまうと
+「送ったものと違うものが見えている」状態になり、しかも成功時にバッファを
+閉じるので**その編集が黙って消える**。`my:htnblog--set-posting` が
+`buffer-read-only` と `mode-line-process` と札（`my:htnblog--posting`）を
+まとめて切り替える。
+
+札は 3 か所で見る。
+
+| | |
+|---|---|
+| `C-c C-c` | 二重送信を断る（`htnblog: まだ投稿中`） |
+| `C-u M-x htnblog` | 入れ直しを断る。`define-derived-mode` が `kill-all-local-variables` を通るので、入れ直すと札ごと消え、応答が返ったときに**入れたばかりのひな形を閉じてしまう** |
+| `C-c C-k` | 「送信は止まりませんが、閉じますか?」と訊き方を変える |
+
+失敗したらバッファはそのまま残す（本文も読み取り専用の解除も確認済み）。
+直して送り直せる。
+
+### 【重要】非同期では 4xx / 5xx が `:error` で来る
+
+同期版は「バッファを返す → `url-http-response-status` を見る」だけだったが、
+`url-retrieve` のコールバックでは **url が 4xx / 5xx を
+`(:error (error http NNN))` として渡してくる**（`url-http-parse-headers` が
+`setf (car url-callback-arguments)` する）。`status` の `:error` から先に
+分岐すると、
+
+- `error-message-string` が **`peculiar error: 404`** しか言えない
+- サーバが返した本文を捨てるので **`*htnblog-error*` に何も出ない**
+
+**HTTP のステータスを先に見る**こと。実測で 404 のとき `*htnblog-error*` に
+`HTTP 404` + はてなの HTML が入るようになった。
+
+### 【重要】タイムアウトは自前。しかも閉じる順番がある
+
+`url-retrieve` には `url-retrieve-synchronously` の TIMEOUT に当たる引数が
+ない。`my:htnblog-timeout` は `run-at-time` で見て、応答とタイムアウトの
+どちらが先でもコールバックが 1 回で済むよう `done` で閉じる。
+
+**タイマーの中では、片付けより先にコールバックを呼ぶ。** `delete-process` は
+url のセンチネルを**その場で**走らせ、それが「接続が切れた」として
+コールバックを呼ぶので、後に回すと報告が
+`peculiar error: "deleted\n", :host, ...` に化ける（実測）。先に閉じておけば
+`done` が立っているので無視される。
+
+| | 実測（到達できない IP へ 2 秒） |
+|---|---|
+| コールバックの回数 | **1 回**（2.007 秒） |
+| 報告 | `2 秒待っても応答がない` |
+| 応答バッファの残骸 | なし |
+
+タイマーが起きるのは `let*` の束縛が解けた後なので、**待つ秒数はタイマーを
+仕掛ける時点で捕まえておく**（`timeout` に束縛。`my:htnblog-timeout` を
+そのまま参照すると、呼び出し側が `let` で変えていた値ではなくグローバル値が
+報告される）。
+
+### 検算
+
+成功経路はネットワークを使わずに通した（`my:htnblog--request` を
+`cl-letf` で差し替え、作った Atom を返す）。POST する XML に
+`<app:draft>no</app:draft>` と本文が入っていること、バッファが閉じること、
+`rel=alternate` の URL が kill-ring に入ること、メッセージが
+`htnblog: 公開しました: ...` になることを確認。
+
+**`kill-ring` を汚すプローブでは `interprogram-cut-function` を nil に
+束縛して退避する。** `kill-new` はユーザーのクリップボードまで書き換える。
 
 ## 前日分（最新の公開記事）を参考に貼る
 
