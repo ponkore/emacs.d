@@ -632,6 +632,7 @@ face をリストにすると先に書いたものが勝つので、色は列ご
   log-buffer     ; 生 JSON のバッファ (nil のことがある)
   directory      ; 起動した default-directory (展開済み)
   label          ; バッファ名とヘッダに出す短い名前 (`my:claude--project-label')
+  (suffix "")    ; 同じディレクトリの何本目か。1 本目は "" で 2 本目から "-1"
   gitdir         ; directory を含むリポジトリの .git (nil なら git 管理外)
   branch-cache   ; (FINGERPRINT . BRANCH)。`my:claude--branch' が使う
   name           ; 環境のラベル
@@ -686,17 +687,37 @@ read-only なのでそれは起こらない。**区切りを挟むのはこの�
 (defvar my:claude--sessions nil
   "生きているセッション。新しいものが先頭。
 
-**プロジェクト (作業ディレクトリ) ごとに 1 つ持てる。** `~/.emacs.d' と
-`~/.config' でそれぞれ `C-c a a' すれば `*claude(.emacs.d)*' と
-`*claude(.config)*' が並ぶ。
+**1 つのプロジェクト (作業ディレクトリ) に何本でも持てる。** `~/.emacs.d'
+と `~/.config' でそれぞれ `C-c a a' すれば `*claude(.emacs.d)*' と
+`*claude(.config)*' が並び、同じ `~/.emacs.d' で 2 本目を選べば
+`*claude(.emacs.d)-1*' が増える (`my:claude--session-suffix-for')。
 
 環境 (アカウント) は CLAUDE_CONFIG_DIR をプロセス起動時に渡すことでしか
 変えられないので、**セッションごとに環境が固定される**。どのセッションに
 送っているのかはバッファで決まる (`my:claude--current-session') ので、
 ヘッダ行の 1 列目に環境名を出してあることと合わせて取り違えないこと。")
 
+(defvar my:claude--last-session nil
+  "最後に対象にしたセッション。
+
+**同じディレクトリに複数あるときの既定をこれで決める**
+ (`my:claude--session-for-directory')。プロジェクトが決まるバッファから
+`C-c a s' / `C-c a i' / `C-c a k' / `C-c a q' を押したときに、どれが
+対象になるかが「最後に起こしたほう」で決まってしまうのを避けるため。
+
+更新するのは**自分でそのセッションを選んだとき**だけ
+ (`my:claude--note-session')。応答が届いたときに更新してはいけない
+ — 裏で動いているほうが勝手に対象を奪う。")
+
+(defun my:claude--note-session (session)
+  "SESSION を「いま使っているもの」として覚える。SESSION をそのまま返す。"
+  (when session (setq my:claude--last-session session))
+  session)
+
 (defun my:claude--forget-session (session)
   "SESSION を一覧から外す。プロセスやバッファには触らない。"
+  (when (eq session my:claude--last-session)
+    (setq my:claude--last-session nil))
   (setq my:claude--sessions (delq session my:claude--sessions)))
 
 (defun my:claude--quit-and-forget (session)
@@ -921,16 +942,20 @@ cwd が変わるとセッション記録の置き場
            (read-directory-name "claude を起動するディレクトリ: "
                                 here nil t))))))
 
-(defun my:claude--buffer-name (base label)
-  "BASE と LABEL からバッファ名を作る。
+(defun my:claude--buffer-name (base label &optional suffix)
+  "BASE と LABEL と SUFFIX からバッファ名を作る。
 
-  (my:claude--buffer-name \"claude\" \".emacs.d\")  => \"*claude(.emacs.d)*\"
+  (my:claude--buffer-name \"claude\" \".emacs.d\")       => \"*claude(.emacs.d)*\"
+  (my:claude--buffer-name \"claude\" \".emacs.d\" \"-1\")  => \"*claude(.emacs.d)-1*\"
 
 LABEL が nil なら名前を付けない (`*claude*')。LABEL は
-`my:claude--project-label' が作る。"
-  (if label
-      (format "*%s(%s)*" base label)
-    (format "*%s*" base)))
+`my:claude--project-label'、SUFFIX は `my:claude--session-suffix-for' が
+作る。**SUFFIX は括弧の外**に付く (同じプロジェクトの何本目かであって、
+プロジェクト名の一部ではないため)。"
+  (let ((suffix (or suffix "")))
+    (if label
+        (format "*%s(%s)%s*" base label suffix)
+      (format "*%s*%s" base suffix))))
 
 (defun my:claude--project-label (dir)
   "DIR を表すバッファ名用の短い名前。
@@ -939,12 +964,26 @@ LABEL が nil なら名前を付けない (`*claude*')。LABEL は
 
 **生きているセッションと重ならないところまで親をたどる。**
 `~/work/foo/src' を開いている状態で `~/other/src' を開くと、後者は
-`src' ではなく `other/src' になる (`*claude(other/src)*')。同じ
-ディレクトリを 2 つ開いたときだけ `#2' を付ける。
+`src' ではなく `other/src' になる (`*claude(other/src)*')。
+
+**同じディレクトリの 2 本目には親をたどらせない。** それは別の
+プロジェクトではなく同じプロジェクトの別のセッションなので、既に
+動いているものと同じ label を返し、区別は連番に任せる
+ (`my:claude--session-suffix-for' / `*claude(.emacs.d)-1*')。ここを
+素通りさせると、2 本目が `*claude(masao/.emacs.d)*' のように親まで
+含んだ別名になってしまう (`#2' はもっと後ろのフォールバックなので、
+docstring に反して出てこない)。
 
 **先に開いていたほうの名前は変えない。** 見えているバッファの名前が
 後から変わるほうが分かりにくいため。名前は起動時に 1 回決めて
 セッション構造体に持たせる (`my:claude-session-label')。"
+  (if-let* ((same (my:claude--session-for-directory dir)))
+      (my:claude-session-label same)
+    (my:claude--new-project-label dir)))
+
+(defun my:claude--new-project-label (dir)
+  "DIR を表す label を、生きているどのセッションとも重ならないように作る。
+`my:claude--project-label' の、同じディレクトリが無いときの経路。"
   (let* ((path (directory-file-name (expand-file-name dir)))
          (parts (split-string path "[/\\\\]" t))
          (taken (mapcar #'my:claude-session-label (my:claude--live-sessions)))
@@ -985,20 +1024,57 @@ inode とボリュームの組で比べるので、**同じドライブのディ
              (and (ignore-errors (file-name-case-insensitive-p x))
                   (string-equal-ignore-case x y))))))
 
-(defun my:claude--buffer-for (base label &optional dir)
-  "BASE / LABEL のバッファ。他のプロジェクトのものなら別名で作る。
+(defun my:claude--suffix-free-p (label suffix)
+  "LABEL / SUFFIX を使っている生きたセッションが無ければ非 nil。
 
-同じ名前のバッファが既にあるとき、**それが別のディレクトリの
-セッションのものなら奪わない**。死んだセッションの会話バッファは
-記録として残しておけるので (プロセスが死んでもバッファは消えない)、
-名前だけで `get-buffer-create' すると別のプロジェクトの記録の続きに
-書き足してしまう。"
-  (let* ((name (my:claude--buffer-name base label))
+**見るのは生きているものだけ。** 死んだセッションの会話バッファが
+その名前で残っていてもよい。同じプロジェクトでもう一度起こしたときに
+その記録の続きに書くのは `my:claude--buffer-for' の意図した動きなので、
+ここで避けると立て直すたびに連番が伸びていく。"
+  (not (seq-find (lambda (s)
+                   (and (equal (my:claude-session-label s) label)
+                        (equal (my:claude-session-suffix s) suffix)))
+                 (my:claude--live-sessions))))
+
+(defun my:claude--session-suffix-for (label)
+  "LABEL のセッションに付ける連番。1 本目は \"\"、2 本目から \"-1\"。
+
+空いている最小の番号を返すので、`*claude(proj)-1*' を終えてから
+3 本目を起こすとその番号が再び使われる。"
+  (if (my:claude--suffix-free-p label "")
+      ""
+    (let ((i 1))
+      (while (not (my:claude--suffix-free-p label (format "-%d" i)))
+        (setq i (1+ i)))
+      (format "-%d" i))))
+
+(defun my:claude--buffer-for (base label &optional suffix dir)
+  "BASE / LABEL / SUFFIX のバッファ。他が使っているなら別名で作る。
+
+同じ名前のバッファが既にあるとき、次の 2 つなら**奪わない**。
+
+  - 別のディレクトリのセッションのもの
+  - **生きているセッションのもの**
+
+死んだセッションの会話バッファは記録として残しておけるので
+ (プロセスが死んでもバッファは消えない)、名前だけで
+`get-buffer-create' すると別のプロジェクトの記録の続きに書き足して
+しまう。逆に**同じディレクトリで死んでいるもの**は、同じプロジェクトを
+開き直したときの続きなので使い回してよい。
+
+【重要】2 つめの条件は、同じプロジェクトに複数のセッションを
+持てるようにしたときに要るようになった (2026-10-15)。番号の割り当て
+ (`my:claude--session-suffix-for') と立て直しの番号の引き継ぎ
+ (`my:claude--start' の OLD) が正しければここには来ないが、来たときに
+**動いているセッションの会話に混ざって書く**ので安全網を置く。"
+  (let* ((name (my:claude--buffer-name base label suffix))
          (buf (get-buffer name))
          (owner (and buf (buffer-local-value 'my:claude--session buf))))
-    (if (and owner dir
-             (not (my:claude--same-directory-p
-                   (my:claude-session-directory owner) dir)))
+    (if (and owner
+             (or (and dir
+                      (not (my:claude--same-directory-p
+                            (my:claude-session-directory owner) dir)))
+                 (my:claude--session-usable-p owner)))
         (generate-new-buffer name)
       (get-buffer-create name))))
 
@@ -1032,22 +1108,36 @@ inode とボリュームの組で比べるので、**同じドライブのディ
         (my:claude-quit-session s)))
     (setq my:claude--sessions (nreverse live))))
 
-(defun my:claude--session-for-directory (dir)
-  "DIR で動いているセッション。無ければ nil。
+(defun my:claude--sessions-for-directory (dir)
+  "DIR で動いているセッションを新しい順に返す。
 
 比較は `my:claude--same-directory-p' で行う (`file-equal-p' はこの
 設定では使えない。あちらの説明を参照)。"
   (and dir
-       (seq-find (lambda (s)
-                   (my:claude--same-directory-p
-                    (my:claude-session-directory s) dir))
-                 (my:claude--live-sessions))))
+       (seq-filter (lambda (s)
+                     (my:claude--same-directory-p
+                      (my:claude-session-directory s) dir))
+                   (my:claude--live-sessions))))
+
+(defun my:claude--session-for-directory (dir)
+  "DIR で動いているセッション 1 つ。無ければ nil。
+
+同じディレクトリに複数あるときは、**最後に自分で対象にしたもの**
+ (`my:claude--last-session')。それが無ければ新しいほう。
+
+「新しいほう」だけで決めてはいけない。プロジェクトが決まるバッファから
+`C-c a s' / `C-c a q' を押したときの行き先が、最後に `C-c a a' した
+ほうに勝手に移ってしまう。"
+  (let ((all (my:claude--sessions-for-directory dir)))
+    (or (and (memq my:claude--last-session all) my:claude--last-session)
+        (car all))))
 
 (defun my:claude--current-session ()
   "いま操作の対象になるセッション。決まらなければ nil。
 
   1. このバッファが属するセッション
   2. このバッファのプロジェクトで動いているセッション
+     (複数あれば `my:claude--session-for-directory' の規則で 1 つ)
   3. 生きているセッションが 1 つだけならそれ
 
 **3 で止める。** 複数あるときに「直近のもの」で代用すると、別の
@@ -1058,10 +1148,20 @@ inode とボリュームの組で比べるので、**同じドライブのディ
       (let ((live (my:claude--live-sessions)))
         (and (null (cdr live)) (car live)))))
 
+(defun my:claude--session-title (session)
+  "SESSION を指す短い名前。バッファ名の括弧の中と連番を合わせたもの。
+
+  \".emacs.d\"  /  \".emacs.d-1\"
+
+ヘッダ行の 2 列目と、セッションを選ばせる一覧に出す。**バッファ名と
+一致していないと、複数並べたときにどれがどれだか分からなくなる。**"
+  (concat (or (my:claude-session-label session) "claude")
+          (my:claude-session-suffix session)))
+
 (defun my:claude--session-line (session)
   "SESSION を 1 行で表す。`my:claude--read-session' の候補。"
   (format "%s  [%s]  %s"
-          (my:claude-session-label session)
+          (my:claude--session-title session)
           (my:claude-session-name session)
           (abbreviate-file-name
            (directory-file-name (my:claude-session-directory session)))))
@@ -1076,7 +1176,8 @@ inode とボリュームの組で比べるので、**同じドライブのディ
      (t (let* ((rows (mapcar (lambda (s) (cons (my:claude--session-line s) s))
                              live))
                (choice (completing-read prompt (mapcar #'car rows) nil t)))
-          (cdr (assoc choice rows)))))))
+          ;; 自分で選んだので、以後の既定もこれにする。
+          (my:claude--note-session (cdr (assoc choice rows))))))))
 
 (defun my:claude--session-or-read (prompt)
   "対象のセッション。バッファから決まらなければ選ばせる。"
@@ -1262,21 +1363,38 @@ argv が直接起動した場合と一致することを確認した)。
               (cdr command))
     command))
 
-(defun my:claude--start (dir env &optional resume)
+(defun my:claude--start (dir env &optional resume old)
   "環境 ENV で DIR に claude を起動して session 構造体を返す。
-RESUME は `my:claude--command' に渡す (t で --continue、文字列で --resume)。"
+RESUME は `my:claude--command' に渡す (t で --continue、文字列で --resume)。
+
+OLD は立て直しの元になったセッション (`my:claude--restart')。
+**名前も番号も会話バッファもそこから引き継ぐ。**
+
+【重要】OLD を渡さずに立て直すと、同じプロジェクトに別のセッションが
+いるときに**その生きている会話バッファを掴む**。`my:claude--restart' は
+先に一覧から外すので、番号を取り直すと空いている別の番号
+ (= 隣のセッションが使っている番号) に当たり、`my:claude--buffer-for' の
+`get-buffer-create' がそのバッファを返してしまう。番号を引き継げば
+そもそもぶつからず、`my:claude--buffer-for' 側の安全網にも掛からない。"
   (unless (file-executable-p my:claude-executable)
     (user-error "claude が見つからない: %s" my:claude-executable))
   (let* ((config-dir (my:claude--config-dir env))
          ;; **push より先に決める。** 自分自身の名前を「取られている」と
          ;; 見なすと、立て直すたびに `#2' が伸びていく。
-         (label (my:claude--project-label dir))
-         (conv (my:claude--buffer-for "claude" label dir))
+         (label (if old (my:claude-session-label old)
+                  (my:claude--project-label dir)))
+         (suffix (if old (my:claude-session-suffix old)
+                   (my:claude--session-suffix-for label)))
+         (conv (or (and old (buffer-live-p (my:claude-session-buffer old))
+                        (my:claude-session-buffer old))
+                   (my:claude--buffer-for "claude" label suffix dir)))
          (log  (when my:claude-log
-                 (my:claude--buffer-for "claude-log" label dir)))
+                 (or (and old (buffer-live-p (my:claude-session-log-buffer old))
+                          (my:claude-session-log-buffer old))
+                     (my:claude--buffer-for "claude-log" label suffix dir))))
          (session (my:claude--make-session
                    :buffer conv :log-buffer log
-                   :directory dir :label label
+                   :directory dir :label label :suffix suffix
                    :name env :config-dir config-dir
                    ;; DIR は起動後に変わらないので、探索はここで 1 回だけ。
                    ;; ヘッダ行はこれが非 nil のときだけブランチの列を出す。
@@ -1307,6 +1425,8 @@ RESUME は `my:claude--command' に渡す (t で --continue、文字列で --res
              :sentinel (lambda (_p e) (my:claude--sentinel session e)))))
     (setf (my:claude-session-process session) proc)
     (push session my:claude--sessions)
+    ;; 起こしたばかりのものが以後の既定 (`C-c a s' などの行き先)。
+    (my:claude--note-session session)
     (with-current-buffer conv
       ;; **モードは立っていなければ立てる。** 立て直し (`C-c a m' /
       ;; `C-c a r' / `C-c a e') では同じ会話バッファを使い回すので、
@@ -2130,11 +2250,14 @@ settings.json から求める (`my:claude--effort')。"
            'my:claude-header-plan-face)
           segs)
     ;; [2] プロジェクト名。フルパスは help-echo に入れる。
-    ;; **バッファ名と同じ label を出す。** 複数のセッションを並べている
-    ;; ときは、どのバッファがどれなのかがここで一致していないと困る。
+    ;; **バッファ名と同じものを出す** (`my:claude--session-title' は label に
+    ;; 連番を足したもの)。複数のセッションを並べているときは、どのバッファが
+    ;; どれなのかがここで一致していないと困る。同じプロジェクトの 2 本目
+    ;; (`*claude(PROJ)-1*') はここでしか見分けられない。
     (push (my:claude--header-segment
-           (or (my:claude-session-label session)
-               (file-name-nondirectory (directory-file-name dir)))
+           (if (my:claude-session-label session)
+               (my:claude--session-title session)
+             (file-name-nondirectory (directory-file-name dir)))
            'my:claude-header-dir-face
            'help-echo (abbreviate-file-name dir))
           segs)
@@ -3602,14 +3725,43 @@ nil のときや `can_use_tool\' が飛んで来ないときは `?\' 行が出�
 ;;; コマンド
 ;;; --------------------------------------------------
 
+(defun my:claude--read-session-among (prompt sessions &optional new-label)
+  "SESSIONS から 1 つ選ばせる。NEW-LABEL を選んだときは nil。
+
+NEW-LABEL を渡すと「新しく作る」が候補の最後に並ぶ。**そのときは
+SESSIONS が 1 つでも聞く** (聞かずに使い回すと 2 本目を作る口が無い)。
+NEW-LABEL が nil で SESSIONS が 1 つなら黙ってそれ。
+
+既定 (RET で決まるもの) は先頭、つまり
+`my:claude--session-for-directory' が選ぶものと同じ。"
+  (cond
+   ((null sessions) nil)
+   ((and (null new-label) (null (cdr sessions))) (car sessions))
+   (t
+    (let* ((rows (mapcar (lambda (s) (cons (my:claude--session-line s) s))
+                         sessions))
+           (cands (append (mapcar #'car rows)
+                          (and new-label (list new-label))))
+           (choice (completing-read prompt cands nil t nil nil (car cands))))
+      ;; 「新しく作る」なら `assoc' が nil を返し、`my:claude--note-session'
+      ;; は nil を素通しする。
+      (my:claude--note-session (cdr (assoc choice rows)))))))
+
 ;;;###autoload
 (defun my:claude--ensure-session (&optional arg)
   "このプロジェクトのセッションを返す。無ければ起動する。ウィンドウは触らない。
 
-**セッションはプロジェクト (作業ディレクトリ) ごとに持てる。**
-`~/.emacs.d' と `~/.config' でそれぞれ `C-c a a' すれば、
+**1 つのプロジェクト (作業ディレクトリ) に何本でも持てる。**
+`~/.emacs.d' と `~/.config' でそれぞれ `C-c a a' すれば
 `*claude(.emacs.d)*' と `*claude(.config)*' が別の claude プロセスと
-して並ぶ。既にそのディレクトリで動いていれば黙って使い回す。
+して並び、同じ `~/.emacs.d' で 2 本目を選べば `*claude(.emacs.d)-1*'
+が増える。
+
+  1. **会話バッファの中から呼んだときは、そのセッション。**
+     何も聞かない (`C-c a a' は画面を整え直すだけになる)
+  2. そのプロジェクトで動いているものがあれば、**どれに行くか / 新しく
+     作るかを聞く** (`my:claude--read-session-among')
+  3. 無ければ起こす
 
 対象の決め方は `my:claude--current-session' と同じだが、**プロジェクトが
 決まるバッファからは、そのプロジェクトのセッションしか使わない**
@@ -3618,15 +3770,24 @@ nil のときや `can_use_tool\' が飛んで来ないときは `?\' 行が出�
 1 つしか無ければそれを使う。
 
 ARG が非 nil なら、対象のセッションを畳んで環境と作業ディレクトリを
-選び直す。Pro の残量が尽きたときに Max へ逃がすのがこの操作。"
+選び直す。Pro の残量が尽きたときに Max へ逃がすのがこの操作。
+**こちらでは「新しく作る」は出さない** (立て直す相手を選ぶだけ。
+増やしたいなら `C-u' を付けずに押す)。"
   (let* ((dir (my:claude--guess-directory))
-         (session (or (my:claude--session-usable-p my:claude--session)
-                      (my:claude--session-for-directory dir)
-                      ;; プロジェクトが決まらないバッファ (`*scratch*' など)
-                      ;; から呼ばれたときだけ、1 つしか無ければそれを使う。
-                      (and (null dir)
-                           (let ((live (my:claude--live-sessions)))
-                             (and (null (cdr live)) (car live)))))))
+         (own (my:claude--session-usable-p my:claude--session))
+         (same (unless own (my:claude--sessions-for-directory dir)))
+         (session
+          (or own
+              (and same
+                   (if arg
+                       (my:claude--read-session-among "立て直すセッション: " same)
+                     (my:claude--read-session-among
+                      "claude セッション: " same "新しいセッションを作る")))
+              ;; プロジェクトが決まらないバッファ (`*scratch*' など)
+              ;; から呼ばれたときだけ、1 つしか無ければそれを使う。
+              (and (null dir)
+                   (let ((live (my:claude--live-sessions)))
+                     (and (null (cdr live)) (car live)))))))
     (when (and session arg)
       (my:claude--quit-and-forget session)
       (setq session nil))
@@ -3645,9 +3806,15 @@ ARG が非 nil なら、対象のセッションを畳んで環境と作業デ�
 上半分は編集中のバッファ、下半分が会話と入力。**カーソルは入力
 バッファに入る。** 開いてすぐ書き始められるのが `C-c a a' の役目。
 
-**プロジェクトごとに 1 つ開ける。** 別のプロジェクトのバッファから
+**プロジェクトごとに何本でも開ける。** 別のプロジェクトのバッファから
 押せば、そちらの claude が新しく起動して `*claude(PROJ)*' が並ぶ。
-同じプロジェクトなら既に動いているものに戻るだけ。
+同じプロジェクトで押したときは、**動いているものに戻るか新しく作るかを
+聞く** (`my:claude--ensure-session')。新しく作ると
+`*claude(PROJ)-1*' が増える。
+
+**会話バッファの中で押したときは聞かない。** そのセッションのまま
+画面を整え直す (`C-c a l' と同じになる)。別のセッションに行きたい
+ときは会話バッファの外から押す。
 
 ARG (`C-u') を付けると、そのセッションを畳んで環境と作業ディレクトリを
 選び直す。Pro の残量が尽きたときにその場で Max へ逃がすのがこの操作。"
@@ -3700,8 +3867,9 @@ SESSION を省くと `my:claude--current-session' で決める。それでも
 `my:claude-toggle-maximize' の復帰先でもある
  (トグル前の `window-configuration' は退避しない)。"
   (interactive)
-  (let* ((session (or session (my:claude--current-session)
-                      (my:claude--read-session "レイアウトするセッション: ")))
+  (let* ((session (my:claude--note-session
+                   (or session (my:claude--current-session)
+                       (my:claude--read-session "レイアウトするセッション: "))))
          ;; バッファ名に入れるプロジェクト名の元。セッションがまだ無いときは
          ;; **確認を出さない** `my:claude--guess-directory' で推測する。
          ;; `my:claude--project-directory' を使うと、画面を整えるだけの
@@ -3715,7 +3883,7 @@ SESSION を省くと `my:claude--current-session' で決める。それでも
          ;; 見なせず、上半分に残すバッファとして選んでしまう。
          (keep (my:claude--keep-buffer))
          (conv (if session (my:claude-session-buffer session)
-                 (my:claude--buffer-for "claude" label dir)))
+                 (my:claude--buffer-for "claude" label nil dir)))
          (total (window-total-height (frame-root-window)))
          (bottom (max 8 (round (* total my:claude-window-height-ratio)))))
     ;; セッションより先に `C-c a l' を押したときは、ここで作った会話
@@ -3888,7 +4056,11 @@ OLD を省くと `my:claude--current-session' が対象。
 
 **先に一覧から外してから起こす。** 残したままだと
 `my:claude--project-label' が自分自身を「取られている名前」と見なして
-`#2' を付け、立て直すたびにバッファ名が伸びる。"
+`#2' を付け、立て直すたびにバッファ名が伸びる。
+
+**OLD は `my:claude--start' にも渡す。** 名前・連番・会話バッファを
+引き継がせるため。渡さないと、同じプロジェクトの別のセッションの
+会話バッファを掴むことがある (あちらの説明を参照)。"
   (let* ((old (or old (my:claude--current-session)))
          (dir (if old (my:claude-session-directory old)
                 (my:claude--project-directory)))
@@ -3902,7 +4074,7 @@ OLD を省くと `my:claude--current-session' が対象。
           (while (and (process-live-p (my:claude-session-process old))
                       (< (float-time) d))
             (accept-process-output (my:claude-session-process old) 0.2)))))
-    (let ((session (my:claude--start dir env resume)))
+    (let ((session (my:claude--start dir env resume old)))
       (my:claude-layout session)
       session)))
 
@@ -3982,6 +4154,22 @@ claude はワークスペースのパスの **英数字以外をすべて `-' �
                  (file-name-base f)))
          (seq-take files 30))))))
 
+(defun my:claude--confirm-duplicate (id except)
+  "ID の会話を EXCEPT 以外のセッションが開いていたら確認する。
+
+同じ session-id を 2 つのプロセスで開くと、**同じ `.jsonl' に両方が
+追記する**。1 プロジェクトに複数のセッションを持てるようにして実際に
+起こりうるようになったので (2026-10-15)、ここで一度止める。
+claude 側が守ってくれる保証は無い。"
+  (when-let* ((other (seq-find (lambda (s)
+                                 (and (not (eq s except))
+                                      (equal (my:claude-session-session-id s) id)))
+                               (my:claude--live-sessions))))
+    (unless (yes-or-no-p
+             (format "その会話は %s が開いている。同じものを 2 つ開く? "
+                     (buffer-name (my:claude-session-buffer other))))
+      (user-error "中止した"))))
+
 ;;;###autoload
 (defun my:claude-resume ()
   "過去のセッションを一覧から選んで再開する。
@@ -3989,7 +4177,10 @@ claude はワークスペースのパスの **英数字以外をすべて `-' �
 `--continue' は「そのディレクトリの直近の 1 つ」しか選べない。
 こちらは記録ファイル (`<CLAUDE_CONFIG_DIR>/projects/…/*.jsonl') を
 新しい順に並べて選ばせる。アカウントが違うと保存先も別なので、
-いまの環境のものだけが出る。"
+いまの環境のものだけが出る。
+
+**他のセッションが開いている会話を選んだときは確認する**
+ (`my:claude--confirm-duplicate')。"
   (interactive)
   (let* ((old (my:claude--current-session))
          (env (or (and old (my:claude-session-name old))
@@ -4003,20 +4194,41 @@ claude はワークスペースのパスの **英数字以外をすべて `-' �
     (let* ((choice (completing-read "再開するセッション: "
                                     (mapcar #'car rows) nil t))
            (id (cdr (assoc choice rows))))
+      (my:claude--confirm-duplicate id old)
       (my:claude--restart id env old))))
+
+(defun my:claude--confirm-continue (dir except)
+  "DIR に EXCEPT 以外の生きたセッションがあれば確認する。
+
+`--continue' が掴むのは「そのディレクトリの直近の会話」なので、別の
+セッションがいま話している会話に**合流してしまう**ことがある。どの
+session-id になるかは起動するまで分からないので、ここでは
+`my:claude--confirm-duplicate' のように突き合わせられない。"
+  (when-let* ((other (seq-find (lambda (s) (not (eq s except)))
+                               (my:claude--sessions-for-directory dir))))
+    (unless (yes-or-no-p
+             (format "直近の会話は %s のものかもしれない。--continue する? "
+                     (buffer-name (my:claude-session-buffer other))))
+      (user-error "中止した"))))
 
 ;;;###autoload
 (defun my:claude-continue ()
   "このディレクトリの直近の会話を継いでセッションを開く。
 
 `--continue' を渡す。Emacs を再起動したあとでも、端末で続けていた会話でも、
-そのディレクトリで最後に話していたものに繋がる (実測)。"
+そのディレクトリで最後に話していたものに繋がる (実測)。
+
+**同じプロジェクトに別のセッションがいるときは確認する**
+ (`my:claude--confirm-continue')。"
   (interactive)
   (let ((session (my:claude--current-session)))
     (if session
-        (my:claude--restart t nil session)
+        (progn
+          (my:claude--confirm-continue (my:claude-session-directory session) session)
+          (my:claude--restart t nil session))
       (let* ((dir (my:claude--project-directory))
-             (env (my:claude--read-environment))
+             (env (progn (my:claude--confirm-continue dir nil)
+                         (my:claude--read-environment)))
              (new (my:claude--start dir env t)))
         (my:claude-layout new)))))
 
@@ -4095,7 +4307,7 @@ in the terminal for details.」という要約しか返さず、詳細は端末�
          (servers (my:claude-session-mcp-servers session)))
     (if (null servers)
         (message "MCP の情報がまだ来ていない (1 度送れば init と一緒に届く)")
-      (my:claude--show-mcp-servers (my:claude-session-label session) servers))))
+      (my:claude--show-mcp-servers (my:claude--session-title session) servers))))
 
 ;;; --------------------------------------------------
 ;;; コミットメッセージを書かせる (C-c a g / コミットバッファの C-c C-g)
@@ -4631,9 +4843,10 @@ API が弾く。"
   "TEXT を claude に送る。IMAGES があれば添付する。"
   ;; リージョン送信など、他所から呼ばれることがある。ここで
   ;; `my:claude' を呼ぶとウィンドウを組み替えてしまうので使わない。
-  (let ((session (or (my:claude--session-usable-p session)
-                     (my:claude--current-session)
-                     (my:claude--ensure-session))))
+  (let ((session (my:claude--note-session
+                  (or (my:claude--session-usable-p session)
+                      (my:claude--current-session)
+                      (my:claude--ensure-session)))))
     (when (or images (not (string-empty-p (string-trim text))))
       (my:claude--insert session "\n")
       (unless (string-empty-p (string-trim text))
@@ -4978,11 +5191,17 @@ overlay とは別物だが、範囲を広げる理由が無い。"
   "会話バッファを出して入力エリアへ移動する。画面は `my:claude-layout' にする。
 
 会話バッファの中で `i' を押したときは移動するだけでよいが、他の
-バッファから `C-c a i' したときは画面も組む必要があるので同じ入口にした。"
+バッファから `C-c a i' したときは画面も組む必要があるので同じ入口にした。
+
+**`my:claude--current-session' を先に見る。** `my:claude--ensure-session'
+は同じプロジェクトに複数あるときに聞いてくるが、聞くのは `C-c a a' の
+役目で、入力エリアへ行くだけのここでは邪魔になる。決まらないとき
+ (1 本も無いとき) だけ起こす。"
   (interactive)
-  ;; 会話バッファから呼ばれたときは、そのバッファのセッションが対象。
-  ;; `my:claude--ensure-session' はバッファローカルを最優先に見る。
-  (let ((session (my:claude--ensure-session)))
+  ;; 会話バッファから呼ばれたときは、そのバッファのセッションが対象
+  ;; (`my:claude--current-session' はバッファローカルを最優先に見る)。
+  (let ((session (or (my:claude--current-session)
+                     (my:claude--ensure-session))))
     (my:claude-layout session)))
 
 (defun my:claude-send ()

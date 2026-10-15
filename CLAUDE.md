@@ -1003,6 +1003,14 @@ gopls は大文字のドライブレターで返す（§1「Windows 固有」）
   （`my:claude--buffer-p` はメジャーモードで見る）
 - **セッションの生死はプロセスとバッファの両方**で見る（`:buffer` が nil なので
   会話バッファを kill してもプロセスは生き残る）
+- **【重要】1 プロジェクトに複数のセッションを持てる**（2026-10-15）。連番は
+  label ではなく `my:claude-session-suffix`（`*claude(PROJ)-1*`）。**同じ
+  ディレクトリの 2 本目に `my:claude--project-label` の「親をたどる」分岐を
+  通らせてはいけない**（`*claude(masao/.emacs.d)*` になる）。**立て直し
+  （`C-c a m` / `r` / `e` / `c`）は `my:claude--start` に OLD を渡して番号と
+  会話バッファを引き継ぐ**。取り直すと空いた別の番号に当たり、よその記録
+  バッファに書き始める。送り先は `my:claude--last-session`（最後に自分で
+  選んだもの）で決める → [docs](docs/claude/my-claude.md)
 - **【重要】確定した会話に `keymap` テキストプロパティを載せてはいけない**
   （2026-09-28）。`my:claude--protect` が全域に `my:claude-view-map` を
   載せてあるので、上にもう 1 つ置くと**そこだけ 1 文字キー（`i` / `p` / `n` /
