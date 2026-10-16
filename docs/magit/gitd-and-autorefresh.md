@@ -418,3 +418,136 @@ Error running timer ‘my:magit-watch--fire’: (void-function magit--with-temp-
 `git checkout master` は失敗する。`-q` で握り潰すと「イベントが来ない」と
 誤診する（実際に 1 度誤診した）。`git init -b main` と明示すること。
 
+
+---
+
+## 外部の git との `.git/index.lock` の取り合い（2026-10-16）
+
+Fork や Claude Code からの git が
+`fatal: Unable to create '.../index.lock': File exists` で失敗する、という
+症状が頻発した。**原因は 2 つあり、現れ方が違う。**
+
+| | 症状 | 原因 |
+|---|---|---|
+| **競合** | 1 回失敗するが、やり直すと通る | Emacs 側の git が一瞬ロックを持っている |
+| **残留** | 何度やっても失敗。手で消すまで直らない | git が殺されてロックが残った |
+
+### なぜ増えたか
+
+段階 2（2026-09-17）で **`dired` を開いただけのリポジトリも監視対象**になり、
+かつ **外部の git を検知したら Emacs 側も git を走らせる**ようになった
+（`my:magit-watch--refresh-dired` → `my:diff-hl-dired-update-repo`）。
+
+外部から `git add` が走ると、こうなる。
+
+| t | 誰 | |
+|---|---|---|
+| 0.00 | 外部 | `git add` → `.git/index` のイベント |
+| 0.10 | gitd | 先読み。prelude の `update-index --refresh` + 28 コマンドを 8 並列 |
+| 0.40 | Emacs | リフレッシュ + **vc-git チェーンの第 1 段 `update-index --refresh`** |
+| 0.4〜 | 外部 | `git commit` → **ロックが取れずに fatal** |
+
+外部ツールは「ファイルを書く → git を 2 回以上叩く」ので、**その隙間に
+必ず割り込む**タイミングになっていた。
+
+### 実測
+
+```
+$ git status --porcelain          # .git/index の mtime が変わる = index を書いた
+$ git --no-optional-locks status --porcelain   # 変わらない
+```
+
+| コマンド（`.git/index.lock` を置いた状態で実行） | exit |
+|---|---|
+| `git update-index --refresh` | **128 fatal** |
+| `GIT_OPTIONAL_LOCKS=0 git --no-optional-locks update-index --refresh` | **128 fatal** |
+| `GIT_OPTIONAL_LOCKS=0 git --no-optional-locks status --porcelain` | 0 |
+| 同 `diff-index` / `ls-files` | 0 |
+
+**`update-index --refresh` だけは逃げられない。** あれは起動直後に
+`LOCK_DIE_ON_ERROR` で index をロックするのが仕事そのもので、optional lock
+ではない。`GIT_OPTIONAL_LOCKS=0` も `--no-optional-locks` も効かない。
+
+### 入れた対策（4 つ）
+
+#### 1. magit に `--no-optional-locks`（`my-vc.el`）
+
+**magit はこれを付けない。** `magit-git-global-arguments` の先頭に足す。
+先読みの 28 コマンドが index を書かなくなる。
+
+`magit-process-git-arguments--split` は `(length magit-git-global-arguments)`
+で位置的に切り分けるので、**この変数に足す限り** `my:gitd--role` の判定は
+ずれない（実測で `update-index --refresh` → `prelude`、`add` → 書き込みの
+ままを確認）。**コマンド側に直接足してはいけない。**
+
+#### 2. vc-git のチェーン全段に `GIT_OPTIONAL_LOCKS=0`（`my-vc.el`）
+
+Emacs 31.1 の `vc-git--env-vars` / `vc-git--no-optional-locks` は
+`revert-buffer-in-progress` か `subcommand` が `"status"` のときしか効かない。
+**diff-hl のチェーンに `status` は 1 つも無い**ので、1 つも効いていなかった。
+
+`vc-git-dir-status-goto-stage` に `:around` を張って `process-environment` に
+足す。**2 段目以降は sentinel から呼ばれる**ので、`diff-hl-dired-update` を
+`let` で包んでも第 1 段にしか効かない。入口そのものを押さえること。
+
+実測で 6 段すべてに `GIT_OPTIONAL_LOCKS=0` が乗ることを確認した
+（`vc-git-dir-status-goto-stage` は natively compiled な subr だが、
+同じファイルの `vc-git-after-dir-status-stage` から呼ばれる 2 段目以降にも
+advice は効いた）。
+
+#### 3. 外部がロックを持っている間は走らせない（`my-magit-watch.el`）
+
+`my:magit-watch--locked-p`。`.git/index.lock` が
+`my:magit-watch-lock-grace`（既定 8 秒）より新しければ待ち直す。
+stat 1 回だけ。`my:magit-watch--fire` と `--fire-prewarm` の両方で見る。
+
+**新しさで測るのが肝。** 存在だけで判断すると、残骸があるリポジトリは
+**以後永久に更新されなくなる**。
+
+GUI 実測（w32notify 経由）: ロックを置いて外部からワークツリーを変更
+→ `index.lock で待ち直し 5` / リフレッシュ 0。猶予を過ぎたあとに 1 回だけ
+リフレッシュ。ロック無しの対照では待ち直し 0 / リフレッシュ 1。
+
+**防げるのは「相手がいまロックを持っている」場合だけ。** コマンドと
+コマンドの隙間に割り込むことまでは防げないので、1 と 2 が本体。
+
+#### 4. 【重要】走っている git を殺さない（`my-vc.el`）
+
+**残留の正体。** `diff-hl-dired-update` は前のチェーンが生きていると
+問答無用で `kill-process` する（`diff-hl-dired.el:101`）。Windows の
+`kill-process` は `TerminateProcess` なので、git は atexit の後始末を
+走らせずに死ぬ。**第 1 段が `update-index --refresh` なので、
+`.git/index.lock` を作りっぱなしで消える。**
+
+`my:diff-hl-dired--start` は、一時バッファにプロセスがぶら下がっている
+ときは **ORIG を呼ばずに nil を返す**。上流の `kill-process` に到達する道を
+**構造的に塞ぐ**のが目的で、タイムアウト値を延ばすのでは駄目
+（いくつにしても「超えたら殺す」経路が残る）。
+
+待ちの設計が変わった。
+
+| | 旧 | 新 |
+|---|---|---|
+| `my:diff-hl-dired-max-wait` | 待ちの上限。超えたら**殺して**走る | **無プロセス**が続いた時間の上限。超えたら走る（殺す相手はいない） |
+| `my:diff-hl-dired-hard-max-wait` | — | 待ちの総上限（60 秒）。超えたら**殺さずに諦め** `--stale` を立てる |
+| `my:diff-hl-dired--last-alive` | — | 最後にプロセスを見た時刻。段の切れ目と「居座り」を区別する |
+
+**`--update-guard` の判断は `--in-flight-p`（一時バッファの生死）のまま。**
+`--live-process-p` に変えてはいけない。段の切れ目はプロセスがいないので、
+そこで新しいチェーンを始めると**2 本が同じ一時バッファを `erase-buffer`
+し合う**（2026-09-05 に直した再入そのもの）。
+
+`kill-process` を呼ばずに済ませる判定は `process-live-p` ではなく
+**「プロセスがぶら下がっているか」**で行う。終了直後 sentinel が走る前の
+一瞬は終了済みのプロセスが返り、それに `kill-process` すると
+`Process ... is not active` で落ちる（実測）。
+
+### 残っている穴
+
+- **`update-index --refresh` 自体は消せない。** gitd の prelude（magit の
+  status リフレッシュ由来）と vc-git チェーンの第 1 段の 2 本が残る。
+  外すと「stat が古いだけ」のファイルを変更ありとキャッシュしてしまうので
+  外せない（上の「prelude」の節）
+- 対策 3 は、相手が**いま**ロックを持っている場合しか見られない
+- Emacs 終了時にチェーンが走っていると、Emacs が git を殺す。
+  `kill-buffer-query-functions` を nil にしてあるので確認も出ない

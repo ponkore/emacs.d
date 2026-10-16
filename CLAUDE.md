@@ -948,6 +948,22 @@ gopls は大文字のドライブレターで返す（§1「Windows 固有」）
   （`declare-function` も宣言するだけでロードはしない）。判定は `fboundp` で、
   未ロードなら `call-process` に落とす（`my:magit-watch--check-ignore`）
   → [docs](docs/magit/gitd-and-autorefresh.md)
+- **【重要】走っている git を `kill-process` すると `.git/index.lock` が残る**
+  （2026-10-16）。Windows では `TerminateProcess` なので atexit の後始末が
+  走らない。`diff-hl-dired-update` が再入時に問答無用で殺しており、
+  **vc-git チェーンの第 1 段が `update-index --refresh`** なので、以後その
+  リポジトリは Fork からも Claude Code からも**何度やっても失敗する**
+  （手で消すまで）。`my:diff-hl-dired--start` がプロセスのいる間は
+  上流を呼ばない形にして塞いである。**タイムアウト値を延ばす直し方では
+  駄目**（いくつにしても「超えたら殺す」経路が残る）
+- **【重要】読み取りだけの git も `.git/index.lock` を取る。** `status` でも
+  index を書く（実測）。この設定は外部の変更を検知して**自動で** git を
+  走らせるので、Fork や claude の `add` → `commit` の隙間に割り込む。
+  `--no-optional-locks` / `GIT_OPTIONAL_LOCKS=0` で回数を減らし、
+  `my:magit-watch--locked-p` で相手がロック中は走らせない。
+  **`update-index --refresh` だけはどちらでも消せない**（optional lock では
+  ないため）。**magit は `--no-optional-locks` を付けないので自分で足す**
+  → [docs](docs/magit/gitd-and-autorefresh.md)
 - **監視表の引きは `my:magit-watch--lookup`**（`gethash` ではない）。
   Windows はドライブレターの大小が食い違うので、素の `gethash` だと
   **同じリポジトリに watch が 2 本張られトークンが 2 つに割れる**

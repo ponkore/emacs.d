@@ -173,6 +173,27 @@ nil にすると、dired を開いただけのリポジトリを監視対象に�
 そのまま。"
   :type 'boolean)
 
+(defcustom my:magit-watch-lock-grace 8.0
+  "`.git/index.lock' を「誰かが使っている」とみなす秒数。
+
+**外部の git が index をロックしている間は、こちらから git を起こさない**
+ための窓 (2026-10-16)。0 にすると判定ごと無効になる。
+
+Fork や Claude Code は `add' -> `commit' のように git を何回か続けて叩く。
+その最中にこちらが `update-index --refresh' を走らせると index.lock を
+取り合い、相手が \"Unable to create ... index.lock: File exists\" で落ちる。
+
+**ロックの新しさで測るのが肝。** `.git/index.lock' が残骸として残って
+いると (git が殺された場合に起こる)、存在だけで判断すると**以後そのリポジトリ
+の更新が永久に止まる**。ロックは作られた時点で mtime が決まるので、
+これより古ければ残骸とみなして諦め、従来どおり走らせる。
+
+**これで防げるのは「相手がいまロックを持っている」場合だけ**で、
+コマンドとコマンドの隙間に割り込むことまでは防げない。そちらは
+`--no-optional-locks' (`my-vc.el') で、そもそもロックを取る回数を
+減らすことで対処している。"
+  :type 'number)
+
 (defcustom my:magit-watch-visible-only t
   "非 nil なら、ウィンドウに表示されている magit バッファだけ更新する。
 
@@ -202,7 +223,7 @@ nil にすると、dired を開いただけのリポジトリを監視対象に�
 
 (defvar my:magit-watch--stats
   (list :events 0 :classified 0 :refreshed 0 :skipped 0 :deferred 0
-        :throttled 0 :prewarmed 0 :ign-error 0 :dired 0)
+        :throttled 0 :prewarmed 0 :ign-error 0 :dired 0 :locked 0)
   "統計。`my:magit-watch-stats' で表示する。")
 
 (defvar my:magit-watch--ign-warned nil
@@ -308,6 +329,23 @@ mtime を見て判断する。ブランチ切替では両方とも必ず変わ�
                 (cons (file-attribute-modification-time a)
                       (file-attribute-size a))))
             '("index" "HEAD"))))
+
+;;; ------------------------------------------------ 外部の git との競合
+
+(defun my:magit-watch--locked-p (repo)
+  "REPO の index を外部の git が握っていそうなら非 nil。
+
+stat 1 回だけ。`my:magit-watch-lock-grace' より新しい `.git/index.lock'
+があれば「いま誰かが使っている」とみなす。古いものは残骸なので無視する
+\(無視しないと、残骸がある限り更新が永久に止まる)。
+
+**自分が起こした git のロックも当然引っかかる。** そのときは待ち直すだけ
+なので害は無く、むしろ先読みと本体のリフレッシュが重ならなくなる。"
+  (and (> my:magit-watch-lock-grace 0)
+       (and-let* ((gitdir (my:magit-watch-repo-gitdir repo))
+                  (attr (file-attributes (expand-file-name "index.lock" gitdir))))
+         (< (float-time (time-since (file-attribute-modification-time attr)))
+            my:magit-watch-lock-grace))))
 
 ;;; ------------------------------------------------ .gitignore (課題 3)
 
@@ -531,6 +569,11 @@ magit があるときは magit 経由にする。`magit-process-file' に張っ�
      ((not (my:magit-watch--allowed-p))
       (cl-incf (plist-get my:magit-watch--stats :deferred))
       (my:magit-watch--arm repo my:magit-watch-min-interval))
+     ;; 外部の git が index を握っている。割り込むと相手が落ちる。
+     ;; 待ち直すだけなので、相手が終われば次の窓で必ず走る
+     ((my:magit-watch--locked-p repo)
+      (cl-incf (plist-get my:magit-watch--stats :locked))
+      (my:magit-watch--arm repo my:magit-watch-min-interval))
      ;; レート制限。ビルド中の暴走を止める
      ((< (- (float-time) (or (my:magit-watch-repo-last-refresh repo) 0))
          my:magit-watch-min-interval)
@@ -570,7 +613,11 @@ magit があるときは magit 経由にする。`magit-process-file' に張っ�
 タイマーが張り直されるので、絞らないと先読みが自分自身を呼び続ける。"
   (when-let* ((repo (gethash root my:magit-watch--repos)))
     (setf (my:magit-watch-repo-prewarm-timer repo) nil)
+    ;; 【重要】ロック中は `prewarmed' を立てない。立てるとこの窓では
+    ;; 二度と頼まないので、相手が終わっても先読みされないまま
+    ;; リフレッシュを迎える (遅くなるだけだが、直せるものは直す)。
     (when (and (not (my:magit-watch-repo-prewarmed repo))
+               (not (my:magit-watch--locked-p repo))
                (my:magit-watch--stale-p repo))
       (setf (my:magit-watch-repo-prewarmed repo) t)
       (cl-incf (plist-get my:magit-watch--stats :prewarmed))
@@ -839,7 +886,7 @@ submodule でも `.git' はファイルとして在る)。"
 (defun my:magit-watch-stats ()
   "イベント数・リフレッシュ数・抑止数を表示する。"
   (interactive)
-  (message "magit-watch: %d 監視中 / イベント %d (分類を通った %d) / リフレッシュ %d (dired %d) / 先読み %d / 変化なしで抑止 %d / 操作中で待ち直し %d / レート制限で待ち直し %d%s"
+  (message "magit-watch: %d 監視中 / イベント %d (分類を通った %d) / リフレッシュ %d (dired %d) / 先読み %d / 変化なしで抑止 %d / 操作中で待ち直し %d / レート制限で待ち直し %d / index.lock で待ち直し %d%s"
            (hash-table-count my:magit-watch--repos)
            (plist-get my:magit-watch--stats :events)
            (plist-get my:magit-watch--stats :classified)
@@ -849,6 +896,7 @@ submodule でも `.git' はファイルとして在る)。"
            (plist-get my:magit-watch--stats :skipped)
            (plist-get my:magit-watch--stats :deferred)
            (plist-get my:magit-watch--stats :throttled)
+           (plist-get my:magit-watch--stats :locked)
            (let ((e (plist-get my:magit-watch--stats :ign-error)))
              (if (zerop e) "" (format " / check-ignore 失敗 %d" e)))))
 

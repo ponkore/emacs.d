@@ -22,6 +22,40 @@
   (advice-add 'magit-expand-git-file-name :filter-args
               #'magit-expand-git-file-name--msys)
   :config
+  ;; --------------------------------------------------
+  ;; 【重要】読み取りで .git/index.lock を取らせない (2026-10-16)
+  ;;
+  ;; magit は `--no-optional-locks' を付けない。そのため `status' や `diff'
+  ;; のような **読み取りだけのコマンドでも index.lock を作る**
+  ;; (実測: `status --porcelain' 1 回で `.git\index.lock' のイベントが 2 件。
+  ;; `my-magit-watch.el' の Commentary を参照)。
+  ;;
+  ;; 素の magit なら「ユーザが操作した瞬間だけ」なので実害は無かったが、
+  ;; この設定では事情が違う:
+  ;;
+  ;;   - `my-magit-watch' が外部の変更を検知して自動でリフレッシュする
+  ;;   - `my-gitd' がその 0.1 秒後に **28 コマンドを 8 並列で先読み**する
+  ;;
+  ;; つまり Fork や Claude Code が `add' -> `commit' と続けている最中に、
+  ;; Emacs 側の読み取りが index.lock を取りにいく。相手は
+  ;; "Unable to create '.../index.lock': File exists" で落ちる。
+  ;;
+  ;; `--no-optional-locks' は「書かなくても答えが出せるときは index を
+  ;; 書かない」という指示 (git 2.19 以降)。**書き込みコマンドの本物の
+  ;; ロックには影響しない**ので commit や stage は従来どおり動く。
+  ;;
+  ;; 代償は「次のコマンドが stat をやり直すぶん遅くなる」ことだけだが、
+  ;; magit の status リフレッシュは先頭で `update-index --refresh' を呼ぶ
+  ;; (magit-status.el) ので、stat キャッシュはそこで更新される。
+  ;;
+  ;; `magit-process-git-arguments--split' は
+  ;; `(length magit-git-global-arguments)' で位置的に切り分けるので、
+  ;; **この変数に足す限り** `my-gitd' の役割判定 (`my:gitd--role') は
+  ;; ずれない。コマンド側に直接足してはいけない。
+  (unless (member "--no-optional-locks" magit-git-global-arguments)
+    (setq magit-git-global-arguments
+          (cons "--no-optional-locks" magit-git-global-arguments)))
+
   (defun magit-expand-git-file-name--msys (args)
     "Handle Msys directory names such as /c/* by changing them to C:/*"
     (let ((filename (car args)))
@@ -140,17 +174,36 @@
     "前のチェーンが終わったかを見に行く間隔 (秒)。")
 
   (defvar my:diff-hl-dired-max-wait 5.0
-    "前のチェーンの終了を待つ上限 (秒)。
+    "チェーンが「死んでいる」と判断するまでの無プロセス時間 (秒)。
 
-これを超えたら待たずに走らせる (= diff-hl 本来の kill-process する動作)。
-一時バッファが何かの理由で残ったままになったときに、更新が永久に
-止まってしまうのを防ぐための保険。")
+**プロセスが走っている間は、何秒経っても待つ。** ここで測るのは
+「一時バッファは生きているのに git が 1 つも走っていない」状態が
+続いた時間で、これを超えたら一時バッファが居座っているとみなして
+新しいチェーンを始める。そのときプロセスはいないので
+`kill-process' は走らない。
+
+チェーンは 6 段のリレーなので段の切れ目では一瞬プロセスが途切れる。
+その一瞬を「死んでいる」と誤認しないための猶予でもある。")
+
+  (defvar my:diff-hl-dired-hard-max-wait 60.0
+    "1 回の待ちの総上限 (秒)。これを超えたら**殺さずに**諦める。
+
+諦めたときは `my:diff-hl-dired--stale' を立てるので、次に可視になった
+ときか次の readin で取り直される。マークが 1 回古いまま残るだけで、
+`.git/index.lock' を残すよりはるかに安い。")
 
   (defvar-local my:diff-hl-dired--timer nil
     "待ち直し用のタイマー。dired バッファごとに 1 本。")
 
   (defvar-local my:diff-hl-dired--deadline nil
-    "待ちを諦める時刻 (`float-time')。待っていないときは nil。")
+    "待ちを諦める時刻 (`float-time')。待っていないときは nil。
+`my:diff-hl-dired-hard-max-wait' で決まる総上限のほう。")
+
+  (defvar-local my:diff-hl-dired--last-alive nil
+    "最後にチェーンのプロセスが生きているのを見た時刻 (`float-time')。
+
+段の切れ目と「一時バッファだけが居座っている」状態を区別するために要る。
+`my:diff-hl-dired-max-wait' はこの時刻からの経過で測る。")
 
   (defvar-local my:diff-hl-dired--stale nil
     "表示していない間に VC 状態が変わったら t。可視になった時点で取り直す。
@@ -167,18 +220,78 @@ autorevert が revert したバッファに無駄な取り直しが残らない�
 そのまま「走っている」ことの印になる。"
     (buffer-live-p (bound-and-true-p diff-hl-dired-process-buffer)))
 
+  (defun my:diff-hl-dired--process ()
+    "チェーンの一時バッファにぶら下がっているプロセスを返す。無ければ nil。
+
+終了済みのプロセスは sentinel が走った時点で外れるので、非 nil なら
+ほぼ「走っている」。**ただし「終了したが sentinel がまだ」の一瞬だけは
+終了済みのものが返る。** そこで `kill-process' を呼ぶと
+\"Process ... is not active\" で落ちるので、`my:diff-hl-dired--start' は
+`process-live-p' ではなくこの関数で見る (いるなら触らない)。"
+    (and (my:diff-hl-dired--in-flight-p)
+         (get-buffer-process diff-hl-dired-process-buffer)))
+
+  (defun my:diff-hl-dired--live-process-p ()
+    "チェーンの git が **いま実際に走っている**なら非 nil。
+
+`my:diff-hl-dired--in-flight-p' との違いが肝。あちらは一時バッファの
+生死しか見ないので、「バッファは残っているがプロセスはいない」
+\(段の切れ目 / チェーンが途中で死んだ) と区別が付かない。"
+    (let ((p (my:diff-hl-dired--process)))
+      (and p (process-live-p p))))
+
+  ;; --------------------------------------------------
+  ;; 【重要】走っている git を殺さない (2026-10-16)
+  ;;
+  ;; `diff-hl-dired-update' は、前のチェーンが生きていると
+  ;; **問答無用で `kill-process' する** (diff-hl-dired.el:101)。
+  ;;
+  ;;   (when proc (kill-process proc))
+  ;;
+  ;; Windows の `kill-process' は `TerminateProcess' なので、git は
+  ;; atexit の後始末を走らせずに死ぬ。**チェーンの第 1 段は
+  ;; `git update-index --refresh'** (vc-git.el の
+  ;; `vc-git-dir-status-goto-stage') で、これは起動直後に
+  ;; `.git/index.lock' を作りっぱなしのまま消える。
+  ;;
+  ;; こうなると Fork でも Claude Code でも、以後その リポジトリの git は
+  ;; **何度やっても失敗する** (手で index.lock を消すまで)。実際に起きていた。
+  ;;
+  ;; そこで `my:diff-hl-dired--start' は、生きたプロセスがあるときは
+  ;; **ORIG を呼ばずに nil を返す**。上流の kill-process に到達する道を
+  ;; 構造的に塞ぐのが目的で、タイムアウトの値を延ばすのでは駄目
+  ;; (値がいくつでも「超えたら殺す」経路は残る)。
+  ;;
+  ;; 待ちが長引いたときは殺さずに諦める (`my:diff-hl-dired-hard-max-wait')。
+  ;; マークが 1 回古いまま残るだけで、印 (`--stale') を立てておけば
+  ;; 次に可視になった時点で取り直される。
+
   (defun my:diff-hl-dired--start (orig)
-    "ORIG (`diff-hl-dired-update') を実際に呼び、一時バッファを黙らせる。"
-    (setq my:diff-hl-dired--deadline nil)
-    ;; ここまで来れば取り直される。**入口がどれであっても**印は下ろしてよい。
-    (setq my:diff-hl-dired--stale nil)
-    (funcall orig)
-    ;; 一時バッファはここで (再) 生成されている。バッファは使い回されるうえ
-    ;; チェーンの終わりに kill されるので、毎回張り直す。
-    (let ((buffer (bound-and-true-p diff-hl-dired-process-buffer)))
-      (when (buffer-live-p buffer)
-        (with-current-buffer buffer
-          (setq-local kill-buffer-query-functions nil)))))
+    "ORIG (`diff-hl-dired-update') を実際に呼ぶ。実行したら t を返す。
+
+**プロセスがぶら下がっているときは呼ばない** (nil を返す)。呼ぶと ORIG が
+`kill-process' して `.git/index.lock' を残す。最後の安全網なので、
+呼び出し側の判断 (`--run' / `--update-guard') とは独立に置いてある。"
+    (if (my:diff-hl-dired--process)
+        nil
+      ;; 待ちは終わり。**張ってあるタイマーを必ず外す。** 残すと、これから
+      ;; 始めるチェーンの最中に前の待ちのタイマーが起きて、状態を見失う
+      ;; (`--update-guard' から入ったときは `--run' が外してくれない)
+      (when (timerp my:diff-hl-dired--timer)
+        (cancel-timer my:diff-hl-dired--timer))
+      (setq my:diff-hl-dired--timer nil)
+      (setq my:diff-hl-dired--deadline nil)
+      (setq my:diff-hl-dired--last-alive nil)
+      ;; ここまで来れば取り直される。**入口がどれであっても**印は下ろしてよい。
+      (setq my:diff-hl-dired--stale nil)
+      (funcall orig)
+      ;; 一時バッファはここで (再) 生成されている。バッファは使い回されるうえ
+      ;; チェーンの終わりに kill されるので、毎回張り直す。
+      (let ((buffer (bound-and-true-p diff-hl-dired-process-buffer)))
+        (when (buffer-live-p buffer)
+          (with-current-buffer buffer
+            (setq-local kill-buffer-query-functions nil))))
+      t))
 
   (defun my:diff-hl-dired--rearm (buffer orig)
     "BUFFER で ORIG を呼び直すタイマーを張り直す。"
@@ -188,15 +301,41 @@ autorevert が revert したバッファに無駄な取り直しが残らない�
           (run-at-time my:diff-hl-dired-poll-interval nil
                        #'my:diff-hl-dired--run buffer orig)))
 
+  (defun my:diff-hl-dired--give-up ()
+    "待ちを諦める。**殺さない。** 印を立てて次の機会に回す。"
+    (setq my:diff-hl-dired--deadline nil)
+    (setq my:diff-hl-dired--last-alive nil)
+    (setq my:diff-hl-dired--stale t))
+
   (defun my:diff-hl-dired--run (buffer orig)
-    "待ちから復帰したときの入口。BUFFER が生きていれば ORIG を呼ぶ。"
+    "待ちから復帰したときの入口。BUFFER が生きていれば判断し直す。"
     (when (buffer-live-p buffer)
       (with-current-buffer buffer
         (setq my:diff-hl-dired--timer nil)
-        (if (and (my:diff-hl-dired--in-flight-p)
-                 (< (float-time) (or my:diff-hl-dired--deadline 0)))
-            (my:diff-hl-dired--rearm buffer orig)
-          (my:diff-hl-dired--start orig)))))
+        (let ((now (float-time)))
+          ;; 入口がどこであっても基準時刻は必ず持たせる
+          (unless my:diff-hl-dired--last-alive
+            (setq my:diff-hl-dired--last-alive now))
+          (cond
+           ;; 終わった。素直に走らせる
+           ((not (my:diff-hl-dired--in-flight-p))
+            (or (my:diff-hl-dired--start orig)
+                (my:diff-hl-dired--rearm buffer orig)))
+           ;; 総上限。**殺さずに**諦める
+           ((and my:diff-hl-dired--deadline
+                 (>= now my:diff-hl-dired--deadline))
+            (my:diff-hl-dired--give-up))
+           ;; git が走っている。何秒かかっていても待つ
+           ((my:diff-hl-dired--live-process-p)
+            (setq my:diff-hl-dired--last-alive now)
+            (my:diff-hl-dired--rearm buffer orig))
+           ;; プロセスはいない。段の切れ目かもしれないので少し待つ
+           ((< (- now my:diff-hl-dired--last-alive) my:diff-hl-dired-max-wait)
+            (my:diff-hl-dired--rearm buffer orig))
+           ;; 無プロセスのまま居座っている = チェーンが途中で死んでいる。
+           ;; ここで ORIG を呼んでも殺す相手がいないので安全
+           (t (or (my:diff-hl-dired--start orig)
+                  (my:diff-hl-dired--rearm buffer orig))))))))
 
   (defun my:diff-hl-dired-update-guard (orig &rest _args)
     "`diff-hl-dired-update' の再入を防ぐ。
@@ -204,14 +343,85 @@ autorevert が revert したバッファに無駄な取り直しが残らない�
 走っているチェーンが無ければそのまま呼ぶ。走っていれば呼ばず、
 終わるのを待って 1 回だけ呼ぶ (待っている間に来た分は畳まれる)。"
     (let ((buffer (current-buffer)))
-      (if (not (my:diff-hl-dired--in-flight-p))
-          (my:diff-hl-dired--start orig)
-        (unless my:diff-hl-dired--deadline
-          (setq my:diff-hl-dired--deadline
-                (+ (float-time) my:diff-hl-dired-max-wait)))
-        (my:diff-hl-dired--rearm buffer orig))))
+      ;; 【重要】判断は `--in-flight-p' (一時バッファの生死) で行う。
+      ;; `--live-process-p' にしてはいけない。段の切れ目はプロセスが
+      ;; いないので、そこで新しいチェーンを始めてしまい、**2 本が同じ
+      ;; 一時バッファを erase-buffer し合う** (2026-09-05 に直した再入そのもの)。
+      (if (and (not (my:diff-hl-dired--in-flight-p))
+               (my:diff-hl-dired--start orig))
+          t
+        (let ((now (float-time)))
+          (unless my:diff-hl-dired--deadline
+            (setq my:diff-hl-dired--deadline
+                  (+ now my:diff-hl-dired-hard-max-wait))
+            (setq my:diff-hl-dired--last-alive now)))
+        (my:diff-hl-dired--rearm buffer orig)
+        nil)))
 
   (advice-add 'diff-hl-dired-update :around #'my:diff-hl-dired-update-guard)
+
+  ;; --------------------------------------------------
+  ;; 【重要】チェーン全体で optional lock を取らない (2026-10-16)
+  ;;
+  ;; `vc-git-dir-status-files' のリレー 6 段は、どれも index を書きうる。
+  ;; Emacs 31.1 の vc-git には逃げ道が用意されているが、
+  ;;
+  ;;   (and (or revert-buffer-in-progress (equal subcommand "status"))
+  ;;        '("--no-optional-locks"))            ; vc-git.el:2904
+  ;;
+  ;; **このチェーンに "status" は 1 つも無い** (update-index / diff-index /
+  ;; ls-files だけ) ので、1 つも効いていない。
+  ;;
+  ;; `GIT_OPTIONAL_LOCKS=0' を環境変数で渡して全段に効かせる。
+  ;; `revert-buffer-in-progress' を t に束縛しても同じ結果になるが、
+  ;; あれはグローバルな動的変数で「revert 中である」という嘘を
+  ;; 他のコードにも見せてしまうので採らない。
+  ;;
+  ;; **第 1 段の `update-index --refresh' だけはこれでも消えない。**
+  ;; あのコマンドは起動直後に `LOCK_DIE_ON_ERROR' で index をロックするのが
+  ;; 仕事そのもので、optional lock ではない。そちらは
+  ;; `my-magit-watch.el' の `my:magit-watch--locked-p' (外部の git が
+  ;; ロックを持っている間は走らせない) で避ける。
+  ;;
+  ;;; 2 段目以降をどうやって捕まえるか
+  ;;
+  ;; `vc-git-dir-status-goto-stage' は、2 段目以降は **sentinel から**
+  ;; 呼ばれる。`diff-hl-dired-update' を let で包んでも第 1 段にしか
+  ;; 効かないので、入口そのものに advice を張る。
+  ;;
+  ;;   第 1 段   `my:diff-hl-dired--in-chain' (動的束縛) で見分ける
+  ;;   2 段目以降 一時バッファに立てたバッファローカルの印で見分ける
+  ;;
+  ;; 印を立てるのは advice の中。第 1 段の時点で current-buffer は
+  ;; 既に一時バッファになっている (diff-hl が `with-current-buffer' で
+  ;; 包んでから `dir-status-files' を呼ぶ) ので、ここで立てておけば
+  ;; sentinel から来る 2 段目以降が拾える。
+
+  (defvar my:diff-hl-dired--in-chain nil
+    "`diff-hl-dired-update' の呼び出し中なら非 nil (動的束縛)。")
+
+  (defvar-local my:diff-hl-dired--chain-buffer nil
+    "この一時バッファが diff-hl のチェーン用なら t。")
+
+  (defun my:diff-hl-dired--no-optional-locks (orig &rest args)
+    "diff-hl のチェーンに `GIT_OPTIONAL_LOCKS=0' を効かせる。"
+    (if (not (or my:diff-hl-dired--in-chain my:diff-hl-dired--chain-buffer))
+        (apply orig args)
+      (setq-local my:diff-hl-dired--chain-buffer t)
+      (let ((process-environment (cons "GIT_OPTIONAL_LOCKS=0"
+                                       process-environment)))
+        (apply orig args))))
+
+  (advice-add 'vc-git-dir-status-goto-stage :around
+              #'my:diff-hl-dired--no-optional-locks)
+
+  (defun my:diff-hl-dired--mark-chain (orig &rest args)
+    "`diff-hl-dired-status-files' の呼び出し中を印で囲む。"
+    (let ((my:diff-hl-dired--in-chain t))
+      (apply orig args)))
+
+  (advice-add 'diff-hl-dired-status-files :around
+              #'my:diff-hl-dired--mark-chain)
 
   ;; --------------------------------------------------
   ;; commit のあとに dired のマークを取り直す (2026-09-17)
