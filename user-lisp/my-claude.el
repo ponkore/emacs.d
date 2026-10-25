@@ -2875,8 +2875,35 @@ FLOOR はどの列にも残す最低の桁数。BUDGET がそれすら賄えな�
     (when (= i from) (setq i (1+ from)))
     (my:claude--word-break-point s from (my:claude--kinsoku-point s from i))))
 
-(defun my:claude--wrap-cell (s width)
-  "S を WIDTH 桁で折り返し、行のリストにして返す。
+(defconst my:claude--br-regexp "<[ \t]*[bB][rR][ \t]*/?[ \t]*>"
+  "セルの中で強制改行とみなす HTML タグ。`<br>' / `<br/>' / `<BR />'。")
+
+(defun my:claude--split-cell-br (s)
+  "S を `<br>' で分けた断片のリストにして返す。断片の前後の空白は落とす。
+`<br>' が無ければ `(S)' をそのまま返す。
+
+**切り出しは `substring' で行う**ので、`**強調**' や行中のコード、
+リンクの face は断片にも残る (`my:claude--split-row' と同じ理由)。"
+  (if (not (string-match-p my:claude--br-regexp s))
+      (list s)
+    (let ((parts nil) (i 0))
+      (while (string-match my:claude--br-regexp s i)
+        (push (string-trim (substring s i (match-beginning 0))) parts)
+        (setq i (match-end 0)))
+      (push (string-trim (substring s i)) parts)
+      (nreverse parts))))
+
+(defun my:claude--cell-width (s)
+  "セル S を折り返さずに出すのに要る桁数。
+
+`<br>' は強制改行なので、**そこで分けた断片のうちいちばん広いもの**を返す。
+`string-width' をそのまま使うと `<br>' の前後を足した長さになり、
+列が実際より広く見積もられる (`my:claude--cap-widths' がよその列を
+削りにいく)。"
+  (apply #'max 0 (mapcar #'string-width (my:claude--split-cell-br s))))
+
+(defun my:claude--wrap-lines (s width)
+  "S を WIDTH 桁で折り返し、行のリストにして返す。`<br>' は見ない。
 
 **テキストプロパティは `substring' が持ち越す**ので、`**強調**' や
 行中のコードの face は折り返した先にも残る。"
@@ -2889,6 +2916,16 @@ FLOOR はどの列にも残す最低の桁数。BUDGET がそれすら賄えな�
           (setq i end)))
       (nreverse lines))))
 
+(defun my:claude--wrap-cell (s width)
+  "S を WIDTH 桁で折り返し、行のリストにして返す。
+
+**`<br>' は強制改行として扱う。** claude はセルの中で改行したいときに
+これを書いてくるが、罫線の表では `<br>' がそのまま文字として出てしまい、
+しかも改行は入らないので、幅に収まっているセルでも意図した位置で
+折れない。断片ごとに折り返して繋げる。"
+  (mapcan (lambda (p) (my:claude--wrap-lines p width))
+          (my:claude--split-cell-br s)))
+
 (defun my:claude--table-string (rows aligns header indent)
   "ROWS を罫線の表にした文字列を返す。
 
@@ -2899,7 +2936,9 @@ ALIGNS は列ごとの寄せ方、HEADER は見出し行の数、INDENT は行�
 
 幅が `my:claude--table-width' に収まらないときは、広い列から詰めて
  (`my:claude--cap-widths') セルの中で折り返す (`my:claude--wrap-cell')。
-**収まるうちは何もしない**ので、短い表の見た目は変わらない。"
+**収まるうちは何もしない**ので、短い表の見た目は変わらない。
+
+セルの中の `<br>' は強制改行として扱う (`my:claude--wrap-cell')。"
   (let* ((ncol (apply #'max 1 (mapcar #'length rows)))
          (rows (mapcar (lambda (r)
                          (append r (make-list (- ncol (length r)) "")))
@@ -2921,10 +2960,12 @@ ALIGNS は列ごとの寄せ方、HEADER は見出し行の数、INDENT は行�
          ;; eaw を外した Emacs では `─' が幅 1 になるので、その場合は
          ;; 何も広げない (`rw' を実測しているのはそのため)。
          (rw (max 1 (char-width ?─)))
-         ;; 自然幅 = そのセルをすべて 1 行で出すのに要る桁。
+         ;; 自然幅 = そのセルを折り返さずに出すのに要る桁
+         ;; (`<br>' で分かれるぶんは数えない。`my:claude--cell-width')。
          (natural (mapcar (lambda (i)
                             (apply #'max 1
-                                   (mapcar (lambda (r) (string-width (nth i r)))
+                                   (mapcar (lambda (r)
+                                             (my:claude--cell-width (nth i r)))
                                            rows)))
                           (number-sequence 0 (1- ncol))))
          ;; セルに使える桁の合計。1 行の全長は
