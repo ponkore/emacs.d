@@ -58,6 +58,94 @@ Emacs 31.1 は `lisp/international/cp51932.el` を同梱しているが、あれ
 `my-japanese.el` が `(define-coding-system-alias 'euc-jp 'cp51932)` と
 `set-coding-system-priority` でこれらを使っている。
 
+### 【重要】translation-table を `utf-8` に貼ると UTF-8 が非可逆になる（2026-10-25）
+
+`CLAUDE.md` を Emacs で保存したら、`1〜3 行` / `59〜76 ms` など **5 箇所の
+`〜`（U+301C WAVE DASH）が `～`（U+FF5E FULLWIDTH TILDE）に書き換わっていた**。
+文字数は前後とも 46,503 で、変わったのはこの 1 種類だけ。
+
+原因は `my-japanese.el` が `japanese-ucs-jis-to-cp932-map` と自前の
+1 組テーブル（`#x301c → #xff5e`）を **`utf-8` にも貼っていた**こと。
+稼働中の Emacs で実測。
+
+| | 結果 |
+|---|---|
+| UTF-8 の `E3 80 9C`（`〜`）を decode | **`#xff5e`** |
+| `#x301c` を utf-8 で encode | **`ef bd 9e`** |
+
+**decode 側でも変換されるので、バッファ上は最初から `～` に見える。**
+ファイルを開いて保存するだけで中身が変わり、気づけるのは `git diff` だけ。
+リポジトリの実情もこれと一致していて、`〜` が残っているのは Claude Code が
+直接バイトで書いたファイル（`docs/` 以下に 100 箇所超）、`～` になっているのは
+Emacs で保存したファイル（`docs/README.md` / `gitd/README.md`）だった。
+
+#### 対応表は 8 組ある（`utf-8` を外すだけでは直らない）
+
+`japanese-ucs-jis-to-cp932-map` を `map-char-table` で展開した実測値。
+
+```
+#xa2->#xffe0  ¢→￠    #xa3->#xffe1  £→￡    #xa6->#xffe4  ¦→￤
+#xac->#xffe2  ¬→￢    #x2014->#x2015 —→―    #x2016->#x2225 ‖→∥
+#x2212->#xff0d −→－    #x301c->#xff5e 〜→～
+```
+
+`utf-8` には**この 8 組と 1 組テーブルが二重に貼られていた**。後から貼った
+1 組が勝っていたので、実際に効いていたのは `〜`→`～` だけ（`−` と `‖` は
+素通しだと実測で確認）。したがって**1 組テーブルの `mapc` から `utf-8` を
+外すだけでは、8 組の方が復活して悪化する**。`〜`→`～` は直らないまま、
+`CLAUDE.md` の `—`（12 箇所）が `―` に化ける。**decode 側の
+`coding-system-put` も消すこと。**
+
+#### `coding-system-put` は後から貼った方が勝つ（消す手段が無い）
+
+同じ coding system に 2 回貼ると前の指定が黙って潰れる。これで
+**`cp932` 側にも副作用が出ていた**（1 組テーブルが 8 組を潰していた）。
+
+| | 修正前 | 修正後 |
+|---|---|---|
+| `U+301C` を cp932 で encode | `81 60` | `81 60` |
+| `U+2212`（`−`）を cp932 で encode | **`20`（空白に落ちる）** | `81 7c` |
+
+また **モジュールを再評価しても外れない**。再起動するか、明示的に nil を貼る。
+
+```elisp
+(coding-system-put 'utf-8 :decode-translation-table nil)
+(coding-system-put 'utf-8 :encode-translation-table nil)
+```
+
+#### 貼る先（修正後）
+
+| coding system | decode | encode |
+|---|---|---|
+| `euc-jp`（= `cp51932`） / `iso-2022-jp` | jis→cp932 の 8 組 | cp932→jis の 8 組 |
+| `cp932` | （貼らない。cp932 は `0x8160` を元から `U+FF5E` に decode する） | jis→cp932 の 8 組 |
+| `utf-16le`（Windows のクリップボード） | `〜`→`～` の 1 組 | 同じ |
+| **`utf-8`** | **貼らない** | **貼らない** |
+
+クリップボードを素通しにするかは別の判断。`utf-16le` を残してあるので、
+Emacs からコピーした `〜` は他アプリへ `～` として渡る。
+
+#### 背景: Shift_JIS ⇔ Unicode の対応表が 2 系統ある
+
+JIS X 0208 の 1 区 41 点（Shift_JIS `0x8160`）を Unicode のどこに当てるかで
+流儀が分かれた。この食い違いが上の 8 組（`¦` と `—` を除く 6 組が
+Shift_JIS 由来）の正体で、Emacs が両方向の対応表を同梱しているのもそのため。
+
+| | `0x8160` | 他の組 |
+|---|---|---|
+| JIS 規格票 / Unicode コンソーシアムの対応表（Apple の変換もこちら） | `U+301C` `〜` | `U+2212` `−` / `U+2016` `‖` / `U+00A2` `¢` / `U+00A3` `£` / `U+00AC` `¬` |
+| **Microsoft CP932** | `U+FF5E` `～` | `U+FF0D` `－` / `U+2225` `∥` / `U+FFE0` `￠` / `U+FFE1` `￡` / `U+FFE2` `￢` |
+
+Windows で作った UTF-8 には `FF5E`、JIS 準拠の変換を通ったものには `301C` が
+入るので、片方しか知らない相手を通すと「`〜` が化ける / `?` になる /
+検索に引っかからない」が起きる。メール・CSV・DB（Oracle の `JA16SJIS`）・
+ファイル名で有名になった件。U+301C のグリフが Unicode 規格票では波の向きが
+JIS と逆に描かれていた（後に修正）ことも、見た目で区別できない一因。
+
+**Windows 式に寄せる方針自体は妥当**だが、寄せるのは cp932 に出入りする
+ときだけで足りる。UTF-8 同士の往復にまで張ると、保存するたびに中身が
+変わるものになる。
+
 ### public repo はあるが、乗り換える利点が無い（2026-09-09 に調査）
 
 MELPA の `cp5022x`（[awasira/cp5022x.el](https://github.com/awasira/cp5022x.el)）が

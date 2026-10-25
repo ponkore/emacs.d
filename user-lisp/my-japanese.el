@@ -57,12 +57,22 @@
 
   (define-coding-system-alias 'euc-jp 'cp51932)
 
+  ;; 機種依存文字の対応表 (JIS 式 ⇔ cp932 式) を貼る。
+  ;;
+  ;; `japanese-ucs-jis-to-cp932-map' は 8 組:
+  ;;   ¢ → ￠ / £ → ￡ / ¦ → ￤ / ¬ → ￢ / — → ― / ‖ → ∥ / − → － / 〜 → ～
+  ;;
+  ;; 【重要】utf-8 には貼らない。貼ると UTF-8 の読み書きが非可逆になり、
+  ;; 〜 (U+301C) を含むファイルを開いて保存するだけで ～ (U+FF5E) に
+  ;; 書き換わる。しかも decode 側でも変換されるのでバッファ上は最初から
+  ;; ～ に見え、git diff を取るまで気づけない (2026-10-25 に CLAUDE.md の
+  ;; 5 箇所で踏んだ)。この対応表は cp932 との変換の食い違いを吸収する
+  ;; ためのものなので、cp932 と JIS 系の coding system にだけ貼る。
+
   ;; decode-translation-table の設定
   (coding-system-put 'euc-jp :decode-translation-table
                      (get 'japanese-ucs-jis-to-cp932-map 'translation-table))
   (coding-system-put 'iso-2022-jp :decode-translation-table
-                     (get 'japanese-ucs-jis-to-cp932-map 'translation-table))
-  (coding-system-put 'utf-8 :decode-translation-table
                      (get 'japanese-ucs-jis-to-cp932-map 'translation-table))
 
   ;; encode-translation-table の設定
@@ -72,17 +82,19 @@
                      (get 'japanese-ucs-cp932-to-jis-map 'translation-table))
   (coding-system-put 'cp932 :encode-translation-table
                      (get 'japanese-ucs-jis-to-cp932-map 'translation-table))
-  (coding-system-put 'utf-8 :encode-translation-table
-                     (get 'japanese-ucs-jis-to-cp932-map 'translation-table))
 
-  ;; 全角チルダ/波ダッシュをWindowsスタイルにする
+  ;; 全角チルダ/波ダッシュを Windows スタイルにする (クリップボード経路)。
+  ;;
+  ;; cp932 はすぐ上の 8 組に任せる。ここに cp932 を書くと `coding-system-put'
+  ;; が後から上書きするので、8 組が 1 組に潰れて − ∥ ￠ ￡ ￢ が cp932 で
+  ;; 書けなくなる (実測で − が空白 0x20 に落ちた)。
   (let ((table (make-translation-table-from-alist '((#x301c . #xff5e))) ))
     (mapc
      (lambda (coding-system)
        (coding-system-put coding-system :decode-translation-table table)
        (coding-system-put coding-system :encode-translation-table table)
        )
-     '(utf-8 cp932 utf-16le)))
+     '(utf-16le)))
 
   ;; cp932エンコード時の表示を「P」とする
   (coding-system-put 'cp932 :mnemonic ?P)

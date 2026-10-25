@@ -164,6 +164,31 @@ Windows では `default-process-coding-system` が `(utf-8 . cp932)`。
 | url.el（`my-htnblog`）などプロセスを通らない経路 | `encode-coding-string` で明示するしかない |
 | claude（`my-claude`）の stdin | 起動時に `(utf-8-unix . utf-8-unix)` を**束縛する** |
 
+### 【重要】`utf-8` に translation-table を貼らない（開いて保存すると中身が変わる）
+
+→ 実測と経緯: [docs/japanese/eaw-and-cp5022x.md](docs/japanese/eaw-and-cp5022x.md)
+
+`my-japanese.el` が `japanese-ucs-jis-to-cp932-map`（機種依存文字の 8 組。
+`〜`→`～` / `—`→`―` / `−`→`－` など）を coding system に貼っている。
+**これを `utf-8` に貼ると UTF-8 の読み書きが非可逆になる。**
+
+- decode 側でも変換されるので**バッファ上は最初から `～` に見える**
+- ファイルを開いて保存しただけで中身が変わる。**差分は `git diff` でしか見えない**
+
+2026-10-25 に `CLAUDE.md` の 5 箇所（`1〜3 行` など）が `～` に化けた。
+貼る先は **cp932 と JIS 系（`euc-jp` / `iso-2022-jp`）、それにクリップボード
+（`utf-16le`）だけ**。UTF-8 は素通しにする。
+
+**`coding-system-put` は後から貼ったものが勝ち、消す手段が無い。** そのため
+①同じ coding system に 2 回貼ると前の指定が**黙って潰れる**（1 組だけの
+波ダッシュ用テーブルで 8 組を潰していて、`−` が cp932 で空白に落ちていた）、
+②**モジュールを再評価しても外れない**（再起動するか、明示的に nil を貼る）。
+
+```elisp
+(coding-system-put 'utf-8 :decode-translation-table nil)
+(coding-system-put 'utf-8 :encode-translation-table nil)
+```
+
 ### 【重要】日本語で「一致なし」になったら、まずこれを疑う
 
 grep も rg も**エラーを出さず 0 件を返す**。`my:grep-with-cp932` /
