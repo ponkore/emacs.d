@@ -76,7 +76,7 @@ git clone git@github.com:ponkore/emacs.d.git ~/.emacs.d
 |---|---|
 | `early-init.el` | `init.el` では手遅れになる設定だけ（GC 抑制、`package.el` 無効化、`user-lisp-auto-scrape` を nil、ちらつき回避） |
 | `init.el` | ブートストラップと読み込み順の宣言のみ |
-| `user-lisp/` | **設定本体。26 モジュール**（[下表](#user-lisp-のモジュール)） |
+| `user-lisp/` | **設定本体。27 モジュール**（[下表](#user-lisp-のモジュール)） |
 | `custom.el` | `customize` が自動生成する。手で書かない（[設計方針](#設計方針)） |
 | `site-lisp/` | パッケージマネージャで入手できないローカルベンダの Emacs Lisp |
 | `etc/` | 文字を目で選ぶための一覧（emoji / Nerd Font）と、その生成スクリプト |
@@ -132,6 +132,7 @@ git clone git@github.com:ponkore/emacs.d.git ~/.emacs.d
 | `my-claude` | Claude Code を stream-json で使う（`C-c a`） |
 | `my-htnblog` | はてなブログ AtomPub API へ投稿する（`M-x htnblog`） |
 | `my-pty` | ConPTY 経由で対話 TUI を動かす。Windows のみ |
+| `my-genpreview` | GenPreview でファイルをプレビューする（`M-x genpreview-open`、dired の `v`）。Windows のみ |
 | `my-platform` | Windows / macOS 固有設定 |
 
 ## 設計方針
@@ -307,6 +308,7 @@ Excel ブックは OS の関連付けに渡す、`C-c x` で exceldiff、`C-c m`
 |---|---|
 | `.` | hydra |
 | `RET` / `f` / `e` | 開く（Excel なら OS の関連付けへ） |
+| `v` | プレビュー（PDF / 画像 / SVG / markdown / CSV は GenPreview。`C-u` で `view-mode`） |
 | `TAB` / `S-TAB` | サブツリーの開閉 / 巡回 |
 | `V` | `dired-vc-status` |
 | `G` | ripgrep |

@@ -515,7 +515,9 @@ _E_xplorer / Finder で開く
     ("t" dired-toggle-marks)
     ("U" dired-unmark-all-marks)
     ("u" dired-unmark)
-    ("v" dired-view-file :exit t)
+    ;; v は dired-mode-map と揃える (my-genpreview.el。GenPreview が
+    ;; 無い環境ではそのまま dired-view-file に落ちる)。
+    ("v" my:genpreview-dired-view-file :exit t)
     ("w" dired-copy-filename-as-kill)
     ("W" dired-get-fullpath-filename)
     ("y" my:dired-copy-git-relative-filename-as-kill)
