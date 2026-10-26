@@ -30,6 +30,7 @@ CLAUDE.md の各節から、詳細はここへリンクしてある。逆にこ�
 | [editing/completion.md](editing/completion.md) | vertico / consult / corfu。`C-x C-r` と capf の切り分け |
 | [editing/editorconfig.md](editing/editorconfig.md) | 効き先は `.editorconfig` の置き場所で決まる |
 | [editing/line-movement.md](editing/line-movement.md) | 視覚行の `C-n` / `C-p` / `C-e` |
+| [help/keyhelp.md](help/keyhelp.md) | `describe-bindings` を 1 枚の表に置き換える。Context 列・シャドウ判定・絞り込み |
 | [packages/straight-maintenance.md](packages/straight-maintenance.md) | 棚卸し・掃除・更新の手順 |
 | [misc/calendar-holidays.md](misc/calendar-holidays.md) | 日本の祝日（本体には入っていない） |
 | [misc/pdf-preview.md](misc/pdf-preview.md) | `doc-view-mode` + mupdf |

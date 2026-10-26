@@ -111,6 +111,7 @@ git clone git@github.com:ponkore/emacs.d.git ~/.emacs.d
 | `my-appearance` | フォント、フレーム、modus-vivendi テーマ、doom-modeline、nerd-icons |
 | `my-completion` | vertico、consult、marginalia、orderless、corfu、cape、embark |
 | `my-keybind` | グローバルキーバインド |
+| `my-keyhelp` | 有効なキーバインドを 1 枚の表で見る（`<f1> b`。`describe-bindings` の置き換え） |
 | `my-editor` | hydra、symbol-overlay、smartparens、whitespace、yasnippet、recentf、editorconfig、tab-bar ほか |
 | `my-dired` | dired、hydra-dired、dired-sidebar（`F8`）、dired-x の上書き対策、exceldiff / MarkText の起動 |
 | `my-dired-watch` | ファイルのサイズ・日時・属性の変化で dired の行を貼り替える。Windows のみ |
@@ -228,6 +229,18 @@ Excel ブックは OS の関連付けに渡す、`C-c x` で exceldiff、`C-c m`
 なので待っている間も Emacs は止まらない（モードラインに `投稿中` が出る）。
 → [docs/htnblog/my-htnblog.md](docs/htnblog/my-htnblog.md)
 
+### キーバインドの一覧表（`<f1> b`）
+
+`describe-bindings` を、モード別のテキストではなく **1 枚の表**に置き換える。
+Key / Command / Context / State の 4 列で、列見出しは `header-line` なので
+スクロールしても残る。**どのキーマップ由来かが列になり**、他のマップに隠されて
+実際には効かない束縛が分かる（dired バッファで 1081 件中 63 件）。
+`/` または `C-s` でインクリメンタルに絞り込む。**空白を AND 区切りにしない**ので、
+4 列すべてを対象にしたまま `C-c e` と打てば 1 件に絞れる
+（`*Help*` + `consult-line` では 135 件が一致していた）。
+`TAB` で特定の列だけに絞ることもできる。
+→ [docs/help/keyhelp.md](docs/help/keyhelp.md)
+
 ### その他
 
 - **カレンダーに日本の祝日**（`japanese-holidays`。Emacs 本体には入っていない）
@@ -263,6 +276,7 @@ Excel ブックは OS の関連付けに渡す、`C-c x` で exceldiff、`C-c m`
 | `C-c t` | ディレクトリを選んで**新しいタブ**で開く（タブ名に色付きの印） |
 | `C-TAB` / `C-S-TAB` | タブ移動（`tab-next` / `tab-previous`。組み込み） |
 | `ESC ?` | `apropos` |
+| `<f1> b` | キーバインドの一覧表（`C-u` でモード固有のみ。元の `describe-bindings` は `<f1> C-b`） |
 | `<f2>` | フォントサイズの hydra |
 | `<f8>` | dired サイドバーの開閉 |
 | `<f12>` | 実装 ⇄ テストの切り替え（projectile） |
@@ -301,6 +315,18 @@ Excel ブックは OS の関連付けに渡す、`C-c x` で exceldiff、`C-c m`
 
 自分の発言は各行の行頭にオレンジの帯が付く。長い行は折り返した先にも付くので、
 遡って探すときの目印になる。
+
+### キーバインドの一覧表（`<f1> b`）
+
+| キー | |
+|---|---|
+| `/` / `C-s` | インクリメンタルに絞り込む（既定は 4 列の全体。`^` 前方一致 / `$` 後方一致） |
+| `TAB` | 対象列を 全体 → Key → Command → Context → State と切り替える |
+| `DEL` | 絞り込みを解除 |
+| `RET` | その行のコマンドの説明 |
+| `S` | 列でソート（見出しのクリックでも） |
+| `t` / `L` | 隠れて効かない束縛の表示 / グローバルマップの除外 |
+| `w` | その行のキーを kill-ring へ |
 
 ### dired
 

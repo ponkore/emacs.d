@@ -721,6 +721,44 @@ remap して避けているが、`C-e` を別のコマンドに張り替える�
 いて、**タブを閉じる手段がメニューバーしか無かった**（`C-x T` へ退避済み）。
 `(where-is-internal 'tab-close)` が `[menu-bar ...]` しか返さないのが目印。
 
+## `my-keyhelp` — キーバインドの一覧表（`<f1> b`）
+
+→ [docs/help/keyhelp.md](docs/help/keyhelp.md)
+
+`describe-bindings` の置き換え。C 実装の出力はパースせず `map-keymap` を自前で回す
+（**テキストからは Context 列が作れない**）。
+
+- **【重要】`map-keymap` は親キーマップの束縛も返す。** 分離しないと、同じ Context に
+  矛盾した行が並ぶ（`SPC` が `dired-next-line` と `scroll-up-command` の 2 行。後者は
+  `special-mode-map` のもので、dired バッファでは **21 件**がこれ）。親を別に走査して
+  差し引いてある。**`set-keymap-parent` で一時的に外す形にはしない**（ユーザーが
+  使っているキーマップを書き換えることになる）
+- **【重要】`tabulated-list` は列幅を超える値を切り詰めない。** その行だけ次の列が右へ
+  押される（`[remap exchange-point-and-mark]` は 31 文字で Key 列 24 文字を 7 文字
+  はみ出していた）。**桁を揃えるのがこのモードの目的**なので、エントリを作る段階で
+  `truncate-string-to-width` に通す。検算は「全行で Command 列が始まる桁が同じか」
+- **列幅の測定は `pop-to-buffer` の後に行う。** まだウィンドウに出ていないバッファで
+  `window-body-width` を呼ぶと**呼び出し元のウィンドウの幅**が返る
+- **【重要】絞り込みで空白を AND 区切りにしない。** これが「`*Help*` で `C-s` すると
+  不要な行が大量に出る」の真因だった（`C-s` = `my:consult-line` で、orderless が
+  `C-c e` を「`C-c` を含む」かつ「`e` を含む」に分解し、`C-c & C-n` =
+  `yas-n`**`e`**`w-snippet` まで一致する）。素の部分一致にすれば 1079 行が **1 行**になる。
+  **そのぶん対象列を絞らなくても鋭い**ので、既定は 4 列の全体でよい（`C-c e` は
+  Key 列でも全体でも 1 件）
+- **【重要】絞り込みの状態を列見出しに埋めない。** `tabulated-list-sort-key` は
+  **列名の文字列で `assoc` して列を引く**ので、見出しを `Key [C-c e]` に書き換えると
+  **その列でソート中だった場合にソートが外れる**。状態は `mode-name`（対象列）と
+  `mode-line-process`（クエリと件数）に出す
+- **`mode-line-process` に入れる文字列は `%` をエスケープする。** `format-mode-line` が
+  escape として解釈し、**`%` はこの設定のキーバインドの 1 つ**（`my:match-paren`）
+  なので検索語にそのまま現れる
+- **`after-change-functions` の中でエラーを出さない**（打った 1 文字が入ったか
+  分からなくなる）。また**`point` を動かすだけでは表示が追従しない**
+  （選択中はミニバッファなので、表のウィンドウは window-point を別に持つ）
+- 束縛が nil / `undefined` の行は出さない（「親の定義を打ち消す」ためのもので、
+  キーバインドではない。出すと `TAB / nil / yas-minor-mode / shadowed` という
+  誤解を招く行になる）
+
 ## `my-dired`
 
 → [docs/dired/dired-extensions.md](docs/dired/dired-extensions.md)

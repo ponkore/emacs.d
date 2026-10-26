@@ -160,6 +160,7 @@
 (require 'my-appearance)   ; フォント・フレーム・テーマ・モードライン
 (require 'my-completion)   ; 補完 (vertico / consult / company など)
 (require 'my-keybind)   ; グローバルキーバインド
+(require 'my-keyhelp)   ; 有効なキーバインドを一覧表で見る (<f1> b)
 (require 'my-editor)   ; エディタ全般の設定
 (require 'my-dired)   ; dired と neotree
 (require 'my-dired-watch)   ; ファイルの中身の変化で dired を追従させる
