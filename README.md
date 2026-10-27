@@ -121,7 +121,7 @@ git clone git@github.com:ponkore/emacs.d.git ~/.emacs.d
 | `my-lang-python` | Python（python-ts-mode、pyvenv、py-isort、blacken） |
 | `my-lang-web` | PHP、JavaScript / TypeScript、web-mode、scss |
 | `my-lang-native` | Rust、C++、C#、Go |
-| `my-lang-misc` | SQL、bat、Swift、Lua、VisualBasic |
+| `my-lang-misc` | SQL（SQLcl で Oracle に繋ぐ `M-x my:sql-sqlcl`）、bat、Swift、Lua、VisualBasic、PowerShell |
 | `my-lsp` | eglot（組み込み、`C-c l`）、flymake（`C-c !`） |
 | `my-fileformat` | yaml、diff、log4j、Dockerfile、vimrc、XML（`.csproj`） |
 | `my-project` | projectile（`C-c p`） |
@@ -240,6 +240,18 @@ Key / Command / Context / State の 4 列で、列見出しは `header-line` な
 （`*Help*` + `consult-line` では 135 件が一致していた）。
 `TAB` で特定の列だけに絞ることもできる。
 → [docs/help/keyhelp.md](docs/help/keyhelp.md)
+
+### Oracle に SQLcl で繋ぐ（`M-x my:sql-sqlcl`）
+
+`sql.el` の `oracle` 製品は SQL*Plus 前提だが、**SQLcl を `sqlcl` という別製品
+として足してある**。接続先は SQLcl の connmgr に保存した名前を選ぶだけ
+（パスワードは SQLcl 側にあるので訊かれない）。`C-c C-c` で送信、
+`C-c C-l a` / `C-c C-l t` で一覧と定義（`C-u` で `INFO+`）、オブジェクト名の補完。
+
+**裸の `/` は直前の文を再実行する**、**接続が済む前に送ると二度と応えない**、
+**`INFO+` の直後はプロンプトの手前に escape が入って `sql-redirect` が固まる**
+など、SQL*Plus との違いはすべて踏んで塞いである。
+→ [docs/languages/sqlcl.md](docs/languages/sqlcl.md)
 
 ### その他
 
@@ -395,6 +407,7 @@ jsdoc / json / python / rust / toml / tsx / typescript / yaml の 17 個。
 | ripgrep | `G` / `C-c p s` |
 | Git 付属の `bash.exe` | Windows の `shell-file-name`（あるときだけ設定） |
 | golangci-lint | `C-c C-l` |
+| SQLcl | `M-x my:sql-sqlcl`（`scoop install sqlcl`。接続は SQLcl の `connmgr` に登録しておく。Windows では `~/bin/sql.cmd` のラッパがあればそれを使う） |
 
 ---
 

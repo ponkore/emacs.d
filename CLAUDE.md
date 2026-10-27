@@ -505,6 +505,8 @@ tr-ime / Windows 側が IME のトグルとして処理するので、Emacs 側�
 | **`elisp-flymake-byte-compile-load-path` に `user-lisp/` を足さない** | 2026-09-09 | 偽診断が別の偽診断に入れ替わるだけで、所要 0.51 → 1.10 秒、`recentf` / `history` を毎回書き戻す副作用が増える → [docs](docs/lsp/eglot-and-flymake.md) |
 | **`libxml-parse-xml-region` に切り替えない**（my-htnblog） | | 名前空間の prefix を落とすので `app:control` が取れなくなる。速度差は 0.001 秒 |
 | **`my:pty-console-font` の既定は nil（フォントを切り替えない）** | | 切り替えると `char-width-table` と同じく **Emacs 全体**のフォントが変わり、編集中のバッファまで巻き込む |
+| **SQLcl は `oracle` を書き換えず `sqlcl` という別製品として足す** | 2026-10-27 | `oracle` は SQL*Plus 前提で、直すと SQL*Plus が使えなくなる。合わないのは `SHOW` を通る 3 つだけなので、`sql-add-product` で足して font-lock と文の開始語は流用するのが安い → [docs](docs/languages/sqlcl.md) |
+| **SQLcl 用の専用パッケージ（`uhellstr/sqlcl-shell`）は入れない** | 2026-10-07 | **PTY 前提**（JLine が自前でエコーする）の Linux 向け。Windows の Emacs はパイプなので条件が逆で、素の comint でそのまま動く |
 
 ---
 
@@ -1231,6 +1233,45 @@ upstream は 2020-12 で止まっているが**祝日法が 2021 年以降変わ
 - **`eglot-code-actions` を対話的に呼んではいけない。** INTERACTIVE 非 nil だと
   該当 0 件のとき `eglot--error` が飛び、`before-save-hook` の中なので
   **import を整理する必要が無いファイルは保存できなくなる**
+
+## `my-lang-misc` — SQLcl（Oracle）
+
+→ [docs/languages/sqlcl.md](docs/languages/sqlcl.md)
+
+`sql.el` に `sqlcl` という製品を足してある（§2）。SQL*Plus との違いで静かに
+壊れるものが 4 つある。
+
+- **【重要】最初のプロンプトより前に stdin へ書くと、SQLcl は以後プロンプトも
+  応答も一切返さない。** 起動に 8 秒かかるので 1 行打つだけで当たる。エラーは
+  出ず「繋がっているのに無言」になるだけ。起動時の `SET` は
+  `comint-output-filter-functions` でプロンプトを見てから送り、ユーザーの入力は
+  それまで保留する（`sql-input-sender` への advice）
+- **【重要】裸の `/` は直前の文をもう一度実行する**（裸の `;` はバッファの
+  listing だけ）。`sql-send-terminator` を `t` にすると `/` が送られるので、
+  **`show linesize` を送っただけで直前の DELETE が走りうる**。
+  `my:sql-sqlcl--magic-terminator` が SQLcl のときは `;` しか送らないよう固定
+  している。**この advice を外してはいけない**
+- **【重要】`INFO+` の出力は最後の行が `\e[mSQL> ` で終わる。** 素の `"^SQL> "`
+  では一致せず、`sql-redirect` の完了待ちにはタイムアウトが無いので **Emacs が
+  固まる**。`:prompt-regexp` で escape を許している。会話バッファ側は
+  ansi-color が escape を消すので気づけない
+- **【重要】`sql-interactive-remove-continuation-prompt` を外す。** SQLcl は
+  継続プロンプトを出さないので、送った行数ぶんの本物の `SQL> ` を食われる
+  （プロンプトの数が合わなくなり、以後の `sql-redirect` が 1 つ前のプロンプトで
+  完了したことにしてしまう）
+
+ほかに踏みやすいもの。
+
+- **バッファローカルな設定を `:sqli-comint-func` の中でやらない**
+  （`sql-interactive-mode` が `kill-all-local-variables` を通るので消える）。
+  入れるのは `sql-interactive-mode-hook`
+- **`SHOW` は複数オプションを解釈しない**ので、一覧・補完は現在値を読まず
+  `my:sql-sqlcl-startup-commands` を流し直して戻す。`SET` も SQL*Plus の
+  部分集合（`RECSEP` は無い）で、知らないオプションは `SP2-0158` を返すだけ
+- **stdin だけ UTF-8 にならない。** ラッパの `-Dfile.encoding=UTF-8` は出力側
+  だけなので、`JDK_JAVA_OPTIONS=-Dstdin.encoding=UTF-8` を足して揃えている
+- `sql-product` の既定は `postgres` のまま。`.sql` バッファで `C-c C-l a` などを
+  使うには、そのバッファで `M-x sql-set-product` → `sqlcl`（送信は製品が違っても通る）
 
 ---
 

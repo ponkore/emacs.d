@@ -22,6 +22,7 @@ CLAUDE.md の各節から、詳細はここへリンクしてある。逆にこ�
 | [text/markdown.md](text/markdown.md) | `markdown-preview` と `markdown-open` は別経路 |
 | [htnblog/my-htnblog.md](htnblog/my-htnblog.md) | はてなブログへ AtomPub で投稿する |
 | [languages/go.md](languages/go.md) | Go。gopls 以外は同梱で足りる。外部 `go-mode` を入れない理由 |
+| [languages/sqlcl.md](languages/sqlcl.md) | SQL*Plus の代わりに SQLcl を sql.el から使う。接続前の送信・裸の `/`・`INFO+` のプロンプト |
 | [languages/tree-sitter.md](languages/tree-sitter.md) | 文法があるときだけ `*-ts-mode` に差し替える仕掛け |
 | [lsp/eglot-and-flymake.md](lsp/eglot-and-flymake.md) | eglot と flymake の罠（didOpen・ドライブレター・`trusted-content`） |
 | [japanese/encoding.md](japanese/encoding.md) | Windows のプロセス起動と文字コード（cp932 / UTF-8） |
