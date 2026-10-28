@@ -45,6 +45,8 @@ type Statement struct {
 	// 閉じていない例: 終端子が無い / 文字列リテラルの途中 / `END;` の後に
 	// `/` が来ていない PL/SQL ブロック。
 	Complete bool `json:"complete"`
+	// Binds は文の中のバインド変数（`:name`）。Emacs はこれを見て値を訊く。
+	Binds []string `json:"binds,omitempty"`
 }
 
 // clientCommands は「SQL ではない」と見分ける先頭語。
@@ -418,7 +420,7 @@ done:
 		return Statement{}, false
 	}
 	return Statement{
-		Text: text, Raw: raw, Kind: kind,
+		Text: text, Raw: raw, Kind: kind, Binds: Binds(text),
 		Begin: begin, End: s.i, Line: beginLine, Complete: complete,
 	}, true
 }

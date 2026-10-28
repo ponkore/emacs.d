@@ -129,12 +129,13 @@ type Session struct {
 
 // openRows は maxrows で止めたカーソル。rows/more で続きを取る。
 type openRows struct {
-	query  int
-	rows   *sql.Rows
-	cols   []Column
-	sent   int
-	seq    int
-	cancel context.CancelFunc // このカーソルを捨てるときに呼ぶ
+	query    int
+	rows     *sql.Rows
+	cols     []Column
+	sent     int
+	seq      int
+	lobLimit int
+	cancel   context.CancelFunc // このカーソルを捨てるときに呼ぶ
 }
 
 type Manager struct {
@@ -459,9 +460,24 @@ func (s *Session) closeRows() {
 // Emit は行の束を送る関数。daemon が rows/chunk 通知に変える。
 type Emit func(query, seq int, rows [][]any, done bool)
 
+// Bind は名前付きのバインド変数。
+// 【重要】`&var` の置換と違い、値が SQL の文字列として解釈されない。
+type Bind struct {
+	Name  string `json:"name"`
+	Value any    `json:"value"`
+}
+
+func namedArgs(binds []Bind) []any {
+	out := make([]any, 0, len(binds))
+	for _, b := range binds {
+		out = append(out, sql.Named(b.Name, b.Value))
+	}
+	return out
+}
+
 // Exec は 1 文を実行する。行は emit で先に流し、最後に Result を返す。
-func (s *Session) Exec(ctx context.Context, text string, binds []any,
-	maxRows, chunk int, emit Emit) (*Result, error) {
+func (s *Session) Exec(ctx context.Context, text string, binds []Bind,
+	maxRows, chunk, lobLimit int, emit Emit) (*Result, error) {
 
 	if !s.stmtMu.TryLock() {
 		return nil, fmt.Errorf("busy")
@@ -494,6 +510,9 @@ func (s *Session) Exec(ctx context.Context, text string, binds []any,
 	if chunk <= 0 {
 		chunk = 200
 	}
+	if lobLimit <= 0 {
+		lobLimit = 4096
+	}
 
 	// COMMIT / ROLLBACK は daemon の tx 状態と食い違わないよう専用経路へ。
 	if cmd, ok := sqlsplit.IsTxControl(text); ok && (cmd == "COMMIT" || cmd == "ROLLBACK") {
@@ -518,7 +537,7 @@ func (s *Session) Exec(ctx context.Context, text string, binds []any,
 	start := time.Now()
 
 	if sqlsplit.IsQuery(text) {
-		rows, err := s.execer().QueryContext(cctx, text, binds...)
+		rows, err := s.execer().QueryContext(cctx, text, namedArgs(binds)...)
 		if err != nil {
 			s.takeOutput(context.Background()) // エラーの前に出た分も拾う
 			return nil, err
@@ -528,7 +547,8 @@ func (s *Session) Exec(ctx context.Context, text string, binds []any,
 			rows.Close()
 			return nil, err
 		}
-		open := &openRows{query: query, rows: rows, cols: cols, cancel: cancel}
+		open := &openRows{query: query, rows: rows, cols: cols, cancel: cancel,
+			lobLimit: lobLimit}
 		n, more, err := s.drain(open, maxRows, chunk, emit)
 		elapsed := msOf(time.Since(start))
 		if err != nil {
@@ -550,7 +570,7 @@ func (s *Session) Exec(ctx context.Context, text string, binds []any,
 			InTx: s.Info().InTx, Output: s.takeOutput(context.Background())}, nil
 	}
 
-	res, err := s.execer().ExecContext(cctx, text, binds...)
+	res, err := s.execer().ExecContext(cctx, text, namedArgs(binds)...)
 	elapsed := msOf(time.Since(start))
 	if err != nil {
 		s.takeOutput(context.Background())
@@ -651,7 +671,7 @@ func (s *Session) drain(open *openRows, maxRows, chunk int, emit Emit) (int, boo
 			if i < len(cts) {
 				ct = cts[i]
 			}
-			vals[i] = convert(vals[i], ct)
+			vals[i] = convert(vals[i], ct, open.lobLimit)
 		}
 		buf = append(buf, vals)
 		n++
@@ -709,18 +729,36 @@ func hasZone(t string) bool {
 
 const wallClock = "2006-01-02T15:04:05.999999999"
 
-func convert(v any, ct *sql.ColumnType) any {
+// convert は値を JSON に載る形にする。
+// 【重要】LOB は既定（go-ora の `LOB FETCH=INLINE`）で中身が丸ごと来るので、
+// ここで上限を掛けないと巨大な CLOB が stdio を埋める（実測 H）。
+func convert(v any, ct *sql.ColumnType, lobLimit int) any {
 	switch x := v.(type) {
 	case nil:
 		return nil
 	case []byte:
+		if lobLimit > 0 && len(x) > lobLimit {
+			return map[string]any{
+				"$b64":   base64.StdEncoding.EncodeToString(x[:lobLimit]),
+				"len":    len(x),
+				"$trunc": true,
+			}
+		}
 		return map[string]any{"$b64": base64.StdEncoding.EncodeToString(x), "len": len(x)}
 	case time.Time:
 		if ct != nil && hasZone(ct.DatabaseTypeName()) {
 			return x.Format(time.RFC3339Nano)
 		}
 		return x.Format(wallClock)
-	case string, bool, float64, float32, int64, int32, int:
+	case string:
+		if lobLimit > 0 && len([]rune(x)) > lobLimit {
+			r := []rune(x)
+			return map[string]any{
+				"text": string(r[:lobLimit]), "len": len(r), "$trunc": true,
+			}
+		}
+		return x
+	case bool, float64, float32, int64, int32, int:
 		return x
 	default:
 		return fmt.Sprint(x)

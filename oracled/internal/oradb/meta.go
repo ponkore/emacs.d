@@ -316,3 +316,37 @@ func atoiSafe(s string) int {
 	}
 	return n
 }
+
+// Explain は実行計画を取る。
+//
+// `EXPLAIN PLAN` は**文を実行しない**ので、DML でも安全に計画だけ見られる。
+// 【重要】バインド変数を含む文でも値は要らない（計画は値に依らず取れる）。
+// 出力の整形は DBMS_XPLAN に任せる（自前で桁を揃えるより正確）。
+func (s *Session) Explain(ctx context.Context, text string) ([]string, error) {
+	text = strings.TrimRight(strings.TrimSpace(text), ";")
+	if text == "" {
+		return nil, fmt.Errorf("文が空")
+	}
+	const id = "oracled"
+	if _, err := s.conn.ExecContext(ctx,
+		"explain plan set statement_id = '"+id+"' for "+text); err != nil {
+		return nil, err
+	}
+	rows, err := s.conn.QueryContext(ctx,
+		`select plan_table_output
+       from table(dbms_xplan.display('PLAN_TABLE', :sid, 'TYPICAL'))`,
+		sql.Named("sid", id))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var line sql.NullString
+		if err := rows.Scan(&line); err != nil {
+			return nil, err
+		}
+		out = append(out, line.String)
+	}
+	return out, rows.Err()
+}

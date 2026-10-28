@@ -81,3 +81,83 @@ func IsTxControl(src string) (string, bool) {
 	}
 	return "", false
 }
+
+// Binds は文の中のバインド変数（`:name`）を現れた順に返す。
+//
+// 【重要】ここも daemon が持つ。Emacs 側で正規表現を書くと、文字列の
+// 中の `:` やコメントの中の `:name`、`::` を取り違える（lexer を 2 つに
+// しない原則。設計 §7）。
+//
+// PL/SQL のラベル（`<<label>>`）や代入（`:=`）は拾わない。
+func Binds(src string) []string {
+	s := &scanner{r: []rune(src), i: 0, line: 1}
+	var out []string
+	seen := map[string]bool{}
+	for !s.eof() {
+		c := s.at(0)
+		switch {
+		case c == '-' && s.at(1) == '-':
+			s.skipLineComment()
+			continue
+		case c == '/' && s.at(1) == '*':
+			s.skipBlockComment()
+			continue
+		case c == '\'':
+			if !s.skipString() {
+				return out
+			}
+			continue
+		case c == '"':
+			if !s.skipIdent() {
+				return out
+			}
+			continue
+		case (c == 'q' || c == 'Q' || c == 'n' || c == 'N') && s.isQuoteStart():
+			if !s.skipQuoted() {
+				return out
+			}
+			continue
+		case c == ':':
+			// `::` は型変換などで使われることがあるので飛ばす。
+			// `:=` は代入。どちらもバインドではない
+			if s.at(1) == ':' || s.at(1) == '=' {
+				s.advance()
+				s.advance()
+				continue
+			}
+			s.advance()
+			start := s.i
+			for !s.eof() {
+				d := s.at(0)
+				if isIdentRune(d) {
+					s.advance()
+					continue
+				}
+				break
+			}
+			name := string(s.r[start:s.i])
+			// 位置指定のバインド（`:1`）は名前として扱わない
+			if name != "" && !allDigits(name) && !seen[name] {
+				seen[name] = true
+				out = append(out, name)
+			}
+			continue
+		}
+		s.advance()
+	}
+	return out
+}
+
+func isIdentRune(c rune) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+		(c >= '0' && c <= '9') || c == '_' || c == '#' || c == '$'
+}
+
+func allDigits(s string) bool {
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return len(s) > 0
+}

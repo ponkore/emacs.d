@@ -726,3 +726,150 @@ func TestLiveObjects(t *testing.T) {
 		t.Errorf("DDL のあとも token が同じ: %v", got)
 	}
 }
+
+// バインド変数（本物のバインド。`&var` の文字列置換ではない）。
+func TestLiveBinds(t *testing.T) {
+	s := &server{mgr: oradb.NewManager(), start: time.Now()}
+	c, buf := capture()
+	sid := openSession(t, s, c)
+	defer s.Handle(c, raw(99), "session/close", raw(map[string]any{"session": sid}))
+
+	// sql/binds が文から名前を拾う
+	res, rerr := s.Handle(c, raw(2), "sql/binds",
+		raw(map[string]any{"text": "select * from t where a = :a and b = :b"}))
+	if rerr != nil {
+		t.Fatalf("sql/binds: %v", rerr)
+	}
+	if got := res.(map[string]any)["binds"].([]string); len(got) != 2 ||
+		got[0] != "a" || got[1] != "b" {
+		t.Errorf("binds = %v", got)
+	}
+
+	// 実際に値を渡して実行する（日本語・数値・NULL）
+	_, rerr = s.Handle(c, raw(3), "sql/exec", raw(map[string]any{
+		"session": sid,
+		"text": `select :jp as jp, :n as n, nvl(:nul, 'それは NULL') as nul,
+		                length(:jp) as len from dual`,
+		"binds": []map[string]any{
+			{"name": "jp", "value": "あいう漢字"},
+			{"name": "n", "value": 42},
+			{"name": "nul", "value": nil},
+		},
+	}))
+	if rerr != nil {
+		t.Fatalf("sql/exec with binds: %v", rerr)
+	}
+	var rows [][]any
+	for _, m := range notifications(t, buf) {
+		if m.Method != "rows/chunk" {
+			continue
+		}
+		var p struct {
+			Rows [][]any `json:"rows"`
+		}
+		json.Unmarshal(m.Params, &p)
+		rows = append(rows, p.Rows...)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("行が %d", len(rows))
+	}
+	if rows[0][0] != "あいう漢字" {
+		t.Errorf("日本語のバインドが %#v", rows[0][0])
+	}
+	if rows[0][1] != "42" {
+		t.Errorf("数値のバインドが %#v（NUMBER は文字列で返る）", rows[0][1])
+	}
+	if rows[0][2] != "それは NULL" {
+		t.Errorf("NULL のバインドが %#v", rows[0][2])
+	}
+	if rows[0][3] != "5" {
+		t.Errorf("length(:jp) が %#v（文字数で 5 のはず）", rows[0][3])
+	}
+
+	// 【重要】文字列として連結されていないこと（インジェクションにならない）
+	_, rerr = s.Handle(c, raw(4), "sql/exec", raw(map[string]any{
+		"session": sid,
+		"text":    "select :v as v from dual",
+		"binds":   []map[string]any{{"name": "v", "value": "' or 1=1 --"}},
+	}))
+	if rerr != nil {
+		t.Errorf("引用符を含む値で落ちた: %v", rerr)
+	}
+}
+
+// LOB は上限を掛けて返す（巨大な CLOB が stdio を埋めないように）。
+func TestLiveLobLimit(t *testing.T) {
+	s := &server{mgr: oradb.NewManager(), start: time.Now()}
+	c, buf := capture()
+	sid := openSession(t, s, c)
+	defer s.Handle(c, raw(99), "session/close", raw(map[string]any{"session": sid}))
+
+	_, rerr := s.Handle(c, raw(2), "sql/exec", raw(map[string]any{
+		"session": sid,
+		// 【重要】VARCHAR2 には 4000 バイトの上限があるので、日本語で
+		// 3000 文字は作れない（rpad が途中で止まる）。CLOB で作る
+		"text":      "select to_clob(rpad('x', 3000, 'x')) || 'あいう' as big from dual",
+		"lob_limit": 100,
+	}))
+	if rerr != nil {
+		t.Fatalf("sql/exec: %v", rerr)
+	}
+	var rows [][]any
+	for _, m := range notifications(t, buf) {
+		if m.Method != "rows/chunk" {
+			continue
+		}
+		var p struct {
+			Rows [][]any `json:"rows"`
+		}
+		json.Unmarshal(m.Params, &p)
+		rows = append(rows, p.Rows...)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("行が %d", len(rows))
+	}
+	cell, ok := rows[0][0].(map[string]any)
+	if !ok {
+		t.Fatalf("切り詰められていない: %T", rows[0][0])
+	}
+	if cell["$trunc"] != true {
+		t.Errorf("$trunc が立っていない: %#v", cell)
+	}
+	if n := len([]rune(cell["text"].(string))); n != 100 {
+		t.Errorf("切り詰めた長さが %d（100 のはず）", n)
+	}
+	if cell["len"].(float64) != 3003 {
+		t.Errorf("元の長さが %v（3003 のはず）", cell["len"])
+	}
+}
+
+// EXPLAIN PLAN（文は実行しない）。
+func TestLiveExplain(t *testing.T) {
+	s := &server{mgr: oradb.NewManager(), start: time.Now()}
+	c, _ := capture()
+	sid := openSession(t, s, c)
+	defer s.Handle(c, raw(99), "session/close", raw(map[string]any{"session": sid}))
+
+	start := time.Now()
+	res, rerr := s.Handle(c, raw(2), "plan/explain", raw(map[string]any{
+		"session": sid,
+		"text":    "select * from all_objects where object_name = :name",
+	}))
+	if rerr != nil {
+		t.Fatalf("plan/explain: %v", rerr)
+	}
+	lines := res.(map[string]any)["lines"].([]string)
+	t.Logf("explain: %d 行 %.0f ms", len(lines), float64(time.Since(start).Milliseconds()))
+	if len(lines) < 5 {
+		t.Fatalf("行が少なすぎる: %v", lines)
+	}
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "Id") || !strings.Contains(joined, "Operation") {
+		t.Errorf("計画の見出しが無い:\n%s", joined)
+	}
+	// バインド変数を含む文でも、値を渡さずに計画が取れる
+	if _, rerr := s.Handle(c, raw(3), "plan/explain", raw(map[string]any{
+		"session": sid, "text": "update ORACLED_NOPE set x = :v where id = :id"})); rerr == nil {
+		t.Error("無い表の計画が取れてしまった")
+	}
+}

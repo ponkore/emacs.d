@@ -175,6 +175,37 @@ func (s *server) Handle(c *rpc.Conn, id json.RawMessage, method string,
 		}
 		return sess.Info(), nil
 
+	case "sql/binds":
+		// 文の中のバインド変数（`:name`）を返す。Emacs はこれを見て値を訊く。
+		var p struct {
+			Text string `json:"text"`
+		}
+		if err := unmarshal(params, &p); err != nil {
+			return nil, err
+		}
+		binds := sqlsplit.Binds(p.Text)
+		if binds == nil {
+			binds = []string{}
+		}
+		return map[string]any{"binds": binds}, nil
+
+	case "plan/explain":
+		sess, rerr := s.session(params)
+		if rerr != nil {
+			return nil, rerr
+		}
+		var p struct {
+			Text string `json:"text"`
+		}
+		if err := unmarshal(params, &p); err != nil {
+			return nil, err
+		}
+		lines, err := sess.Explain(context.Background(), p.Text)
+		if err != nil {
+			return nil, dbError(err)
+		}
+		return map[string]any{"lines": lines}, nil
+
 	case "meta/describe":
 		sess, rerr := s.session(params)
 		if rerr != nil {
@@ -261,11 +292,12 @@ func (s *server) Handle(c *rpc.Conn, id json.RawMessage, method string,
 // 行は rows/chunk 通知で、結末は stmt/result か stmt/error で流す。
 func (s *server) exec(c *rpc.Conn, params json.RawMessage) (any, *rpc.Error) {
 	var p struct {
-		Session string `json:"session"`
-		Text    string `json:"text"`
-		Binds   []any  `json:"binds"`
-		MaxRows int    `json:"maxrows"`
-		Chunk   int    `json:"chunk"`
+		Session  string       `json:"session"`
+		Text     string       `json:"text"`
+		Binds    []oradb.Bind `json:"binds"`
+		MaxRows  int          `json:"maxrows"`
+		Chunk    int          `json:"chunk"`
+		LobLimit int          `json:"lob_limit"`
 	}
 	if err := unmarshal(params, &p); err != nil {
 		return nil, err
@@ -288,7 +320,8 @@ func (s *server) exec(c *rpc.Conn, params json.RawMessage) (any, *rpc.Error) {
 		})
 	}
 
-	res, err := sess.Exec(context.Background(), p.Text, p.Binds, p.MaxRows, p.Chunk, emit)
+	res, err := sess.Exec(context.Background(), p.Text, p.Binds,
+		p.MaxRows, p.Chunk, p.LobLimit, emit)
 	if err != nil {
 		if err.Error() == "busy" {
 			return nil, rpc.Errorf(rpc.CodeBusy, "その session は別の文を走らせている")

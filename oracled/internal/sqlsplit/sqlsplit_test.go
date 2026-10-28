@@ -317,3 +317,35 @@ commit;
 		t.Errorf("@@ を拾えていない: %#v", got[3])
 	}
 }
+
+func TestBinds(t *testing.T) {
+	cases := []struct {
+		src  string
+		want []string
+	}{
+		{"select * from t where id = :id", []string{"id"}},
+		{"select * from t where a = :a and b = :b and a2 = :a", []string{"a", "b"}},
+		{"select ':notabind' from dual", nil},
+		{"select 1 from dual -- :nope", nil},
+		{"select 1 from dual /* :nope */", nil},
+		{"select q'[:nope]' from dual", nil},
+		{`select "a:b" from t where x = :x`, []string{"x"}},
+		{"select * from t where id = :1", nil}, // 位置指定は名前ではない
+		{"begin x := 1; end;", nil},            // 代入
+		{"select cast(x as number) from t where y = :y", []string{"y"}},
+		{"update t set a = :val where id = :id", []string{"val", "id"}},
+	}
+	for _, c := range cases {
+		got := Binds(c.src)
+		if len(got) != len(c.want) {
+			t.Errorf("%q: %v（期待 %v）", c.src, got, c.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != c.want[i] {
+				t.Errorf("%q: %v（期待 %v）", c.src, got, c.want)
+				break
+			}
+		}
+	}
+}

@@ -8,10 +8,11 @@ SQLcl を介さずに直接 DB と話す。
 Emacs ──stdio (JSON-RPC 2.0 / Content-Length)──> oracled ──TCP──> Oracle
 ```
 
-**現状: Phase 2.5 完了（2026-10-28）。** daemon（`cmd/oracled`）と Elisp
+**現状: Phase 3 まで完了（2026-10-28）。** daemon（`cmd/oracled`）と Elisp
 （`../user-lisp/my-oracle.el`）が動いている。`.sql` バッファからの送信、
 **`SQL> ` プロンプトの対話バッファ**、**`@file`**、**`DBMS_OUTPUT`**、
-**`DESCRIBE` / オブジェクト一覧 / 補完**まで。
+**`DESCRIBE` / オブジェクト一覧 / 補完**、**バインド変数 / 縦表示 /
+CSV・JSON 書き出し / `EXPLAIN PLAN`** まで。
 
 | | |
 |---|---|
@@ -123,8 +124,8 @@ export ORACLED_PASSWORD=...     # これだけは環境変数
 | ~~**Phase 1**~~ | 完了。JSON-RPC・session・`sql/exec` + 行の分割送信・`sql/split` + テスト・エラーの構造化。Emacs 側は送信・結果の表・割り込み・tx |
 | ~~**Phase 2**~~ | 完了。対話バッファ（`SQL> `）・`@file`・`DBMS_OUTPUT`・tx 表示 |
 | ~~**Phase 2.5**~~ | 完了。`DESCRIBE`・オブジェクト一覧・補完（往復しない） |
+| ~~**Phase 3**~~ | 完了。バインド変数・縦表示・CSV/JSON 書き出し・`EXPLAIN PLAN`・LOB の上限 |
 | Phase 2.5 | `meta/describe` / `meta/objects` / 補完 |
-| Phase 3 | バインド変数・縦表示・CSV/JSON 書き出し・`EXPLAIN PLAN` |
 
 ## Emacs 側（`my-oracle.el`）
 
@@ -142,6 +143,9 @@ export ORACLED_PASSWORD=...     # これだけは環境変数
 | `C-c q d` | **describe**（点の上の名前が既定。`C-u` で制約・索引も） |
 | `C-c q l` | オブジェクトを選んで describe（`C-u` で一覧を取り直す） |
 | `C-c q g` | メタ情報を取り直す（`C-u` で全スキーマ） |
+| `C-c q x` | **縦表示**と表を切り替える（列が多い 1 行を読むとき） |
+| `C-c q w` | 結果を CSV / TSV / JSON で書き出す |
+| `C-c q e` | **実行計画**（`EXPLAIN PLAN`。文は実行しない） |
 | `C-c q m` | 止めたカーソルから続きを取る |
 | `C-c q r` | **対話バッファ**（`SQL> ` プロンプト）を開く |
 | `C-c q f` | スクリプトを選んで実行（`@file` と同じ） |
@@ -176,6 +180,15 @@ ORA-00900 の山で本当のエラーが埋もれ、黙って飛ばすとスク�
 
 エラーが出たら既定で止まり（`my:oracle-script-on-error`）、
 **トランザクションはそのまま残す**（自動 commit も自動 rollback もしない）。
+
+文に**バインド変数**（`:name`）があると、送る前に値を訊く（名前の抽出は
+daemon の lexer がやるので、文字列やコメントの中の `:` を取り違えない）。
+`&var` の置換と違い**本物のバインド**として渡るので、引用符を含む値でも壊れない。
+
+LOB と長い文字列は `my:oracle-lob-limit`（既定 4096 文字）で切り詰めて
+`…(全 N 文字)` と出す（`C-u C-c C-q` で送ると上限が上がる）。
+**go-ora は既定で LOB の中身を丸ごと転送する**ので、これが無いと
+巨大な CLOB で stdio が埋まる。
 
 結果は `*oracle(接続名):rows*` に表で出る（桁は `string-width` で揃えるので
 **日本語を含む列でもずれない**）。履歴は `*oracle(接続名):log*`。

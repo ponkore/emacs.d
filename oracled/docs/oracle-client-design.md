@@ -923,7 +923,7 @@ header-line の内容: 接続名 / ユーザー@DB / `AC:on|off` / `TX` / 経過
 | `DBMS_OUTPUT` | **主 conn で `DBMS_OUTPUT.ENABLE` しておき、文ごとに取る**（SQLcl の `SET SERVEROUTPUT ON` 相当）。結果は `stmt/result` の `dbms_output` に入れて Emacs がログへ。**別接続からは取れない**ので必ず主 conn。**【重要】`GET_LINE` は 1 行 = 1 往復 = 110 ms。PL/SQL ブロックの中で `GET_LINES` → 連結して 1 つの OUT で受け、1 往復に畳む**（コレクションのバインドも避けられる。→ [phase0-findings.md](phase0-findings.md) F） |
 | feedback | `affected`（`RowsAffected`）をそのまま。「3 行が更新されました」は Emacs 側の文言 |
 | timing | daemon 側で計る（**往復を含まない純粋な DB 時間**も返す） |
-| bind 変数 | `:name` を本物のバインドとして渡す。**値の型を Emacs 側で指定できる**（`&`置換と違い SQL インジェクション的な事故が起きない） |
+| bind 変数 | `:name` を本物のバインドとして渡す。**値の型を Emacs 側で指定できる**（`&`置換と違い SQL インジェクション的な事故が起きない）。**名前の抽出も daemon の lexer**（`sqlsplit.Binds`）。文字列・コメント・`q'[]'` の中の `:` と `::` / `:=` / `:1` を外す |
 | `RETURNING INTO` / OUT パラメータ | `sql.Out` 経由。**初期は非対応**でよい |
 
 ---
@@ -999,7 +999,7 @@ SQLcl 版は**全部 GUI で手で確かめるしかなかった**（プロン�
 | Phase 1 | JSON-RPC・session・`sql/exec` + `rows/chunk`・`sql/split` + テスト・エラー構造化・**Emacs 側は `.sql` バッファからの `C-c C-c` と結果の表、割り込みだけ** | 常用に入れるかの判断 |
 | ~~**Phase 2**~~（**完了。2026-10-28**） | 対話バッファ（`SQL> ` / 履歴 / `RET` の完了判定 / comint のシグナルキー潰し）・`@file`・`DBMS_OUTPUT`・tx 表示 | 実機で通し確認済み |
 | ~~**Phase 2.5**~~（**完了。2026-10-28**） | `meta/describe` / `meta/objects` / 補完 | 実測: describe 260 ms、一覧 231 ms、補完 0.07 ms |
-| Phase 3 | bind 変数・縦表示・CSV/JSON 書き出し・`EXPLAIN PLAN`・LOB の取り直し・エラー位置への飛び | |
+| ~~**Phase 3**~~（**完了。2026-10-28**） | バインド変数・縦表示・CSV/JSON 書き出し・`EXPLAIN PLAN`・LOB の上限 | エラー位置への飛びは Phase 1 で済んでいた |
 
 **Phase 0 で測る前に Phase 1 を書かない。** 割り込みの段 1 が効かず、段 2 の
 権限も無く、段 3（切断）しか残らないなら、**SQLcl 版と大差ない**ので企画自体を

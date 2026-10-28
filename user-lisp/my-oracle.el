@@ -120,6 +120,18 @@ autoCommit は既定 true で、tx の外の DML は即コミットされるた�
 自動 rollback もしない。どちらも「静かにデータが変わる」側に倒れる）。"
   :type '(choice (const stop) (const continue) (const ask)))
 
+(defcustom my:oracle-lob-limit 4096
+  "LOB / 長い文字列を切り詰める文字数。
+`C-u' を付けて送ると `my:oracle-lob-limit-large' を使う。
+
+【重要】go-ora は既定で LOB の中身を丸ごと転送するので、上限が無いと
+巨大な CLOB で stdio が埋まる。"
+  :type 'integer)
+
+(defcustom my:oracle-lob-limit-large 1000000
+  "`C-u' を付けて送ったときの LOB の上限。"
+  :type 'integer)
+
 (defcustom my:oracle-script-max-depth 8
   "`@file' の入れ子の深さの上限。"
   :type 'integer)
@@ -161,6 +173,21 @@ autoCommit は既定 true で、tx の外の DML は即コミットされるた�
 (defvar my:oracle--sessions nil
   "session id → plist（:name :info）の alist。")
 
+(defvar my:oracle--pending nil
+  "走っている 1 文の状態。
+plist: :session :query :text :origin-buffer :origin-pos :dest
+       :columns :rows :start
+daemon を張り直すときに捨てるので、ここで宣言しておく。")
+
+(defvar my:oracle--script nil
+  "走っているスクリプトの状態（`@file' と、対話バッファの 1 入力）。
+plist: :queue :name :dest :errors :ignored :done :total :depth :dir")
+
+(defvar my:oracle--meta nil
+  "session id → plist（:token :objects :columns :checked）の alist。
+`:objects' は (名前 . 種別) の alist、`:columns' は 表名 → 列名のリスト。
+daemon を張り直すときに捨てるので、ここで宣言しておく。")
+
 (defvar my:oracle--last-session nil
   "最後に自分で選んだ session id。
 【重要】送り先はこれで決める。`my-claude' で「取り直すとよその
@@ -195,9 +222,14 @@ autoCommit は既定 true で、tx の外の DML は即コミットされるた�
   (unless (my:oracle--available-p)
     (user-error "oracled が無い。M-x my:oracle-build で作る"))
   (when (and my:oracle--conn (not (jsonrpc-running-p my:oracle--conn)))
+    ;; daemon が死んだら、走っていた文とスクリプトの札も捨てる。
+    ;; 残しておくと「まだ前の文が走っている」と言い続けて何も送れなくなる
     (setq my:oracle--conn nil
           my:oracle--sessions nil
-          my:oracle--last-session nil))
+          my:oracle--last-session nil
+          my:oracle--pending nil
+          my:oracle--script nil
+          my:oracle--meta nil))
   (unless my:oracle--conn
     (let* ((default-directory (expand-file-name "~/"))
            (process
@@ -308,7 +340,9 @@ autoCommit は既定 true で、tx の外の DML は即コミットされるた�
 (defun my:oracle--buffer-name (id kind)
   (let ((name (or (plist-get (cdr (assoc id my:oracle--sessions)) :name) id)))
     (format "*oracle(%s)%s*" name
-            (pcase kind ('rows ":rows") ('log ":log") ('desc ":desc") (_ "")))))
+            (pcase kind
+              ('rows ":rows") ('log ":log") ('desc ":desc") ('plan ":plan")
+              (_ "")))))
 
 (define-derived-mode my:oracle-rows-mode special-mode "Oracle-Rows"
   "結果の表を見るモード。"
@@ -338,14 +372,6 @@ autoCommit は既定 true で、tx の外の DML は即コミットされるた�
 
 ;; 走っている 1 文の状態。daemon は session ごとに 1 文ずつしか
 ;; 走らせないので、ここも 1 つで足りる。
-(defvar my:oracle--pending nil
-  "plist: :session :query :text :origin-buffer :origin-pos :columns :rows :start")
-
-(defvar my:oracle--script nil
-  "走っているスクリプトの状態（`@file' と、対話バッファの 1 入力）。
-plist: :queue :name :dest :errors :ignored :done :total :depth :dir
-通知の受け取り側（[6]）から見るので、ここで宣言しておく。")
-
 (defun my:oracle--busy-p ()
   (and my:oracle--pending (plist-get my:oracle--pending :session)))
 
@@ -379,10 +405,12 @@ plist: :queue :name :dest :errors :ignored :done :total :depth :dir
         (car (last (seq-filter (lambda (st) (<= (plist-get st :end) (1+ pos)))
                                statements))))))
 
-(defun my:oracle--send (text &optional origin-pos dest)
+(defun my:oracle--send (text &optional origin-pos dest binds lob-limit)
   "TEXT を送る。
 ORIGIN-POS はバッファ内の文の開始位置（エラー位置に飛ぶのに使う）。
-DEST が非 nil なら、そのバッファにも結果をテキストで出す（対話バッファ）。"
+DEST が非 nil なら、そのバッファにも結果をテキストで出す（対話バッファ）。
+BINDS は `my:oracle--read-binds' が作ったバインド変数。
+LOB-LIMIT は LOB を切り詰める文字数。"
   (when (my:oracle--busy-p)
     (user-error "まだ前の文が走っている（C-c C-k で止める）"))
   (let ((id (my:oracle--session)))
@@ -395,7 +423,12 @@ DEST が非 nil なら、そのバッファにも結果をテキストで出す�
     (jsonrpc-async-request
      (my:oracle--ensure-daemon) 'sql/exec
      (list :session id :text text
-           :maxrows my:oracle-maxrows :chunk my:oracle-chunk)
+           :maxrows my:oracle-maxrows :chunk my:oracle-chunk
+           ;; 【重要】JSON の配列は**ベクタ**で渡す。リストで渡すと
+           ;; `json-serialize' が alist と解釈して
+           ;; `Wrong type argument: symbolp, "jp"' で落ちる
+           :binds (vconcat binds)
+           :lob_limit (or lob-limit my:oracle-lob-limit))
      :success-fn #'my:oracle--on-result
      :error-fn (lambda (err)
                  (my:oracle--finish-error
@@ -405,9 +438,11 @@ DEST が非 nil なら、そのバッファにも結果をテキストで出す�
     (message "送信中… (C-c C-k で止める)")))
 
 ;;;###autoload
-(defun my:oracle-send-statement ()
-  "点のある文を送る。"
-  (interactive)
+(defun my:oracle-send-statement (&optional big-lob)
+  "点のある文を送る。
+文にバインド変数（`:name'）があれば値を訊く。`C-u' を付けると LOB の
+上限を `my:oracle-lob-limit-large' に上げる。"
+  (interactive "P")
   (let ((st (my:oracle-statement-at-point)))
     (unless st (user-error "送る文が無い"))
     (when (eq (my:oracle--kind st) 'client)
@@ -415,7 +450,10 @@ DEST が非 nil なら、そのバッファにも結果をテキストで出す�
     (unless (eq (plist-get st :complete) t)
       (unless (y-or-n-p "文が閉じていない（終端子が無い）。それでも送る? ")
         (user-error "中止")))
-    (my:oracle--send (plist-get st :text) (1+ (plist-get st :begin)))))
+    (my:oracle--send (plist-get st :text) (1+ (plist-get st :begin)) nil
+                     (my:oracle--read-binds
+                      (append (plist-get st :binds) nil))
+                     (and big-lob my:oracle-lob-limit-large))))
 
 ;;;###autoload
 (defun my:oracle-send-region (begin end)
@@ -424,13 +462,17 @@ DEST が非 nil なら、そのバッファにも結果をテキストで出す�
   (my:oracle--send (string-trim (buffer-substring-no-properties begin end)) begin))
 
 ;;;###autoload
-(defun my:oracle-cancel ()
-  "走っている文を止める（実測で 165〜260 ms。セッションは残る）。"
-  (interactive)
+(defun my:oracle-cancel (&optional force)
+  "走っている文を止める（実測で 165〜260 ms。セッションは残る）。
+`C-u' を付けると、応答が来ないまま残った札も降ろす（スクリプトも打ち切る）。"
+  (interactive "P")
   (let ((id (or (plist-get my:oracle--pending :session) my:oracle--last-session)))
     (unless id (user-error "繋がっていない"))
     (jsonrpc-notify (my:oracle--ensure-daemon) '$/cancel (list :session id))
-    (message "割り込みを送った")))
+    (if force
+        (progn (setq my:oracle--pending nil my:oracle--script nil)
+               (message "割り込みを送り、札も降ろした"))
+      (message "割り込みを送った"))))
 
 ;;;###autoload
 (defun my:oracle-more ()
@@ -481,6 +523,7 @@ DEST が非 nil なら、そのバッファにも結果をテキストで出す�
       (my:oracle--emit dest
                        (propertize "※ この文は暗黙コミットした（DDL なので保留中の変更も確定）\n"
                                    'face 'warning)))
+    (when query-p (my:oracle--remember-result id columns rows))
     (if query-p
         (progn
           (my:oracle--render id columns rows params)
@@ -591,6 +634,10 @@ DEST が非 nil なら、そのバッファにも結果をテキストで出す�
    ;; RAW / BLOB は {"$b64": …, "len": N} で来る
    ((and (listp v) (plist-get v :$b64))
     (propertize (format "⟨%s bytes⟩" (plist-get v :len)) 'face 'shadow))
+   ;; 長すぎる文字列・CLOB は {"text": …, "len": N, "$trunc": t}
+   ((and (listp v) (plist-get v :text))
+    (concat (my:oracle--one-line (plist-get v :text))
+            (propertize (format "…(全 %s 文字)" (plist-get v :len)) 'face 'shadow)))
    (t (format "%s" v))))
 
 (defun my:oracle--truncate (s width)
@@ -738,6 +785,9 @@ DEST が非 nil なら、そのバッファにも結果をテキストで出す�
     (define-key map "d" #'my:oracle-describe)
     (define-key map "l" #'my:oracle-objects)
     (define-key map "g" #'my:oracle-refresh-metadata)
+    (define-key map "x" #'my:oracle-toggle-vertical)
+    (define-key map "w" #'my:oracle-write-result)
+    (define-key map "e" #'my:oracle-explain)
     (define-key map "m" #'my:oracle-more)
     (define-key map "i" #'my:oracle-info)
     (define-key map "q" #'my:oracle-disconnect)
@@ -1129,10 +1179,6 @@ daemon には書かない（ダミープロセスに書くと取りこぼす）�
 0 にすると毎回確かめる（1 往復ぶん遅くなる）。"
   :type 'integer)
 
-(defvar my:oracle--meta nil
-  "session id → plist（:token :objects :columns :checked）の alist。
-`:objects' は (名前 . 種別) の alist、`:columns' は 表名 → 列名のリスト。")
-
 (defun my:oracle--meta-entry (id)
   (or (cdr (assoc id my:oracle--meta))
       (let ((new (list :token nil :objects nil :columns nil :checked nil)))
@@ -1360,7 +1406,174 @@ daemon には書かない（ダミープロセスに書くと取りこぼす）�
   (add-hook 'completion-at-point-functions
             #'my:oracle-completion-at-point nil t))
 
-;;; [13] キーバインド
+;;; [13] バインド変数
+
+(defvar my:oracle--bind-history nil
+  "バインド変数の名前 → 前回の値。")
+
+(defun my:oracle--read-binds (names)
+  "NAMES の値を訊いて、daemon に渡す形で返す。
+
+【重要】`&var' の置換と違い、値は**本物のバインド**として渡るので
+SQL の文字列として解釈されない（引用符を含む値でも壊れない）。
+空のまま `RET' すると NULL になる。"
+  (mapcar
+   (lambda (name)
+     (let* ((prev (cdr (assoc name my:oracle--bind-history)))
+            (input (read-string (format ":%s = " name) prev)))
+       (setf (alist-get name my:oracle--bind-history nil nil #'equal) input)
+       (list :name name
+             :value (cond
+                     ((string-empty-p input) nil) ; 空は NULL
+                     ((string-match-p "\\`-?[0-9]+\\'" input)
+                      (string-to-number input))
+                     (t input)))))
+   names))
+
+;;; [14] 縦表示・書き出し・実行計画
+
+(defvar my:oracle--last-result nil
+  "session id → plist（:columns :rows）。縦表示と書き出しに使う。")
+
+(defun my:oracle--remember-result (id columns rows)
+  (setf (alist-get id my:oracle--last-result nil nil #'equal)
+        (list :columns columns :rows rows)))
+
+(defvar-local my:oracle--vertical nil
+  "このバッファを縦表示にしているか。")
+
+(defun my:oracle--format-vertical (columns rows)
+  "1 列 1 行の縦置き（`psql' の `\\x' 相当）にして返す。
+列が多い 1 行を読むときに要る。**構造のまま持っているからできること。**"
+  (let* ((names (mapcar (lambda (c) (or (plist-get c :name) "")) columns))
+         (width (apply #'max 0 (mapcar #'string-width names))))
+    (mapconcat
+     (lambda (pair)
+       ;; `seq-map-indexed' は (関数 要素 添字) で呼ぶので、
+       ;; cons の car が行・cdr が添字になる
+       (let ((row (car pair)) (i (cdr pair)))
+         (concat
+          (propertize (format "-- %d 行目 --\n" (1+ i)) 'face 'shadow)
+          (mapconcat
+           (lambda (nc)
+             (format "%s │ %s\n"
+                     (propertize (my:oracle--pad (car nc) width nil)
+                                 'face 'my:oracle-header-face)
+                     (my:oracle--cell (cdr nc))))
+           (seq-mapn #'cons names (append row nil))
+           ""))))
+     (seq-map-indexed #'cons rows)
+     "\n")))
+
+;;;###autoload
+(defun my:oracle-toggle-vertical ()
+  "結果の表示を縦置きと表で切り替える。"
+  (interactive)
+  (let* ((id (or my:oracle--session-id my:oracle--last-session))
+         (last (cdr (assoc id my:oracle--last-result))))
+    (unless last (user-error "表示できる結果が無い"))
+    (setq my:oracle--vertical (not my:oracle--vertical))
+    (let ((inhibit-read-only t)
+          (columns (plist-get last :columns))
+          (rows (plist-get last :rows)))
+      (erase-buffer)
+      (insert (if my:oracle--vertical
+                  (my:oracle--format-vertical columns rows)
+                (my:oracle--format-table columns rows)))
+      (goto-char (point-min)))
+    (message "%s" (if my:oracle--vertical "縦置き" "表"))))
+
+;;;###autoload
+(defun my:oracle-write-result (file format)
+  "直前の結果を FILE に書き出す。"
+  (interactive
+   (list (read-file-name "書き出し先: ")
+         (intern (completing-read "形式: " '("csv" "tsv" "json") nil t nil nil "csv"))))
+  (let* ((id (or my:oracle--session-id my:oracle--last-session))
+         (last (cdr (assoc id my:oracle--last-result))))
+    (unless last (user-error "書き出せる結果が無い"))
+    (let* ((columns (plist-get last :columns))
+           (rows (plist-get last :rows))
+           (names (mapcar (lambda (c) (or (plist-get c :name) "")) columns))
+           (coding-system-for-write 'utf-8-unix))
+      (with-temp-file file
+        (pcase format
+          ('json
+           (insert "[\n")
+           (insert (mapconcat
+                    (lambda (row)
+                      (concat "  {"
+                              (string-join
+                               (seq-mapn (lambda (n v)
+                                           (format "%s: %s" (json-serialize n)
+                                                   (my:oracle--json-value v)))
+                                         names (append row nil))
+                               ", ")
+                              "}"))
+                    rows ",\n"))
+           (insert "\n]\n"))
+          (_
+           (let ((sep (if (eq format 'tsv) "\t" ",")))
+             (insert (string-join (mapcar (lambda (n) (my:oracle--csv n sep)) names) sep)
+                     "\n")
+             (dolist (row rows)
+               (insert (string-join
+                        (mapcar (lambda (v) (my:oracle--csv (my:oracle--raw-cell v) sep))
+                                (append row nil))
+                        sep)
+                       "\n")))))))
+    (message "%d 行を %s に書き出した" (length (plist-get last :rows)) file)))
+
+(defun my:oracle--raw-cell (v)
+  "書き出し用の文字列（NULL は空、切り詰めた LOB は中身だけ）。"
+  (cond
+   ((null v) "")
+   ((eq v :json-false) "false")
+   ((eq v t) "true")
+   ((stringp v) v)
+   ((numberp v) (number-to-string v))
+   ((and (listp v) (plist-get v :text)) (plist-get v :text))
+   ((and (listp v) (plist-get v :$b64)) (plist-get v :$b64))
+   (t (format "%s" v))))
+
+(defun my:oracle--json-value (v)
+  (cond
+   ((null v) "null")
+   ((eq v :json-false) "false")
+   ((eq v t) "true")
+   ((numberp v) (number-to-string v))
+   (t (json-serialize (my:oracle--raw-cell v)))))
+
+(defun my:oracle--csv (s sep)
+  "S を CSV / TSV の 1 項目にする。"
+  (let ((text (my:oracle--one-line s)))
+    (if (or (string-search sep text) (string-search "\"" text))
+        (concat "\"" (string-replace "\"" "\"\"" text) "\"")
+      text)))
+
+;;;###autoload
+(defun my:oracle-explain ()
+  "点のある文の実行計画を出す（文は実行しない）。"
+  (interactive)
+  (let* ((id (my:oracle--session))
+         (st (my:oracle-statement-at-point))
+         (_ (unless st (user-error "文が無い")))
+         (res (my:oracle--request 'plan/explain
+                                  (list :session id :text (plist-get st :text))))
+         (buf (get-buffer-create (my:oracle--buffer-name id 'plan))))
+    (with-current-buffer buf
+      (unless (derived-mode-p 'my:oracle-rows-mode) (my:oracle-rows-mode))
+      (setq my:oracle--session-id id)
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert (string-join (append (plist-get res :lines) nil) "\n"))
+        (goto-char (point-min))
+        (setq header-line-format
+              (format " 実行計画（実行はしていない）  %s"
+                      (my:oracle--one-line (plist-get st :text))))))
+    (display-buffer buf)))
+
+;;; [15] キーバインド
 
 (use-package sql
   :defer t
