@@ -8,10 +8,10 @@ SQLcl を介さずに直接 DB と話す。
 Emacs ──stdio (JSON-RPC 2.0 / Content-Length)──> oracled ──TCP──> Oracle
 ```
 
-**現状: Phase 2 完了（2026-10-28）。** daemon（`cmd/oracled`）と Elisp
-（`../user-lisp/my-oracle.el`）が動いている。`.sql` バッファからの送信に加えて、
-**`SQL> ` プロンプトの対話バッファ**・**`@file`**・**`DBMS_OUTPUT`** が使える。
-残るのは `DESCRIBE` / オブジェクト一覧 / 補完（Phase 2.5）。
+**現状: Phase 2.5 完了（2026-10-28）。** daemon（`cmd/oracled`）と Elisp
+（`../user-lisp/my-oracle.el`）が動いている。`.sql` バッファからの送信、
+**`SQL> ` プロンプトの対話バッファ**、**`@file`**、**`DBMS_OUTPUT`**、
+**`DESCRIBE` / オブジェクト一覧 / 補完**まで。
 
 | | |
 |---|---|
@@ -122,6 +122,7 @@ export ORACLED_PASSWORD=...     # これだけは環境変数
 | ~~**Phase 0**~~ | 完了。繋ぐ / 割り込む / 日本語 / 型 / 書き込みと tx を実測 → [docs/phase0-findings.md](docs/phase0-findings.md) |
 | ~~**Phase 1**~~ | 完了。JSON-RPC・session・`sql/exec` + 行の分割送信・`sql/split` + テスト・エラーの構造化。Emacs 側は送信・結果の表・割り込み・tx |
 | ~~**Phase 2**~~ | 完了。対話バッファ（`SQL> `）・`@file`・`DBMS_OUTPUT`・tx 表示 |
+| ~~**Phase 2.5**~~ | 完了。`DESCRIBE`・オブジェクト一覧・補完（往復しない） |
 | Phase 2.5 | `meta/describe` / `meta/objects` / 補完 |
 | Phase 3 | バインド変数・縦表示・CSV/JSON 書き出し・`EXPLAIN PLAN` |
 
@@ -138,6 +139,9 @@ export ORACLED_PASSWORD=...     # これだけは環境変数
 | `C-c C-k` | **割り込み**（実測 165〜260 ms。セッションは残る） |
 | `C-c q c` / `C-c q b` | commit / rollback |
 | `C-c q a` | autocommit の切り替え（tx 中は daemon が拒否する） |
+| `C-c q d` | **describe**（点の上の名前が既定。`C-u` で制約・索引も） |
+| `C-c q l` | オブジェクトを選んで describe（`C-u` で一覧を取り直す） |
+| `C-c q g` | メタ情報を取り直す（`C-u` で全スキーマ） |
 | `C-c q m` | 止めたカーソルから続きを取る |
 | `C-c q r` | **対話バッファ**（`SQL> ` プロンプト）を開く |
 | `C-c q f` | スクリプトを選んで実行（`@file` と同じ） |

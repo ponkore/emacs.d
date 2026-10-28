@@ -307,7 +307,8 @@ autoCommit は既定 true で、tx の外の DML は即コミットされるた�
 
 (defun my:oracle--buffer-name (id kind)
   (let ((name (or (plist-get (cdr (assoc id my:oracle--sessions)) :name) id)))
-    (format "*oracle(%s)%s*" name (pcase kind ('rows ":rows") ('log ":log") (_ "")))))
+    (format "*oracle(%s)%s*" name
+            (pcase kind ('rows ":rows") ('log ":log") ('desc ":desc") (_ "")))))
 
 (define-derived-mode my:oracle-rows-mode special-mode "Oracle-Rows"
   "結果の表を見るモード。"
@@ -625,26 +626,29 @@ DEST が非 nil なら、そのバッファにも結果をテキストで出す�
                                  cells))))
            names)))
     (concat
-     (string-join
-      (seq-map-indexed
-       (lambda (name i)
-         (propertize (my:oracle--pad (my:oracle--truncate name (nth i widths))
-                                     (nth i widths) nil)
-                     'face 'my:oracle-header-face))
-       names)
-      " │ ")
+     (string-trim-right
+      (string-join
+       (seq-map-indexed
+        (lambda (name i)
+          (propertize (my:oracle--pad (my:oracle--truncate name (nth i widths))
+                                      (nth i widths) nil)
+                      'face 'my:oracle-header-face))
+        names)
+       " │ "))
      "\n"
      (string-join (mapcar (lambda (w) (make-string w ?─)) widths) "─┼─")
      "\n"
+     ;; 行末の詰め物は落とす（コピーしたときに余分な空白が付かないように）
      (mapconcat
       (lambda (row)
-        (string-join
-         (seq-map-indexed
-          (lambda (w i)
-            (my:oracle--pad (my:oracle--truncate (or (nth i row) "") w)
-                            w (nth i numeric)))
-          widths)
-         " │ "))
+        (string-trim-right
+         (string-join
+          (seq-map-indexed
+           (lambda (w i)
+             (my:oracle--pad (my:oracle--truncate (or (nth i row) "") w)
+                             w (nth i numeric)))
+           widths)
+          " │ ")))
       cells "\n")
      (if cells "\n" ""))))
 
@@ -731,6 +735,9 @@ DEST が非 nil なら、そのバッファにも結果をテキストで出す�
     (define-key map "a" #'my:oracle-toggle-autocommit)
     (define-key map "s" #'my:oracle-toggle-serveroutput)
     (define-key map "f" #'my:oracle-run-script)
+    (define-key map "d" #'my:oracle-describe)
+    (define-key map "l" #'my:oracle-objects)
+    (define-key map "g" #'my:oracle-refresh-metadata)
     (define-key map "m" #'my:oracle-more)
     (define-key map "i" #'my:oracle-info)
     (define-key map "q" #'my:oracle-disconnect)
@@ -789,6 +796,7 @@ DEST が非 nil なら、そのバッファにも結果をテキストで出す�
   ;; 【重要】履歴にパスワードを残さない。
   (add-hook 'comint-input-filter-functions #'my:oracle--repl-input-filter nil t)
   (setq-local truncate-lines t)
+  (my:oracle--setup-completion)
   (comint-read-input-ring t)
   (add-hook 'kill-buffer-hook #'comint-write-input-ring nil t))
 
@@ -1109,7 +1117,250 @@ daemon には書かない（ダミープロセスに書くと取りこぼす）�
     (setf (plist-get (cdr (assoc id my:oracle--sessions)) :info) new)
     (message "SERVEROUTPUT %s" (if (eq (plist-get new :serveroutput) t) "ON" "OFF"))))
 
-;;; [11] キーバインド
+;;; [11] メタ情報（describe / 一覧 / 補完）
+
+;; 【重要】キャッシュの無効化は「通知」ではなく**トークン**で表す
+;; （gitd と同じ。通知を 1 つ落とすと永久に古いままになる壊れ方をしない）。
+;; トークンは `MAX(last_ddl_time)/件数'。秒精度なので同じ秒の DDL は
+;; 取りこぼす。だから**手で取り直す道（`C-u'）を必ず残す**。
+
+(defcustom my:oracle-token-check-interval 60
+  "キャッシュが古くないかを確かめる最短間隔（秒）。
+0 にすると毎回確かめる（1 往復ぶん遅くなる）。"
+  :type 'integer)
+
+(defvar my:oracle--meta nil
+  "session id → plist（:token :objects :columns :checked）の alist。
+`:objects' は (名前 . 種別) の alist、`:columns' は 表名 → 列名のリスト。")
+
+(defun my:oracle--meta-entry (id)
+  (or (cdr (assoc id my:oracle--meta))
+      (let ((new (list :token nil :objects nil :columns nil :checked nil)))
+        (push (cons id new) my:oracle--meta)
+        new)))
+
+(defun my:oracle--meta-put (id key value)
+  (let ((entry (my:oracle--meta-entry id)))
+    (setf (plist-get entry key) value)
+    (setcdr (assoc id my:oracle--meta) entry)
+    value))
+
+(defun my:oracle--fetch-objects (id &optional all)
+  "オブジェクト一覧を取り直してキャッシュする。"
+  (let* ((res (my:oracle--request 'meta/objects
+                                  (list :session id :all (if all t :json-false))))
+         (objects (mapcar (lambda (o)
+                            (cons (plist-get o :name) (plist-get o :type)))
+                          (append (plist-get res :objects) nil))))
+    (my:oracle--meta-put id :objects objects)
+    (my:oracle--meta-put id :token (plist-get res :token))
+    (my:oracle--meta-put id :checked (current-time))
+    (my:oracle--log (format "オブジェクト %d 件 (%.1f ms) token=%s"
+                            (length objects) (or (plist-get res :elapsed_ms) 0)
+                            (plist-get res :token)))
+    objects))
+
+(defun my:oracle--objects (id &optional force)
+  "キャッシュしたオブジェクト名を返す。FORCE なら取り直す。"
+  (let* ((entry (my:oracle--meta-entry id))
+         (objects (plist-get entry :objects)))
+    (cond
+     ((or force (null objects)) (my:oracle--fetch-objects id))
+     (t (my:oracle--check-token id) objects))))
+
+(defun my:oracle--check-token (id)
+  "キャッシュが古くないかを**非同期で**確かめる。
+【重要】ここを同期にすると補完のたびに往復（100 ms 前後）が入る。
+古かった場合の取り直しも非同期で、次の補完から新しくなる。"
+  (let* ((entry (my:oracle--meta-entry id))
+         (checked (plist-get entry :checked)))
+    (when (or (null checked)
+              (> (float-time (time-subtract (current-time) checked))
+                 my:oracle-token-check-interval))
+      (my:oracle--meta-put id :checked (current-time))
+      (jsonrpc-async-request
+       (my:oracle--ensure-daemon) 'meta/token (list :session id)
+       :success-fn
+       (lambda (res)
+         (unless (equal (plist-get res :token) (plist-get entry :token))
+           (my:oracle--log "DDL があったのでメタ情報を取り直す")
+           (jsonrpc-async-request
+            (my:oracle--ensure-daemon) 'meta/objects (list :session id)
+            :success-fn (lambda (r)
+                          (my:oracle--meta-put
+                           id :objects
+                           (mapcar (lambda (o) (cons (plist-get o :name)
+                                                     (plist-get o :type)))
+                                   (append (plist-get r :objects) nil)))
+                          (my:oracle--meta-put id :token (plist-get r :token)))
+            :error-fn #'ignore :timeout nil)))
+       :error-fn #'ignore :timeout nil))))
+
+;;;###autoload
+(defun my:oracle-refresh-metadata (&optional all)
+  "メタ情報を取り直す（`C-u' で全スキーマ）。"
+  (interactive "P")
+  (let ((id (my:oracle--session)))
+    (message "%d 件" (length (my:oracle--fetch-objects id all)))))
+
+;;;###autoload
+(defun my:oracle-objects (&optional force)
+  "オブジェクトを選んで describe する（`C-u' で一覧を取り直す）。"
+  (interactive "P")
+  (let* ((id (my:oracle--session))
+         (objects (my:oracle--objects id force))
+         (table (lambda (string pred action)
+                  (if (eq action 'metadata)
+                      `(metadata (category . my:oracle-object)
+                                 (annotation-function
+                                  . ,(lambda (cand)
+                                       (let ((type (cdr (assoc cand objects))))
+                                         (and type (concat "  " type))))))
+                    (complete-with-action action objects string pred)))))
+    (my:oracle-describe (completing-read "オブジェクト: " table nil t))))
+
+;;;###autoload
+(defun my:oracle-describe (name &optional full)
+  "NAME の定義を出す。`C-u' を付けると制約・索引・統計まで引く。
+
+既定で制約と索引を引かないのは**辞書ビューが遅い**から（実測で
+`all_constraints' の件数を数えるだけで 0.8 秒）。SQLcl の `DESC' と
+`INFO+' の切り分けと同じ。"
+  (interactive
+   (list (let* ((id (my:oracle--session))
+                (objects (my:oracle--objects id))
+                (default (thing-at-point 'symbol t)))
+           (completing-read
+            (format "describe%s%s: " (if current-prefix-arg "（制約・索引も）" "")
+                    (if default (format " (既定 %s)" default) ""))
+            objects nil nil nil nil default))
+         current-prefix-arg))
+  (let* ((id (my:oracle--session))
+         (res (my:oracle--request 'meta/describe
+                                  (list :session id :name name
+                                        :full (if full t :json-false)))))
+    ;; 補完のために列名も覚えておく
+    (my:oracle--remember-columns id (plist-get res :name)
+                                 (append (plist-get res :columns) nil))
+    (my:oracle--render-describe id res)))
+
+(defun my:oracle--remember-columns (id table columns)
+  (let* ((entry (my:oracle--meta-entry id))
+         (alist (plist-get entry :columns))
+         (names (mapcar (lambda (c) (plist-get c :name)) columns)))
+    (setf (alist-get table alist nil nil #'equal) names)
+    (my:oracle--meta-put id :columns alist)))
+
+(defun my:oracle--render-describe (id res)
+  "describe の結果を `*oracle(接続名):desc*' に出す。"
+  (let* ((buf (get-buffer-create (my:oracle--buffer-name id 'desc)))
+         (columns (append (plist-get res :columns) nil))
+         (grid-cols '((:name "列名" :numeric :json-false)
+                      (:name "型" :numeric :json-false)
+                      (:name "NULL" :numeric :json-false)
+                      (:name "PK" :numeric t)
+                      (:name "コメント" :numeric :json-false)))
+         (grid-rows
+          (mapcar (lambda (c)
+                    (vector (plist-get c :name)
+                            (plist-get c :type)
+                            (if (eq (plist-get c :nullable) t) "" "NOT NULL")
+                            ;; 【重要】ここは DB の NULL ではなく「無い」だけ
+                            ;; なので、NULL の印（`my:oracle-null-string'）は
+                            ;; 使わず空にする
+                            (let ((pk (plist-get c :pk)))
+                              (if (and pk (> pk 0)) (number-to-string pk) ""))
+                            (or (plist-get c :comment) "")))
+                  columns)))
+    (with-current-buffer buf
+      (unless (derived-mode-p 'my:oracle-rows-mode) (my:oracle-rows-mode))
+      (setq my:oracle--session-id id)
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert (propertize (format "%s.%s" (plist-get res :owner)
+                                    (plist-get res :name))
+                            'face 'my:oracle-header-face)
+                (format "  %s" (plist-get res :object_type))
+                (if (and (plist-get res :comment)
+                         (not (string-empty-p (plist-get res :comment))))
+                    (format "  — %s" (plist-get res :comment)) "")
+                "\n")
+        (when (plist-get res :num_rows)
+          (insert (propertize
+                   (format "行数 %s%s\n" (plist-get res :num_rows)
+                           (if (plist-get res :last_analyzed)
+                               (format "（統計 %s）" (plist-get res :last_analyzed)) ""))
+                   'face 'shadow)))
+        (insert "\n" (my:oracle--format-table grid-cols grid-rows))
+        (when-let* ((ks (append (plist-get res :constraints) nil))
+                    (_ (> (length ks) 0)))
+          (insert (propertize "\n制約\n" 'face 'my:oracle-header-face))
+          (dolist (k ks)
+            (insert (format "  %-30s %s (%s)%s\n"
+                            (plist-get k :name)
+                            (pcase (plist-get k :type)
+                              ("P" "主キー") ("U" "一意") ("R" "外部キー")
+                              (other other))
+                            (string-join (append (plist-get k :columns) nil) ", ")
+                            (if (and (plist-get k :refers)
+                                     (not (string-empty-p (plist-get k :refers))))
+                                (format " → %s" (plist-get k :refers)) "")))))
+        (when-let* ((is (append (plist-get res :indexes) nil))
+                    (_ (> (length is) 0)))
+          (insert (propertize "\n索引\n" 'face 'my:oracle-header-face))
+          (dolist (i is)
+            (insert (format "  %-30s %s(%s)\n"
+                            (plist-get i :name)
+                            (if (eq (plist-get i :unique) t) "UNIQUE " "")
+                            (string-join (append (plist-get i :columns) nil) ", ")))))
+        (goto-char (point-min))
+        (setq header-line-format
+              (format " %s  %d 列%s  %.1f ms"
+                      (plist-get res :name) (length columns)
+                      (if (> (+ (length (plist-get res :constraints))
+                                (length (plist-get res :indexes))) 0)
+                          (format "  制約 %d  索引 %d"
+                                  (length (plist-get res :constraints))
+                                  (length (plist-get res :indexes)))
+                        "  （C-u で制約・索引も）")
+                      (or (plist-get res :elapsed_ms) 0)))))
+    (display-buffer buf)
+    buf))
+
+;;; [12] 補完（corfu がそのまま使う）
+
+(defun my:oracle-completion-at-point ()
+  "オブジェクト名と、describe した表の列名を補完する。
+
+【重要】**往復しない。**キャッシュしたものだけを返し、古くないかの
+確認は非同期で行う（補完のたびに 100 ms 待たされるのは論外）。"
+  (when-let* ((id (and my:oracle--last-session
+                       (assoc my:oracle--last-session my:oracle--sessions)
+                       my:oracle--last-session))
+              (bounds (bounds-of-thing-at-point 'symbol)))
+    (let* ((entry (my:oracle--meta-entry id))
+           (objects (plist-get entry :objects))
+           (columns (apply #'append (mapcar #'cdr (plist-get entry :columns))))
+           (cands (append (mapcar #'car objects) columns)))
+      (when (null objects)
+        ;; まだ持っていないときは、次回に間に合わせるため非同期で取りにいく
+        (my:oracle--check-token id))
+      (when cands
+        (list (car bounds) (cdr bounds)
+              (completion-table-dynamic (lambda (_) cands))
+              :annotation-function
+              (lambda (cand)
+                (cond ((cdr (assoc cand objects))
+                       (concat "  " (cdr (assoc cand objects))))
+                      ((member cand columns) "  列")))
+              :exclusive 'no)))))
+
+(defun my:oracle--setup-completion ()
+  "このバッファの capf に足す。"
+  (add-hook 'completion-at-point-functions
+            #'my:oracle-completion-at-point nil t))
+
+;;; [13] キーバインド
 
 (use-package sql
   :defer t
@@ -1120,7 +1371,8 @@ daemon には書かない（ダミープロセスに書くと取りこぼす）�
   (define-key sql-mode-map (kbd "C-c q") my:oracle-prefix-map)
   (define-key sql-mode-map (kbd "C-c C-q") #'my:oracle-send-statement)
   (define-key sql-mode-map (kbd "C-c M-q") #'my:oracle-send-region)
-  (define-key sql-mode-map (kbd "C-c C-k") #'my:oracle-cancel))
+  (define-key sql-mode-map (kbd "C-c C-k") #'my:oracle-cancel)
+  (add-hook 'sql-mode-hook #'my:oracle--setup-completion))
 
 (provide 'my-oracle)
 ;;; my-oracle.el ends here

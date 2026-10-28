@@ -553,3 +553,176 @@ func TestLiveServerOutput(t *testing.T) {
 		t.Errorf("OFF なのに取れている: %v", r.Output)
 	}
 }
+
+// meta/describe は【重要】1 往復で全部を引く。
+// 列・コメント・制約・索引・統計を別々に引くと、この回線では
+// DESCRIBE 1 回で 0.7〜1 秒になる（docs/phase0-findings.md F）。
+func TestLiveDescribe(t *testing.T) {
+	s := &server{mgr: oradb.NewManager(), start: time.Now()}
+	c, _ := capture()
+	sid := openSession(t, s, c)
+	defer s.Handle(c, raw(99), "session/close", raw(map[string]any{"session": sid}))
+
+	exec := func(text string) *rpc.Error {
+		_, rerr := s.Handle(c, raw(2), "sql/exec",
+			raw(map[string]any{"session": sid, "text": text}))
+		return rerr
+	}
+	_ = exec("drop table ORACLED_D1 purge")
+	if rerr := exec(`create table ORACLED_D1 (
+	    id    number(10)    not null,
+	    code  varchar2(20)  not null,
+	    name  varchar2(100),
+	    qty   number(12,2),
+	    constraint PK_ORACLED_D1 primary key (id),
+	    constraint UQ_ORACLED_D1 unique (code))`); rerr != nil {
+		t.Fatalf("create: %v", rerr)
+	}
+	defer exec("drop table ORACLED_D1 purge")
+	if rerr := exec("create index IX_ORACLED_D1 on ORACLED_D1 (name, qty)"); rerr != nil {
+		t.Fatalf("create index: %v", rerr)
+	}
+	if rerr := exec("comment on table ORACLED_D1 is '検証用の表'"); rerr != nil {
+		t.Fatalf("comment: %v", rerr)
+	}
+	if rerr := exec("comment on column ORACLED_D1.name is '名前（日本語）'"); rerr != nil {
+		t.Fatalf("comment column: %v", rerr)
+	}
+
+	// 既定（列とコメントだけ）
+	start := time.Now()
+	res, rerr := s.Handle(c, raw(3), "meta/describe",
+		raw(map[string]any{"session": sid, "name": "oracled_d1"}))
+	if rerr != nil {
+		t.Fatalf("meta/describe: %v", rerr)
+	}
+	light := res.(*oradb.DescribeResult)
+	t.Logf("describe（既定）: %.1f ms", float64(time.Since(start).Milliseconds()))
+	if len(light.Constraints) != 0 || len(light.Indexes) != 0 {
+		t.Error("既定で制約・索引まで引いている（遅いので C-u のときだけ）")
+	}
+
+	// C-u 相当（制約・索引まで）
+	start = time.Now()
+	res, rerr = s.Handle(c, raw(4), "meta/describe",
+		raw(map[string]any{"session": sid, "name": "oracled_d1", "full": true}))
+	if rerr != nil {
+		t.Fatalf("meta/describe full: %v", rerr)
+	}
+	d := res.(*oradb.DescribeResult)
+	t.Logf("describe（full）: %.1f ms", float64(time.Since(start).Milliseconds()))
+
+	if d.Name != "ORACLED_D1" || d.ObjectType != "TABLE" {
+		t.Errorf("name=%q type=%q", d.Name, d.ObjectType)
+	}
+	if d.Comment != "検証用の表" {
+		t.Errorf("表のコメントが %q", d.Comment)
+	}
+	if len(d.Columns) != 4 {
+		t.Fatalf("列が %d（4 のはず）: %+v", len(d.Columns), d.Columns)
+	}
+	if d.Columns[0].Name != "ID" || d.Columns[0].Type != "NUMBER(10)" ||
+		d.Columns[0].Nullable || d.Columns[0].PK != 1 {
+		t.Errorf("1 列目が %+v", d.Columns[0])
+	}
+	if d.Columns[1].Type != "VARCHAR2(20)" {
+		t.Errorf("code の型が %q", d.Columns[1].Type)
+	}
+	if d.Columns[2].Comment != "名前（日本語）" {
+		t.Errorf("列コメントが %q", d.Columns[2].Comment)
+	}
+	if d.Columns[3].Type != "NUMBER(12,2)" {
+		t.Errorf("qty の型が %q", d.Columns[3].Type)
+	}
+	// 制約（P と U）
+	var hasPK, hasUQ bool
+	for _, k := range d.Constraints {
+		switch k.Type {
+		case "P":
+			hasPK = true
+			if len(k.Columns) != 1 || k.Columns[0] != "ID" {
+				t.Errorf("主キーの列が %v", k.Columns)
+			}
+		case "U":
+			hasUQ = true
+		}
+	}
+	if !hasPK || !hasUQ {
+		t.Errorf("制約が取れていない: %+v", d.Constraints)
+	}
+	// 索引（主キー・一意制約の索引 + 自分で作ったもの）
+	var found bool
+	for _, i := range d.Indexes {
+		if i.Name == "IX_ORACLED_D1" {
+			found = true
+			if len(i.Columns) != 2 || i.Columns[0] != "NAME" || i.Columns[1] != "QTY" {
+				t.Errorf("索引の列が %v（順序も見る）", i.Columns)
+			}
+			if i.Unique {
+				t.Error("一意索引ではないのに unique になっている")
+			}
+		}
+	}
+	if !found {
+		t.Errorf("索引が取れていない: %+v", d.Indexes)
+	}
+
+	// 無いものは分かるように落ちる
+	if _, rerr := s.Handle(c, raw(5), "meta/describe",
+		raw(map[string]any{"session": sid, "name": "ORACLED_NO_SUCH"})); rerr == nil {
+		t.Error("無いオブジェクトでエラーにならなかった")
+	}
+}
+
+// meta/objects と meta/token（キャッシュの鍵）。
+func TestLiveObjects(t *testing.T) {
+	s := &server{mgr: oradb.NewManager(), start: time.Now()}
+	c, _ := capture()
+	sid := openSession(t, s, c)
+	defer s.Handle(c, raw(99), "session/close", raw(map[string]any{"session": sid}))
+
+	start := time.Now()
+	res, rerr := s.Handle(c, raw(2), "meta/objects",
+		raw(map[string]any{"session": sid}))
+	if rerr != nil {
+		t.Fatalf("meta/objects: %v", rerr)
+	}
+	o := res.(*oradb.ObjectsResult)
+	t.Logf("objects: %d 件 %.1f ms token=%s", len(o.Objects),
+		float64(time.Since(start).Milliseconds()), o.Token)
+	if len(o.Objects) == 0 {
+		t.Fatal("1 件も返らない")
+	}
+	if o.Token == "" {
+		t.Error("token が空（キャッシュの鍵に使えない)")
+	}
+	for _, x := range o.Objects {
+		if x.Name == "" || x.Type == "" {
+			t.Errorf("空の要素: %+v", x)
+			break
+		}
+	}
+
+	// token だけを引く経路は、一覧と同じ値を返す
+	res, rerr = s.Handle(c, raw(3), "meta/token", raw(map[string]any{"session": sid}))
+	if rerr != nil {
+		t.Fatalf("meta/token: %v", rerr)
+	}
+	if got := res.(map[string]any)["token"]; got != o.Token {
+		t.Errorf("token が食い違う: %v / %v", got, o.Token)
+	}
+
+	// DDL を打つと token が変わる（キャッシュが古いと分かる）
+	before := o.Token
+	_, _ = s.Handle(c, raw(4), "sql/exec",
+		raw(map[string]any{"session": sid, "text": "create table ORACLED_TOK (id number)"}))
+	defer s.Handle(c, raw(98), "sql/exec",
+		raw(map[string]any{"session": sid, "text": "drop table ORACLED_TOK purge"}))
+	res, rerr = s.Handle(c, raw(5), "meta/token", raw(map[string]any{"session": sid}))
+	if rerr != nil {
+		t.Fatalf("meta/token: %v", rerr)
+	}
+	if got := res.(map[string]any)["token"]; got == before {
+		t.Errorf("DDL のあとも token が同じ: %v", got)
+	}
+}

@@ -175,6 +175,62 @@ func (s *server) Handle(c *rpc.Conn, id json.RawMessage, method string,
 		}
 		return sess.Info(), nil
 
+	case "meta/describe":
+		sess, rerr := s.session(params)
+		if rerr != nil {
+			return nil, rerr
+		}
+		var p struct {
+			Name string `json:"name"`
+			Full bool   `json:"full"`
+		}
+		if err := unmarshal(params, &p); err != nil {
+			return nil, err
+		}
+		start := time.Now()
+		res, err := sess.Describe(context.Background(), p.Name, p.Full)
+		if err != nil {
+			return nil, dbError(err)
+		}
+		res.ElapsedMS = float64(time.Since(start).Microseconds()) / 1000
+		return res, nil
+
+	case "meta/objects":
+		sess, rerr := s.session(params)
+		if rerr != nil {
+			return nil, rerr
+		}
+		var p struct {
+			All bool `json:"all"`
+		}
+		if err := unmarshal(params, &p); err != nil {
+			return nil, err
+		}
+		start := time.Now()
+		res, err := sess.Objects(context.Background(), p.All)
+		if err != nil {
+			return nil, dbError(err)
+		}
+		res.ElapsedMS = float64(time.Since(start).Microseconds()) / 1000
+		return res, nil
+
+	case "meta/token":
+		sess, rerr := s.session(params)
+		if rerr != nil {
+			return nil, rerr
+		}
+		var p struct {
+			All bool `json:"all"`
+		}
+		if err := unmarshal(params, &p); err != nil {
+			return nil, err
+		}
+		token, err := sess.Token(context.Background(), p.All)
+		if err != nil {
+			return nil, dbError(err)
+		}
+		return map[string]any{"token": token}, nil
+
 	case "sql/exec":
 		return s.exec(c, params)
 
