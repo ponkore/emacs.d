@@ -30,14 +30,15 @@ import (
 // OpenParams は session/open のパラメータ。
 // 【重要】Password はログに出さない。DSN も組んだ後は持ち回さない。
 type OpenParams struct {
-	Host       string `json:"host"`
-	Port       int    `json:"port"`
-	Service    string `json:"service"`
-	SID        string `json:"sid"`
-	User       string `json:"user"`
-	Password   string `json:"password"`
-	AutoCommit bool   `json:"autocommit"`
-	OOB        bool   `json:"oob"`
+	Host         string `json:"host"`
+	Port         int    `json:"port"`
+	Service      string `json:"service"`
+	SID          string `json:"sid"`
+	User         string `json:"user"`
+	Password     string `json:"password"`
+	AutoCommit   bool   `json:"autocommit"`
+	ServerOutput bool   `json:"serveroutput"`
+	OOB          bool   `json:"oob"`
 }
 
 // Info は接続して分かること。Emacs の header-line に出す材料。
@@ -56,6 +57,7 @@ type Info struct {
 	// 【重要】判定は session_privs。user_sys_privs は直接付与だけなので
 	// ロール経由の権限を見落とす（実測）。
 	CanCancelSQL bool    `json:"can_cancel_sql"`
+	ServerOutput bool    `json:"serveroutput"`
 	ConnectMS    float64 `json:"connect_ms"`
 }
 
@@ -73,8 +75,11 @@ type Column struct {
 
 // Result は 1 文の実行結果（行そのものは通知で先に流す）。
 type Result struct {
-	Query          int      `json:"query"`
-	Kind           string   `json:"kind"` // "query" | "exec"
+	Query int    `json:"query"`
+	Kind  string `json:"kind"` // "query" | "exec"
+	// StmtKind は文の分類（"query" / "dml" / "plsql" / "ddl" / "tx"）。
+	// Emacs 側が表示の文言を決めるのに使う。
+	StmtKind       string   `json:"stmt_kind"`
 	Columns        []Column `json:"columns,omitempty"`
 	Rows           int      `json:"rows"`
 	Affected       int64    `json:"affected"`
@@ -82,6 +87,8 @@ type Result struct {
 	More           bool     `json:"more"` // カーソルが開いたまま残っている
 	ImplicitCommit bool     `json:"implicit_commit"`
 	InTx           bool     `json:"in_tx"`
+	// Output は DBMS_OUTPUT の行（SERVEROUTPUT ON のときだけ）。
+	Output []string `json:"output,omitempty"`
 }
 
 // Session は 1 つの接続。文は 1 本ずつしか走らせない。
@@ -100,9 +107,18 @@ type Session struct {
 	baseCtx    context.Context
 	baseCancel context.CancelFunc
 
-	mu         sync.Mutex // info / tx / rows / cancel を触るとき
-	tx         *sql.Tx
-	autocommit bool
+	mu           sync.Mutex // info / tx / rows / cancel を触るとき
+	tx           *sql.Tx
+	autocommit   bool
+	serverOutput bool
+	lastOutput   []string // 直前の文の DBMS_OUTPUT（エラー時も読めるように）
+	// dirty は「このトランザクションで実際に書いたか」。
+	// 【重要】tx オブジェクトの有無で InTx を出すと、autocommit OFF では
+	// SELECT を 1 回投げただけで TX と表示されてしまう（Oracle 側の
+	// トランザクションは DML で初めて始まる）。往復を増やさずに近づける
+	// ため、問い合わせ以外を実行したかを数えるだけにしてある。
+	// SELECT ... FOR UPDATE は取りこぼす（実害は表示だけ）。
+	dirty bool
 
 	stmtMu   sync.Mutex // 文を 1 本ずつにする
 	cancel   context.CancelFunc
@@ -186,7 +202,102 @@ func (m *Manager) Open(ctx context.Context, p OpenParams) (*Session, error) {
 
 	s.info = Info{Session: id, AutoCommit: p.AutoCommit, ConnectMS: connectMS}
 	s.loadInfo(ctx)
+	if p.ServerOutput {
+		if err := s.SetServerOutput(ctx, true); err != nil {
+			// 繋がってはいるので、失敗は呼び出し側に返さず info で分かるようにする
+			s.mu.Lock()
+			s.info.ServerOutput = false
+			s.mu.Unlock()
+		}
+	}
 	return s, nil
+}
+
+// SetServerOutput は DBMS_OUTPUT の取得を入り切りする（SQL*Plus の
+// `SET SERVEROUTPUT ON` 相当）。
+func (s *Session) SetServerOutput(ctx context.Context, on bool) error {
+	stmt := "begin dbms_output.disable; end;"
+	if on {
+		stmt = "begin dbms_output.enable(null); end;"
+	}
+	if _, err := s.conn.ExecContext(ctx, stmt); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.serverOutput = on
+	s.info.ServerOutput = on
+	s.mu.Unlock()
+	return nil
+}
+
+// 【重要】DBMS_OUTPUT は 1 行ずつ GET_LINE を呼ぶと 1 行 = 1 往復になる
+// （この回線では 110 ms）。GET_LINES でまとめて取り、ブロックの中で
+// 連結して 1 つの OUT で受ける（コレクションのバインドも避けられる）。
+// → docs/phase0-findings.md F
+const fetchOutputBlock = `declare
+  l dbms_output.chararr;
+  n integer := 500;
+  buf varchar2(32767);
+  stopped number := 0;
+begin
+  dbms_output.get_lines(l, n);
+  for i in 1 .. n loop
+    if length(buf) + nvl(length(l(i)), 0) + 1 > 32000 then
+      stopped := 1;
+      exit;
+    end if;
+    buf := buf || l(i) || chr(10);
+  end loop;
+  if n = 500 and stopped = 0 then stopped := 2; end if;
+  :1 := buf;
+  :2 := stopped;
+end;`
+
+// fetchOutput は溜まっている DBMS_OUTPUT を取る。
+// stopped が非 0 なら続きがあるので、上限を決めて繰り返す。
+func (s *Session) fetchOutput(ctx context.Context) []string {
+	var out []string
+	for round := 0; round < 10; round++ {
+		buf := strings.Repeat(" ", 32767) // OUT の領域を先に確保しておく
+		stopped := 0
+		if _, err := s.conn.ExecContext(ctx, fetchOutputBlock,
+			sql.Out{Dest: &buf}, sql.Out{Dest: &stopped}); err != nil {
+			return out
+		}
+		text := strings.TrimRight(buf, " \x00")
+		if text != "" {
+			lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
+			out = append(out, lines...)
+		}
+		if stopped == 0 {
+			break
+		}
+	}
+	return out
+}
+
+// takeOutput は SERVEROUTPUT が ON のときだけ取る。
+func (s *Session) takeOutput(ctx context.Context) []string {
+	s.mu.Lock()
+	on := s.serverOutput
+	s.mu.Unlock()
+	if !on {
+		return nil
+	}
+	out := s.fetchOutput(ctx)
+	s.mu.Lock()
+	s.lastOutput = out
+	s.mu.Unlock()
+	return out
+}
+
+// LastOutput は直前の文の DBMS_OUTPUT を返す（エラー経路で使う）。
+func (s *Session) LastOutput() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := s.lastOutput
+	s.lastOutput = nil
+	return out
 }
 
 // loadInfo は 1 文で分かるものをまとめて引く。
@@ -229,7 +340,7 @@ func (s *Session) Info() Info {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	i := s.info
-	i.InTx = s.tx != nil
+	i.InTx = s.tx != nil && s.dirty
 	i.AutoCommit = s.autocommit
 	return i
 }
@@ -292,6 +403,9 @@ func (s *Session) endTx(ctx context.Context, commit bool) error {
 	if tx == nil {
 		return nil // tx が無いのは正常（autocommit ON か、まだ何も書いていない）
 	}
+	s.mu.Lock()
+	s.dirty = false
+	s.mu.Unlock()
 	if commit {
 		return tx.Commit()
 	}
@@ -393,7 +507,7 @@ func (s *Session) Exec(ctx context.Context, text string, binds []any,
 		if err != nil {
 			return nil, err
 		}
-		return &Result{Query: query, Kind: "exec",
+		return &Result{Query: query, Kind: "exec", StmtKind: "tx",
 			ElapsedMS: msOf(time.Since(start)), InTx: s.Info().InTx}, nil
 	}
 
@@ -406,6 +520,7 @@ func (s *Session) Exec(ctx context.Context, text string, binds []any,
 	if sqlsplit.IsQuery(text) {
 		rows, err := s.execer().QueryContext(cctx, text, binds...)
 		if err != nil {
+			s.takeOutput(context.Background()) // エラーの前に出た分も拾う
 			return nil, err
 		}
 		cols, err := columnsOf(rows)
@@ -430,16 +545,24 @@ func (s *Session) Exec(ctx context.Context, text string, binds []any,
 		} else {
 			rows.Close()
 		}
-		return &Result{Query: query, Kind: "query", Columns: cols, Rows: n,
-			ElapsedMS: elapsed, More: more, InTx: s.Info().InTx}, nil
+		return &Result{Query: query, Kind: "query", StmtKind: "query",
+			Columns: cols, Rows: n, ElapsedMS: elapsed, More: more,
+			InTx: s.Info().InTx, Output: s.takeOutput(context.Background())}, nil
 	}
 
 	res, err := s.execer().ExecContext(cctx, text, binds...)
 	elapsed := msOf(time.Since(start))
 	if err != nil {
+		s.takeOutput(context.Background())
 		return nil, err
 	}
+	output := s.takeOutput(context.Background())
 	affected, _ := res.RowsAffected()
+	if !ddl {
+		s.mu.Lock()
+		s.dirty = true // 問い合わせ以外を実行した
+		s.mu.Unlock()
+	}
 
 	// 【重要】DDL は保留中の DML を巻き込んでサーバ側でコミットされている。
 	// こちらの tx オブジェクトは用済みなので閉じて張り直し、起きたことを返す。
@@ -453,8 +576,9 @@ func (s *Session) Exec(ctx context.Context, text string, binds []any,
 			implicit = true
 		}
 	}
-	return &Result{Query: query, Kind: "exec", Affected: affected,
-		ElapsedMS: elapsed, ImplicitCommit: implicit, InTx: s.Info().InTx}, nil
+	return &Result{Query: query, Kind: "exec", StmtKind: sqlsplit.Classify(text),
+		Affected: affected, ElapsedMS: elapsed, ImplicitCommit: implicit,
+		InTx: s.Info().InTx, Output: output}, nil
 }
 
 // More は開いたままのカーソルから続きを取る。
@@ -614,6 +738,8 @@ type OraError struct {
 	Code     int    `json:"code"`
 	Message  string `json:"message"`
 	Position int    `json:"position"` // 取れなければ -1
+	// Output はエラーの前に出た DBMS_OUTPUT（SQL*Plus と同じく見せる）。
+	Output []string `json:"output,omitempty"`
 }
 
 const posMarker = " error occur at position: "

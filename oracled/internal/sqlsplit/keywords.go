@@ -42,6 +42,32 @@ func IsDDL(src string) bool {
 	return ddlStarters[w[0]]
 }
 
+// Classify は文を "query" / "ddl" / "plsql" / "tx" / "dml" に分ける。
+// Emacs 側の文言（「3 行が更新されました」「PL/SQL が完了しました」）を
+// 決めるのに使う。**Emacs 側に先頭語の判定を書かせない**ためのもの。
+func Classify(src string) string {
+	w := FirstWords(src, 2)
+	if len(w) == 0 {
+		return "dml"
+	}
+	if IsQuery(src) {
+		return "query"
+	}
+	if _, ok := IsTxControl(src); ok {
+		return "tx"
+	}
+	switch w[0] {
+	case "DECLARE", "BEGIN":
+		return "plsql"
+	}
+	if IsDDL(src) {
+		// CREATE PROCEDURE などは PL/SQL だが、暗黙コミットもする。
+		// 表示の都合では DDL 扱いでよい
+		return "ddl"
+	}
+	return "dml"
+}
+
 // IsTxControl は COMMIT / ROLLBACK / SAVEPOINT か。
 // daemon 側の tx 状態と食い違わないよう、専用の経路に回す。
 func IsTxControl(src string) (string, bool) {

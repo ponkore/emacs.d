@@ -203,6 +203,12 @@ func TestLiveQuery(t *testing.T) {
 	if !r.Columns[4].Temporal {
 		t.Errorf("sysdate が Temporal になっていない: %+v", r.Columns[4])
 	}
+	// 【重要】autocommit OFF でも、SELECT を投げただけで TX と出してはいけない。
+	// daemon は内部で *sql.Tx を張るが、Oracle 側のトランザクションは
+	// DML で初めて始まる（表示が「書いていないのに TX」になると信用を失う）。
+	if r.InTx {
+		t.Error("SELECT だけで in_tx が立っている")
+	}
 
 	// rows/chunk 通知を見る
 	var rows [][]any
@@ -439,5 +445,111 @@ func TestLiveError(t *testing.T) {
 	}
 	if strings.Contains(oe.Message, "error occur at position") {
 		t.Errorf("message に位置の文字列が残っている: %q", oe.Message)
+	}
+}
+
+// DBMS_OUTPUT が 1 往復で取れること（SERVEROUTPUT ON）。
+// 【重要】GET_LINE を 1 行ずつ呼ぶと 1 行 = 1 往復（この回線で 110 ms）に
+// なるので、GET_LINES を PL/SQL ブロックの中で連結して 1 つの OUT で受ける。
+func TestLiveServerOutput(t *testing.T) {
+	s := &server{mgr: oradb.NewManager(), start: time.Now()}
+	c, _ := capture()
+	p := openParams(t)
+	p["serveroutput"] = true
+	res, rerr := s.Handle(c, raw(1), "session/open", raw(p))
+	if rerr != nil {
+		t.Fatalf("session/open: %v", rerr)
+	}
+	sid := res.(oradb.Info).Session
+	if !res.(oradb.Info).ServerOutput {
+		t.Error("serveroutput が立っていない")
+	}
+	defer s.Handle(c, raw(99), "session/close", raw(map[string]any{"session": sid}))
+
+	exec := func(text string) (*oradb.Result, *rpc.Error) {
+		r, rerr := s.Handle(c, raw(2), "sql/exec",
+			raw(map[string]any{"session": sid, "text": text}))
+		if rerr != nil {
+			return nil, rerr
+		}
+		return r.(*oradb.Result), nil
+	}
+
+	// 1 往復で何行取れるか（往復の回数を減らすのが目的）
+	start := time.Now()
+	r, rerr := exec(`begin
+	  for i in 1 .. 50 loop
+	    dbms_output.put_line('行 ' || i || ' あいう');
+	  end loop;
+	end;`)
+	if rerr != nil {
+		t.Fatalf("put_line: %v", rerr)
+	}
+	t.Logf("50 行の DBMS_OUTPUT を含む文: %.1f ms（往復込み）", float64(time.Since(start).Milliseconds()))
+	if len(r.Output) != 50 {
+		t.Fatalf("output が %d 行（50 行のはず）", len(r.Output))
+	}
+	if r.Output[0] != "行 1 あいう" {
+		t.Errorf("1 行目が %q", r.Output[0])
+	}
+	if r.Output[49] != "行 50 あいう" {
+		t.Errorf("50 行目が %q", r.Output[49])
+	}
+
+	// 取ったら消えること（次の文に持ち越さない）
+	r, rerr = exec("select 1 from dual")
+	if rerr != nil {
+		t.Fatalf("select: %v", rerr)
+	}
+	if len(r.Output) != 0 {
+		t.Errorf("持ち越している: %v", r.Output)
+	}
+
+	// 500 行を超えても（GET_LINES の 1 回分を超えても）全部取れること
+	r, rerr = exec(`begin
+	  for i in 1 .. 1200 loop dbms_output.put_line('L' || i); end loop;
+	end;`)
+	if rerr != nil {
+		t.Fatalf("put_line 1200: %v", rerr)
+	}
+	if len(r.Output) != 1200 {
+		t.Errorf("output が %d 行（1200 行のはず）", len(r.Output))
+	} else if r.Output[1199] != "L1200" {
+		t.Errorf("最後が %q", r.Output[1199])
+	}
+
+	// エラーで終わった文でも、その前に出た分は拾えること
+	_, rerr = exec(`begin
+	  dbms_output.put_line('途中まで出た');
+	  raise_application_error(-20001, 'ここで失敗');
+	end;`)
+	if rerr == nil {
+		t.Fatal("エラーにならなかった")
+	}
+	if out := s.mgr.All(); len(out) == 0 {
+		t.Fatal("session が消えた")
+	}
+	// stmt/error の output はハンドラ側で LastOutput() を読んでいる。
+	// ここでは Classify の結果だけ見る
+	oe, ok := rerr.Data.(oradb.OraError)
+	if !ok || oe.Code != 20001 {
+		t.Fatalf("ORA-20001 ではない: %#v", rerr.Data)
+	}
+	// 【重要】エラーで終わった文でも、その前に出た DBMS_OUTPUT は見せる
+	if len(oe.Output) != 1 || oe.Output[0] != "途中まで出た" {
+		t.Errorf("エラー前の output が取れていない: %#v", oe.Output)
+	}
+
+	// 切り替え
+	if _, rerr := s.Handle(c, raw(3), "session/serveroutput",
+		raw(map[string]any{"session": sid, "on": false})); rerr != nil {
+		t.Fatalf("serveroutput off: %v", rerr)
+	}
+	r, rerr = exec("begin dbms_output.put_line('出ないはず'); end;")
+	if rerr != nil {
+		t.Fatalf("put_line: %v", rerr)
+	}
+	if len(r.Output) != 0 {
+		t.Errorf("OFF なのに取れている: %v", r.Output)
 	}
 }

@@ -193,10 +193,20 @@ S 式案の「face 付きで渡せる」利点は、**装飾は Emacs 側でや�
 | `meta/token` | → | `MAX(last_ddl_time)` 由来のキャッシュ鍵（§10） |
 | `$/cancel` | → | **通知**。走っている文を break する |
 | `shutdown` | → | 応答してから終了 |
-| `rows/chunk` | ← | **通知**。`{query, seq, rows, done}` |
-| `stmt/progress` | ← | **通知**。`{query, state, elapsed_ms}`（点を回す材料） |
-| `stmt/result` | ← | **通知**。`{query, affected, elapsed_ms, warnings, dbms_output}` |
-| `stmt/error` | ← | **通知**。`{query, code, message, offset, line, col}` |
+| `session/serveroutput` | → | `DBMS_OUTPUT` の入り切り（`SET SERVEROUTPUT ON` 相当） |
+| `rows/chunk` | ← | **通知**。`{session, query, seq, rows, done}` |
+
+### 【重要】結末は「応答」で返す。通知と二重にしない（2026-10-28）
+
+当初は `stmt/result` / `stmt/error` を通知でも返していたが、**Emacs 側が
+同じ結末を 2 回処理して、対話バッファにプロンプトが 2 つ出た**（実機で踏んだ）。
+
+| | |
+|---|---|
+| **通知** | **行の束だけ**（`rows/chunk`）。複数回あるのでこれは通知でしか返せない |
+| **応答** | 結果・エラー・`DBMS_OUTPUT`・暗黙コミットの有無・文の分類 |
+
+応答は 1 回しか返らないので、**二重処理の経路がそもそも作れない**のが利点。
 
 `stmt/*` を**応答ではなく通知**にしているのは、1 つの `sql/exec` から
 「進行 → 行の束 ×n → 結果」と複数回届くため。JSON-RPC の応答は 1 回しか返せない。
@@ -680,6 +690,19 @@ ambiguous を幅 2 にしてある）か `string-pixel-width` で**実際の描�
 `M-n`）・プロンプトの read-only・入力行の kill / yank・履歴のファイル保存を
 全部持っているので、`my-claude` のように確定領域とマーカーを自作するのは損。
 
+#### 実装して分かったこと（2026-10-28、Phase 2）
+
+実機で踏んだものを 3 つ。**どれも「エラーにならないまま間違って動く」型。**
+
+| | |
+|---|---|
+| **jsonrpc.el が渡す JSON の値は文字列** | `(eq (plist-get st :kind) 'client)` は**永久に偽**になり、**`@foo.sql` と `SET LINESIZE` が Oracle に送られて** ORA-00900 / ORA-00922 になった。シンボルに直す関数を 1 つ通す（`my:oracle--kind`） |
+| **結末を通知と応答の両方で返していた** | プロンプトが 2 つ出た。上記のとおり応答だけにした |
+| **`in_tx` を「`*sql.Tx` を持っているか」で出していた** | autocommit OFF では **SELECT を 1 回投げただけで `TX` と表示された**。Oracle 側のトランザクションは DML で始まるので、**実際に書いたか**（`dirty`）で出す。`SELECT … FOR UPDATE` は取りこぼすが、実害は表示だけ |
+
+ダミーの pipe プロセスは**そのまま動いた**（`process-type` が `pipe`、
+comint の `process-mark` も正常）。
+
 #### 【重要】comint は本物のプロセスを要求する → ダミーの pipe プロセスを握らせる
 
 daemon との通信は JSON-RPC で、そこに **comint のための stdin は無い**。
@@ -945,7 +968,7 @@ SQLcl 版は**全部 GUI で手で確かめるしかなかった**（プロン�
 |---|---|---|
 | ~~**Phase 0**~~（**完了。2026-10-28**） | go-ora で繋ぐ / 1 文投げる / 重い文を割り込む / 日本語の往復 / 型 / 書き込みと tx | **両方とも成立した**（割り込み 165 ms・日本語はバイト一致）→ [phase0-findings.md](phase0-findings.md) |
 | Phase 1 | JSON-RPC・session・`sql/exec` + `rows/chunk`・`sql/split` + テスト・エラー構造化・**Emacs 側は `.sql` バッファからの `C-c C-c` と結果の表、割り込みだけ** | 常用に入れるかの判断 |
-| **Phase 2** | **対話バッファ**（`SQL> ` / 履歴 / `RET` の完了判定 / comint のシグナルキー潰し）・**`@file`**・`DBMS_OUTPUT`・autocommit と tx 表示 | **ここで SQLcl 版の日常用途が置き換わる** |
+| ~~**Phase 2**~~（**完了。2026-10-28**） | 対話バッファ（`SQL> ` / 履歴 / `RET` の完了判定 / comint のシグナルキー潰し）・`@file`・`DBMS_OUTPUT`・tx 表示 | 実機で通し確認済み |
 | Phase 2.5 | `meta/describe` / `meta/objects` / 補完 | 機能が並ぶ |
 | Phase 3 | bind 変数・縦表示・CSV/JSON 書き出し・`EXPLAIN PLAN`・LOB の取り直し・エラー位置への飛び | |
 

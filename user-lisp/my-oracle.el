@@ -31,6 +31,8 @@
 ;;; Code:
 
 (require 'jsonrpc)
+(require 'comint)
+(require 'cl-lib)
 (require 'auth-source)
 (require 'seq)
 (require 'subr-x)
@@ -81,6 +83,45 @@ autoCommit は既定 true で、tx の外の DML は即コミットされるた�
 
 (defcustom my:oracle-max-column-width 40
   "表示するときの 1 列の最大幅（文字）。超えたら切り詰める。"
+  :type 'integer)
+
+(defcustom my:oracle-serveroutput t
+  "非 nil なら `DBMS_OUTPUT' を取る（`SET SERVEROUTPUT ON' 相当）。
+文ごとに 1 往復ぶん余計にかかる（この回線で 110 ms 前後）。"
+  :type 'boolean)
+
+(defcustom my:oracle-repl-max-rows 200
+  "対話バッファに出す行数の上限。続きは `C-c q m'。"
+  :type 'integer)
+
+(defcustom my:oracle-prompt "SQL> "
+  "対話バッファのプロンプト。
+【重要】変えるなら `my:oracle--prompt-regexp' も合わせる。継続プロンプトは
+出さない（`comint-prompt-regexp' に 2 種類混ぜると、SQLcl 版で
+`sql-interactive-remove-continuation-prompt' が本物のプロンプトを
+食ったのと同種の事故になる）。"
+  :type 'string)
+
+(defcustom my:oracle-script-path nil
+  "`@file' でスクリプトを探すディレクトリ。
+`default-directory' の次に、ここを順に見る。"
+  :type '(repeat directory))
+
+(defcustom my:oracle-script-coding 'undecided
+  "`@file' で読むスクリプトの文字コード。
+【重要】daemon との間は UTF-8 固定なので、化けうるのはファイルを読む瞬間
+だけ。BOM 無し cp932 の `.sql' があるなら `cp932' を指定する。"
+  :type 'coding-system)
+
+(defcustom my:oracle-script-on-error 'stop
+  "`@file' の途中でエラーが出たときどうするか。
+`stop' は止める（既定）、`continue' は続ける、`ask' は訊く。
+【重要】どれでも**トランザクションはそのまま残す**（自動 commit も
+自動 rollback もしない。どちらも「静かにデータが変わる」側に倒れる）。"
+  :type '(choice (const stop) (const continue) (const ask)))
+
+(defcustom my:oracle-script-max-depth 8
+  "`@file' の入れ子の深さの上限。"
   :type 'integer)
 
 (defcustom my:oracle-null-string "-"
@@ -140,11 +181,13 @@ autoCommit は既定 true で、tx の外の DML は即コミットされるた�
                      (shell-quote-argument dir)))))
 
 (defun my:oracle--notify (_conn method params)
-  "daemon からの通知を捌く。"
+  "daemon からの通知を捌く。
+
+【重要】通知で来るのは**行の束だけ**。文の結末（結果・エラー）は
+`sql/exec' の応答で受ける。両方で返すと Emacs 側が 2 回処理して、
+対話バッファにプロンプトが 2 つ出る（実機で踏んだ）。"
   (pcase method
     ('rows/chunk (my:oracle--on-chunk params))
-    ('stmt/result (my:oracle--on-result params))
-    ('stmt/error (my:oracle--on-error params))
     (_ nil)))
 
 (defun my:oracle--ensure-daemon ()
@@ -214,7 +257,8 @@ autoCommit は既定 true で、tx の外の DML は即コミットされるた�
                       :sid (or (plist-get spec :sid) "")
                       :user (plist-get spec :user)
                       :password (my:oracle--password spec)
-                      :autocommit (if my:oracle-autocommit t :json-false))))
+                      :autocommit (if my:oracle-autocommit t :json-false)
+                      :serveroutput (if my:oracle-serveroutput t :json-false))))
          (id (plist-get info :session)))
     (push (cons id (list :name name :info info)) my:oracle--sessions)
     (setq my:oracle--last-session id)
@@ -296,8 +340,25 @@ autoCommit は既定 true で、tx の外の DML は即コミットされるた�
 (defvar my:oracle--pending nil
   "plist: :session :query :text :origin-buffer :origin-pos :columns :rows :start")
 
+(defvar my:oracle--script nil
+  "走っているスクリプトの状態（`@file' と、対話バッファの 1 入力）。
+plist: :queue :name :dest :errors :ignored :done :total :depth :dir
+通知の受け取り側（[6]）から見るので、ここで宣言しておく。")
+
 (defun my:oracle--busy-p ()
   (and my:oracle--pending (plist-get my:oracle--pending :session)))
+
+(defun my:oracle--kind (st)
+  "文の種類をシンボルで返す。
+
+【重要】jsonrpc.el が渡してくる JSON の値は**文字列**で、シンボルでは
+ない。`(eq (plist-get st :kind) \='client)' は**永久に偽**になり、
+`@file' や `SET` が Oracle に送られて ORA-00900 / ORA-00922 になる
+（実機で踏んだ）。"
+  (let ((k (plist-get st :kind)))
+    (cond ((symbolp k) k)
+          ((stringp k) (intern k))
+          (t 'sql))))
 
 (defun my:oracle-statement-at-point ()
   "点のある文を `sql/split' に決めさせて返す。
@@ -317,25 +378,25 @@ autoCommit は既定 true で、tx の外の DML は即コミットされるた�
         (car (last (seq-filter (lambda (st) (<= (plist-get st :end) (1+ pos)))
                                statements))))))
 
-(defun my:oracle--send (text &optional origin-pos)
-  "TEXT を送る。ORIGIN-POS はバッファ内の文の開始位置（エラー位置に使う）。"
+(defun my:oracle--send (text &optional origin-pos dest)
+  "TEXT を送る。
+ORIGIN-POS はバッファ内の文の開始位置（エラー位置に飛ぶのに使う）。
+DEST が非 nil なら、そのバッファにも結果をテキストで出す（対話バッファ）。"
   (when (my:oracle--busy-p)
     (user-error "まだ前の文が走っている（C-c C-k で止める）"))
   (let ((id (my:oracle--session)))
     (setq my:oracle--pending
           (list :session id :text text :columns nil :rows nil
                 :origin-buffer (current-buffer) :origin-pos origin-pos
-                :start (current-time)))
+                :dest dest :start (current-time)))
     (my:oracle--log (format "送信: %s" (my:oracle--one-line text)))
     ;; 【重要】非同期。同期で待つと $/cancel を送れない。
     (jsonrpc-async-request
      (my:oracle--ensure-daemon) 'sql/exec
      (list :session id :text text
            :maxrows my:oracle-maxrows :chunk my:oracle-chunk)
-     :success-fn #'ignore              ; 結末は stmt/result 通知で受ける
+     :success-fn #'my:oracle--on-result
      :error-fn (lambda (err)
-                 ;; stmt/error 通知も来るが、通知より先にこちらが来ることも
-                 ;; あるので両方で終わらせられるようにしておく
                  (my:oracle--finish-error
                   (or (plist-get err :data)
                       (list :message (plist-get err :message) :position -1))))
@@ -348,7 +409,7 @@ autoCommit は既定 true で、tx の外の DML は即コミットされるた�
   (interactive)
   (let ((st (my:oracle-statement-at-point)))
     (unless st (user-error "送る文が無い"))
-    (when (eq (plist-get st :kind) 'client)
+    (when (eq (my:oracle--kind st) 'client)
       (user-error "SQL*Plus のコマンドは Phase 2（%s）" (plist-get st :text)))
     (unless (eq (plist-get st :complete) t)
       (unless (y-or-n-p "文が閉じていない（終端子が無い）。それでも送る? ")
@@ -381,7 +442,12 @@ autoCommit は既定 true で、tx の外の DML は即コミットされるた�
     (jsonrpc-async-request
      (my:oracle--ensure-daemon) 'rows/more
      (list :session id :maxrows my:oracle-maxrows :chunk my:oracle-chunk)
-     :success-fn #'ignore :error-fn #'ignore :timeout nil)))
+     :success-fn #'my:oracle--on-result
+     :error-fn (lambda (err)
+                 (my:oracle--finish-error
+                  (or (plist-get err :data)
+                      (list :message (plist-get err :message) :position -1))))
+     :timeout nil)))
 
 ;;; [6] 通知の受け取り
 
@@ -397,27 +463,88 @@ autoCommit は既定 true で、tx の外の DML は即コミットされるた�
          (id (or (plist-get params :session) (plist-get pending :session)))
          (columns (append (plist-get params :columns) nil))
          (rows (plist-get pending :rows))
-         (elapsed (plist-get params :elapsed_ms)))
+         (dest (plist-get pending :dest))
+         (elapsed (or (plist-get params :elapsed_ms) 0))
+         (query-p (equal (plist-get params :kind) "query"))
+         (implicit (eq (plist-get params :implicit_commit) t)))
     (setq my:oracle--pending nil)
-    (when (eq (plist-get params :implicit_commit) t)
-      (message "この文は暗黙コミットした（DDL なので保留中の変更も確定）"))
-    (if (equal (plist-get params :kind) "query")
-        (my:oracle--render id columns rows params)
-      (my:oracle--log
-       (format "完了: %s 行 (%.1f ms)%s"
-               (or (plist-get params :affected) 0) (or elapsed 0)
-               (if (eq (plist-get params :implicit_commit) t) " ※暗黙コミット" "")))
-      (message "%s 行 (%.1f ms)%s"
-               (or (plist-get params :affected) 0) (or elapsed 0)
-               (my:oracle--tx-suffix params)))
-    (when (eq (plist-get params :implicit_commit) t)
-      (my:oracle--log "※ DDL により暗黙コミットされた"))))
+    ;; プロンプトの tx 印に使うので、いまの tx 状態を覚えておく
+    (when-let* ((entry (cdr (assoc id my:oracle--sessions))))
+      (setf (plist-get entry :info)
+            (plist-put (copy-sequence (plist-get entry :info))
+                       :in_tx (plist-get params :in_tx))))
+    ;; 【重要】DBMS_OUTPUT は結果より**前**に出す（SQL*Plus と同じ順）
+    (my:oracle--emit-output (append (plist-get params :output) nil) dest)
+    (when implicit
+      (my:oracle--log "※ DDL により暗黙コミットされた")
+      (my:oracle--emit dest
+                       (propertize "※ この文は暗黙コミットした（DDL なので保留中の変更も確定）\n"
+                                   'face 'warning)))
+    (if query-p
+        (progn
+          (my:oracle--render id columns rows params)
+          (when dest
+            (my:oracle--emit
+             dest (concat (my:oracle--format-table columns rows)
+                          (my:oracle--feedback-line
+                           (format "%d 行%s" (length rows)
+                                   (if (eq (plist-get params :more) t)
+                                       "（続きあり。C-c q m）" ""))
+                           elapsed params)))))
+      (my:oracle--log (format "完了: %s 行 (%.1f ms)%s"
+                              (or (plist-get params :affected) 0) elapsed
+                              (if implicit " ※暗黙コミット" "")))
+      (when dest
+        (my:oracle--emit
+         dest (my:oracle--feedback-line (my:oracle--feedback-text params)
+                                        elapsed params))))
+    (unless dest
+      (message "%s (%.1f ms)%s"
+               (if query-p (format "%d 行" (length rows))
+                 (my:oracle--feedback-text params))
+               elapsed (my:oracle--tx-suffix params)))
+    ;; 【重要】スクリプト（対話バッファの入力も 1 文のスクリプトとして
+    ;; 流す）が走っているときは、プロンプトは最後に 1 回だけ出す。
+    ;; ここでも出すと `SQL> SQL> ' と二重になる（実機で踏んだ）。
+    (when (and dest (not my:oracle--script)) (my:oracle--repl-ready dest))
+    (my:oracle--script-continue nil)))
+
+(defun my:oracle--feedback-text (params)
+  "文の種類に合わせた完了の文言。
+
+【重要】種類は daemon が `stmt_kind' で教えてくる。Emacs 側で先頭語を
+見て判定し直すと lexer が 2 つになる（§7 と同じ理由）。"
+  (let ((affected (or (plist-get params :affected) 0)))
+    (pcase (plist-get params :stmt_kind)
+      ("plsql" "PL/SQL が完了しました")
+      ("ddl" "完了しました")
+      ("tx" "完了しました")
+      (_ (format "%s 行が処理されました" affected)))))
+
+(defun my:oracle--feedback-line (text elapsed params)
+  "件数・所要・tx の 1 行を作る。"
+  (propertize (format "\n%s  (%.1f ms)%s\n" text elapsed
+                      (if (eq (plist-get params :in_tx) t) "  [TX]" ""))
+              'face 'shadow))
+
+(defun my:oracle--emit (dest text)
+  "DEST（対話バッファ）に TEXT を出す。DEST が nil なら何もしない。"
+  (when (and dest (buffer-live-p dest))
+    (with-current-buffer dest
+      (my:oracle--repl-insert text))))
+
+(defun my:oracle--emit-output (lines dest)
+  "DBMS_OUTPUT の LINES を出す。"
+  (when lines
+    (my:oracle--log (format "DBMS_OUTPUT %d 行" (length lines)))
+    (if dest
+        (my:oracle--emit dest (concat (string-join lines "\n") "\n"))
+      ;; 対話バッファが無いときはログへ（埋もれないよう件数も出す）
+      (dolist (line lines) (my:oracle--log (concat "| " line)))
+      (message "DBMS_OUTPUT %d 行（:log を見る）" (length lines)))))
 
 (defun my:oracle--tx-suffix (params)
   (if (eq (plist-get params :in_tx) t) "  [TX]" ""))
-
-(defun my:oracle--on-error (params)
-  (my:oracle--finish-error params))
 
 (defun my:oracle--finish-error (err)
   "エラーを報告し、位置が分かればソースの該当位置へ飛ぶ。"
@@ -426,15 +553,26 @@ autoCommit は既定 true で、tx の外の DML は即コミットされるた�
          (code (plist-get err :code))
          (pos (plist-get err :position))
          (buf (plist-get pending :origin-buffer))
+         (dest (plist-get pending :dest))
          (origin (plist-get pending :origin-pos)))
     (setq my:oracle--pending nil)
     (my:oracle--log (format "エラー: %s" (my:oracle--one-line msg)))
+    ;; エラーの前に出た DBMS_OUTPUT も見せる（SQL*Plus と同じ）
+    (my:oracle--emit-output (append (plist-get err :output) nil) dest)
     ;; 【重要】position は 0 始まりの**文字**オフセット（daemon が
     ;; `error occur at position: N' から取っている）
     (when (and pos (>= pos 0) origin (buffer-live-p buf))
       (with-current-buffer buf
         (goto-char (min (point-max) (+ origin pos)))))
-    (message "%s%s" (if code (format "ORA-%05d " code) "") msg)))
+    (if dest
+        (progn
+          (my:oracle--emit dest (propertize (concat msg "\n") 'face 'error))
+          ;; 【重要】スクリプト（対話バッファの 1 入力も 1 文のスクリプト）
+          ;; が走っているときは、プロンプトは最後に 1 回だけ出す。
+          ;; ここでも出すと `SQL> SQL> ' と二重になる（実機で踏んだ）。
+          (unless my:oracle--script (my:oracle--repl-ready dest)))
+      (message "%s%s" (if code (format "ORA-%05d " code) "") msg))
+    (my:oracle--script-continue (or msg "error"))))
 
 ;;; [7] 表示
 
@@ -465,12 +603,14 @@ autoCommit は既定 true で、tx の外の DML は即コミットされるた�
   (let ((gap (max 0 (- width (string-width s)))))
     (if right (concat (make-string gap ?\s) s) (concat s (make-string gap ?\s)))))
 
-(defun my:oracle--render (id columns rows params)
-  "結果の表を出す。
-`vtable' は Phase 2 で検討する（CJK の桁は `string-width' で揃う。
-テキストの整形器は書き出しと対話バッファでも要るので、まずこちらを作る）。"
-  (let* ((buf (my:oracle--rows-buffer id))
-         (names (mapcar (lambda (c) (or (plist-get c :name) "")) columns))
+(defun my:oracle--format-table (columns rows)
+  "COLUMNS と ROWS を桁の揃ったテキストにして返す。
+結果バッファと対話バッファと書き出しで共有する。
+
+【重要】桁は `string-width' で数える（`length' ではない）。あわせて、
+印に使う文字は**描画幅と `string-width' が一致**していないといけない
+（`my:oracle-null-string' の説明を参照）。"
+  (let* ((names (mapcar (lambda (c) (or (plist-get c :name) "")) columns))
          (numeric (mapcar (lambda (c) (eq (plist-get c :numeric) t)) columns))
          (cells (mapcar (lambda (row)
                           (mapcar #'my:oracle--cell (append row nil)))
@@ -484,29 +624,37 @@ autoCommit は既定 true で、tx の外の DML は即コミットされるた�
                                    (string-width (or (nth i row) "")))
                                  cells))))
            names)))
+    (concat
+     (string-join
+      (seq-map-indexed
+       (lambda (name i)
+         (propertize (my:oracle--pad (my:oracle--truncate name (nth i widths))
+                                     (nth i widths) nil)
+                     'face 'my:oracle-header-face))
+       names)
+      " │ ")
+     "\n"
+     (string-join (mapcar (lambda (w) (make-string w ?─)) widths) "─┼─")
+     "\n"
+     (mapconcat
+      (lambda (row)
+        (string-join
+         (seq-map-indexed
+          (lambda (w i)
+            (my:oracle--pad (my:oracle--truncate (or (nth i row) "") w)
+                            w (nth i numeric)))
+          widths)
+         " │ "))
+      cells "\n")
+     (if cells "\n" ""))))
+
+(defun my:oracle--render (id columns rows params)
+  "結果の表を結果バッファに出す。"
+  (let ((buf (my:oracle--rows-buffer id)))
     (with-current-buffer buf
       (let ((inhibit-read-only t))
         (erase-buffer)
-        ;; 見出し
-        (insert (string-join
-                 (seq-map-indexed
-                  (lambda (name i)
-                    (propertize (my:oracle--pad (my:oracle--truncate name (nth i widths))
-                                                (nth i widths) nil)
-                                'face 'my:oracle-header-face))
-                  names)
-                 " │ ")
-                "\n")
-        (insert (string-join (mapcar (lambda (w) (make-string w ?─)) widths) "─┼─") "\n")
-        (dolist (row cells)
-          (insert (string-join
-                   (seq-map-indexed
-                    (lambda (w i)
-                      (my:oracle--pad (my:oracle--truncate (or (nth i row) "") w)
-                                      w (nth i numeric)))
-                    widths)
-                   " │ ")
-                  "\n"))
+        (insert (my:oracle--format-table columns rows))
         (when (eq (plist-get params :more) t)
           (insert (propertize
                    (format "\n--- %d 行で止めている（C-c q m で続き）---\n" (length rows))
@@ -574,19 +722,394 @@ autoCommit は既定 true で、tx の外の DML は即コミットされるた�
              (if (eq (plist-get info :in_tx) t) "あり" "なし")
              (if (eq (plist-get info :can_cancel_sql) t) "可" "不可"))))
 
-;;; [9] キーバインド
-
 (defvar my:oracle-prefix-map
   (let ((map (make-sparse-keymap)))
     (define-key map "o" #'my:oracle-connect)
+    (define-key map "r" #'my:oracle-repl)
     (define-key map "c" #'my:oracle-commit)
     (define-key map "b" #'my:oracle-rollback)
     (define-key map "a" #'my:oracle-toggle-autocommit)
+    (define-key map "s" #'my:oracle-toggle-serveroutput)
+    (define-key map "f" #'my:oracle-run-script)
     (define-key map "m" #'my:oracle-more)
     (define-key map "i" #'my:oracle-info)
     (define-key map "q" #'my:oracle-disconnect)
     map)
-  "`C-c q' に置くキーマップ（q = query）。")
+  "`C-c q' に置くキーマップ（q = query）。
+【重要】対話バッファのキーマップから参照するので、ここより後ろで
+定義してはいけない（void-variable になる）。")
+
+;;; [9] 対話バッファ（SQL> プロンプト）
+
+;; `comint-mode' 派生。入力履歴（M-p / M-n）・プロンプトの read-only・
+;; 入力行の kill / yank・履歴のファイル保存を持っているので、
+;; `my-claude' のように確定領域とマーカーを自作するより安い。
+;;
+;; 【重要】comint は「本物のプロセス」を前提にしているが、daemon との
+;; 通信は JSON-RPC で、そこに comint 用の stdin は無い。そこで
+;; `make-pipe-process' で**書き込みが捨てられるだけのプロセス**を握らせる。
+;; `ielm' は同じ目的で hexl を起こすが、Windows のプロセス生成は 59〜76 ms
+;; かかるうえ無駄な子が残る。pipe プロセスなら子は無い。
+;; 実際の送信は `comint-input-sender' を差し替えて横取りする。
+
+(defvar my:oracle--prompt-regexp "^SQL\\*?> "
+  "プロンプトの正規表現。
+【重要】トランザクション中を `SQL*> ' で示すので、**最初から両方**を
+含めてある（SQLcl 版で `:prompt-regexp' に ANSI escape を入れ忘れて
+`sql-redirect' が固まったのと同じ種類の抜けを作らないため）。")
+
+(defvar-local my:oracle--repl-queue nil
+  "応答待ちの間に打たれた入力（逆順）。")
+
+(defvar my:oracle-repl-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "RET") #'my:oracle-repl-return)
+    (define-key map (kbd "C-j") #'my:oracle-repl-newline)
+    (define-key map (kbd "C-c C-k") #'my:oracle-cancel)
+    (define-key map (kbd "C-c q") my:oracle-prefix-map)
+    ;; 【重要】comint の「プロセスにシグナルを送る」キーを全部潰す。
+    ;; ダミープロセスを殺すと**画面は死ぬのに Oracle 側の文は走り続ける**
+    ;; という最悪の壊れ方をする。
+    (define-key map (kbd "C-c C-c") #'my:oracle-repl-send-force)
+    (define-key map (kbd "C-c C-\\") #'my:oracle-cancel)
+    (define-key map (kbd "C-c C-d") #'ignore)
+    (define-key map (kbd "C-c C-z") #'ignore)
+    map)
+  "対話バッファのキーマップ。")
+
+(define-derived-mode my:oracle-repl-mode comint-mode "Oracle"
+  "oracled と話す対話バッファ。"
+  (setq comint-prompt-regexp my:oracle--prompt-regexp
+        comint-prompt-read-only t
+        comint-use-prompt-regexp nil
+        comint-process-echoes nil      ; 入力はバッファに残るので自前のエコーは不要
+        comint-input-sender #'my:oracle--repl-sender
+        comint-input-ring-file-name
+        (expand-file-name "oracle-history" user-emacs-directory))
+  ;; 【重要】履歴にパスワードを残さない。
+  (add-hook 'comint-input-filter-functions #'my:oracle--repl-input-filter nil t)
+  (setq-local truncate-lines t)
+  (comint-read-input-ring t)
+  (add-hook 'kill-buffer-hook #'comint-write-input-ring nil t))
+
+(defun my:oracle--repl-input-filter (input)
+  "履歴に入れてよい入力か。"
+  (not (string-match-p "\\`[ \t]*\\(connect\\|conn\\)\\b" (downcase input))))
+
+(defun my:oracle--repl-buffer (id)
+  "session ID の対話バッファを作る（無ければ）。"
+  (let ((buf (get-buffer-create (my:oracle--buffer-name id nil))))
+    (with-current-buffer buf
+      (unless (derived-mode-p 'my:oracle-repl-mode)
+        (my:oracle-repl-mode)
+        ;; comint が要求するプロセス。書いたものは捨てられる
+        (let ((proc (make-pipe-process
+                     :name (format "oracle-repl-%s" id)
+                     :buffer (current-buffer) :noquery t :coding 'utf-8-unix
+                     :filter #'ignore :sentinel #'ignore)))
+          (set-marker (process-mark proc) (point-max))))
+      (setq my:oracle--session-id id)
+      (when (= (buffer-size) 0)
+        (my:oracle--repl-insert
+         (propertize (format "-- oracled %s --\n" id) 'face 'shadow))
+        (my:oracle--repl-ready (current-buffer))))
+    buf))
+
+(defun my:oracle--tx-prompt ()
+  "トランザクション中のプロンプト（`SQL> ' → `SQL*> '）。
+【重要】`my:oracle--prompt-regexp' に一致する形でないといけない。
+一致しないと comint がプロンプトと認識せず、M-p の挿入位置が壊れる。"
+  (let ((trimmed (string-trim-right my:oracle-prompt)))
+    (concat (string-remove-suffix ">" trimmed) "*> ")))
+
+(defun my:oracle--repl-insert (text)
+  "【重要】`comint-output-filter' を通して書く。
+`insert' を直書きすると `process-mark' と `comint-last-output-start' が
+ずれ、プロンプトの read-only 境界と M-p の挿入位置が壊れる。"
+  (let ((proc (get-buffer-process (current-buffer))))
+    (if proc
+        (comint-output-filter proc text)
+      (let ((inhibit-read-only t))
+        (goto-char (point-max))
+        (insert text)))))
+
+(defun my:oracle--repl-ready (buffer)
+  "応答が終わったのでプロンプトを出し、溜まっていた入力を流す。"
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (my:oracle--repl-insert
+       (let ((info (plist-get (cdr (assoc my:oracle--session-id my:oracle--sessions))
+                              :info)))
+         ;; tx 中は SQL*> にする（prompt-regexp は両方を含めてある）。
+         ;; 【重要】形を間違えると prompt-regexp に一致せず、comint が
+         ;; プロンプトと認識しなくなる（M-p の挿入位置が壊れる）
+         (if (eq (plist-get info :in_tx) t)
+             (my:oracle--tx-prompt)
+           my:oracle-prompt)))
+      ;; 保留していた入力を 1 つだけ流す（残りはキューに戻してから呼ぶ。
+      ;; 先に呼ぶと、sender が押し戻したものを上書きして失う）
+      (let ((queued (nreverse my:oracle--repl-queue)))
+        (when queued
+          (setq my:oracle--repl-queue (nreverse (cdr queued)))
+          (my:oracle--repl-sender (get-buffer-process (current-buffer))
+                                  (car queued)))))))
+
+(defun my:oracle--repl-sender (_proc input)
+  "対話バッファの入力を捌く（`comint-input-sender'）。
+daemon には書かない（ダミープロセスに書くと取りこぼす）。"
+  (let ((text (string-trim input))
+        (buffer (current-buffer)))
+    (cond
+     ((string-empty-p text) (my:oracle--repl-ready buffer))
+     ;; 応答待ちなら保留する。SQLcl 版の「接続が済む前に送ると二度と
+     ;; 応えない」への対処と同じ仕掛けだが、今回は回避策ではなく仕様
+     ((my:oracle--busy-p)
+      (push input my:oracle--repl-queue)
+      (message "応答待ち。終わってから送ります（%d 件）"
+               (length my:oracle--repl-queue)))
+     (t
+      (let* ((res (my:oracle--request 'sql/split (list :text text)))
+             (statements (append (plist-get res :statements) nil)))
+        (if (null statements)
+            (my:oracle--repl-ready buffer)
+          ;; 複数の文が 1 回の入力に入っていたらスクリプトとして順に流す
+          (my:oracle--script-start statements "入力" buffer)))))))
+
+;;;###autoload
+(defun my:oracle-repl ()
+  "対話バッファを開く。"
+  (interactive)
+  (let ((id (my:oracle--session)))
+    (pop-to-buffer (my:oracle--repl-buffer id))))
+
+(defun my:oracle-repl-newline ()
+  "送らずに改行する。"
+  (interactive)
+  (insert "\n"))
+
+(defun my:oracle-repl-send-force ()
+  "文が閉じていなくても送る。"
+  (interactive)
+  (comint-send-input))
+
+(defun my:oracle-repl-return ()
+  "文が閉じていれば送り、閉じていなければ改行する。
+
+【重要】判定は daemon の `sql/split' の `complete' に任せる。
+「文字列リテラルの途中」「END; がまだ無い」を Emacs 側の正規表現で
+書くと lexer が 2 つになる。"
+  (interactive)
+  (let* ((proc (get-buffer-process (current-buffer)))
+         (start (if proc (marker-position (process-mark proc)) (point-min)))
+         (input (string-trim (buffer-substring-no-properties start (point-max)))))
+    (cond
+     ((string-empty-p input) (comint-send-input))
+     ;; client コマンド（@file / SET ...）は 1 行で完結する
+     ((string-prefix-p "@" input) (comint-send-input))
+     (t
+      (let* ((res (my:oracle--request 'sql/split (list :text input)))
+             (statements (append (plist-get res :statements) nil))
+             (last (car (last statements))))
+        (if (and last (eq (plist-get last :complete) t))
+            (comint-send-input)
+          (my:oracle-repl-newline)))))))
+
+;;; [10] @file — 最小のスクリプト実行
+
+;; 対応するのは DML / DDL / PL/SQL ブロック / @ / @@ / EXEC / PROMPT /
+;; EXIT / COMMIT / ROLLBACK まで。**フルスペックの SQL*Plus ではない。**
+;;
+;; 【重要】未対応のコマンドは Oracle に送らず、無視したことを必ず報告する。
+;; 送ると ORA-00900 の山になって本当のエラーが埋もれ、黙って飛ばすと
+;; 「スクリプトが半分だけ効いた」ことに気づけない。
+
+(defconst my:oracle--script-ignorable
+  '("SET" "COLUMN" "COL" "SPOOL" "DEFINE" "DEF" "UNDEFINE" "UNDEF"
+    "ACCEPT" "TTITLE" "BTITLE" "WHENEVER" "VARIABLE" "VAR" "PRINT"
+    "PAUSE" "CLEAR" "BREAK" "COMPUTE" "TIMING" "SHOW" "HOST" "EDIT"
+    "SAVE" "GET" "STORE" "LIST" "L" "RUN" "R" "COPY" "ARCHIVE"
+    "CONNECT" "DISCONNECT" "DESC" "DESCRIBE" "INFO")
+  "受け取るが実行しないコマンド（報告して飛ばす）。")
+
+(defun my:oracle--script-resolve (path dir)
+  "PATH を探す。拡張子が無ければ `.sql' を補う。"
+  (let* ((name (if (file-name-extension path) path (concat path ".sql")))
+         (dirs (cons (or dir default-directory) my:oracle-script-path)))
+    (or (seq-find #'file-readable-p
+                  (mapcar (lambda (d) (expand-file-name name d)) dirs))
+        (and (file-name-absolute-p name) (file-readable-p name) name))))
+
+(defun my:oracle--script-read (file)
+  "FILE を読んで文に切り分ける。"
+  (let ((text (let ((coding-system-for-read my:oracle-script-coding))
+                (with-temp-buffer
+                  (insert-file-contents file)
+                  (buffer-substring-no-properties (point-min) (point-max))))))
+    (append (plist-get (my:oracle--request 'sql/split (list :text text))
+                       :statements)
+            nil)))
+
+(defun my:oracle--script-start (statements name dest &optional depth dir)
+  "STATEMENTS を順に流す。"
+  (setq my:oracle--script
+        (list :queue statements :name name :dest dest :errors 0 :ignored 0
+              :done 0 :total (length statements)
+              :depth (or depth 0) :dir (or dir default-directory)))
+  (my:oracle--script-step))
+
+;;;###autoload
+(defun my:oracle-run-script (file)
+  "FILE の中身を順に実行する（`@file' と同じ）。"
+  (interactive "fスクリプト: ")
+  (when (my:oracle--busy-p)
+    (user-error "まだ前の文が走っている"))
+  (let ((id (my:oracle--session)))
+    (my:oracle--script-start (my:oracle--script-read file)
+                             (file-name-nondirectory file)
+                             (get-buffer (my:oracle--buffer-name id nil))
+                             0 (file-name-directory file))))
+
+(defun my:oracle--script-step ()
+  "キューの先頭を 1 つ実行する。"
+  (let* ((st (car (plist-get my:oracle--script :queue)))
+         (dest (plist-get my:oracle--script :dest)))
+   (if (null st)
+       (my:oracle--script-finish)
+    (setf (plist-get my:oracle--script :queue)
+          (cdr (plist-get my:oracle--script :queue)))
+    (cl-incf (plist-get my:oracle--script :done))
+    (let ((kind (my:oracle--kind st))
+          (text (plist-get st :text)))
+      ;; 送る文を echo する（SQL*Plus の SET ECHO ON 相当）
+      (when (and dest (> (plist-get my:oracle--script :total) 1))
+        (my:oracle--emit dest (propertize (concat text "\n") 'face 'shadow)))
+      (pcase kind
+        ('client (my:oracle--script-client st))
+        (_ (my:oracle--send text nil dest)))))))
+
+(defun my:oracle--script-client (st)
+  "client コマンドを捌く。実行しないものは報告して次へ。"
+  (let* ((cmd (plist-get st :command))
+         (text (plist-get st :text))
+         (dest (plist-get my:oracle--script :dest))
+         (line (plist-get st :line))
+         (arg (string-trim (substring text (min (length text)
+                                                (length (or cmd "")))))))
+    (pcase cmd
+      ((or "@" "@@")
+       (let* ((rel (string-trim (substring text (length cmd))))
+              (dir (if (equal cmd "@@") (plist-get my:oracle--script :dir)
+                     default-directory))
+              (depth (1+ (plist-get my:oracle--script :depth)))
+              (file (my:oracle--script-resolve rel dir)))
+         (cond
+          ((> depth my:oracle-script-max-depth)
+           (my:oracle--script-note (format "%s: 入れ子が深すぎる" text) t))
+          ((not file)
+           (my:oracle--script-note (format "%s: ファイルが無い" text) t))
+          (t
+           ;; 読み込んだ文をキューの先頭に差し込む
+           (setf (plist-get my:oracle--script :queue)
+                 (append (my:oracle--script-read file)
+                         (plist-get my:oracle--script :queue)))
+           (setf (plist-get my:oracle--script :dir) (file-name-directory file))
+           (setf (plist-get my:oracle--script :depth) depth)
+           (setf (plist-get my:oracle--script :name) (file-name-nondirectory file))
+           ;; 総数を数え直す。これをしないと「1 文のスクリプト」のままで、
+           ;; 各文の echo も最後の要約も出ない
+           (setf (plist-get my:oracle--script :total)
+                 (+ (plist-get my:oracle--script :done)
+                    (length (plist-get my:oracle--script :queue))))))
+         (my:oracle--script-step)))
+      ((or "EXEC" "EXECUTE")
+       ;; BEGIN ... END; に包むだけ（これは安いので訳す）
+       (my:oracle--send (format "begin %s; end;" (string-trim-right arg ";"))
+                        nil dest))
+      ("PROMPT"
+       (my:oracle--emit dest (concat arg "\n"))
+       (my:oracle--script-step))
+      ((or "REM" "REMARK") (my:oracle--script-step))
+      ((or "EXIT" "QUIT")
+       (my:oracle--script-note "EXIT でスクリプトを終了" nil)
+       (setf (plist-get my:oracle--script :queue) nil)
+       (my:oracle--script-step))
+      ("SET"
+       ;; SET SERVEROUTPUT だけは読み替える
+       (if (string-match-p "\\`serveroutput\\b" (downcase arg))
+           (let ((on (not (string-match-p "\\boff\\b" (downcase arg)))))
+             (my:oracle--request 'session/serveroutput
+                                 (list :session (my:oracle--session)
+                                       :on (if on t :json-false)))
+             (my:oracle--script-note (format "SERVEROUTPUT %s" (if on "ON" "OFF")) nil))
+         (my:oracle--script-ignore cmd line))
+       (my:oracle--script-step))
+      (_
+       (if (member cmd my:oracle--script-ignorable)
+           (my:oracle--script-ignore cmd line)
+         (my:oracle--script-note (format "%s: 知らないコマンド（無視）" text) t))
+       (my:oracle--script-step)))))
+
+(defun my:oracle--script-ignore (cmd line)
+  "未対応のコマンドを報告する（Oracle には送らない）。"
+  (cl-incf (plist-get my:oracle--script :ignored))
+  (my:oracle--script-note (format "%d 行目: %s は未対応（無視しました）"
+                                  (or line 0) cmd)
+                          t))
+
+(defun my:oracle--script-note (text warn)
+  (my:oracle--log text)
+  (my:oracle--emit (plist-get my:oracle--script :dest)
+                   (propertize (concat text "\n")
+                               'face (if warn 'warning 'shadow))))
+
+(defun my:oracle--script-continue (error-message)
+  "1 文が終わったので次へ進む（結果・エラーの通知から呼ばれる）。"
+  (when my:oracle--script
+    (if (not error-message)
+        (my:oracle--script-step)
+      (cl-incf (plist-get my:oracle--script :errors))
+      (pcase my:oracle-script-on-error
+        ('continue (my:oracle--script-step))
+        ('ask (if (y-or-n-p "エラーが出た。続ける? ")
+                  (my:oracle--script-step)
+                (my:oracle--script-abort "中止した")))
+        (_ (my:oracle--script-abort "エラーで止めた"))))))
+
+(defun my:oracle--script-abort (why)
+  (let ((rest (length (plist-get my:oracle--script :queue))))
+    (when (> rest 0)
+      (my:oracle--script-note (format "%s（残り %d 文は実行していない）" why rest) t)))
+  (setf (plist-get my:oracle--script :queue) nil)
+  (my:oracle--script-finish))
+
+(defun my:oracle--script-finish ()
+  "【重要】要約を必ず出す。無視した件数が分からないと、
+スクリプトが半分だけ効いたことに気づけない。"
+  (let* ((s my:oracle--script)
+         (dest (plist-get s :dest))
+         (text (format "-- %s: %d 文を実行、エラー %d、無視 %d --"
+                       (plist-get s :name) (plist-get s :done)
+                       (plist-get s :errors) (plist-get s :ignored))))
+    (setq my:oracle--script nil)
+    (when (> (plist-get s :total) 1)
+      (my:oracle--log text)
+      (my:oracle--emit dest (propertize (concat text "\n") 'face 'shadow))
+      (message "%s" text))
+    (when dest (my:oracle--repl-ready dest))))
+
+;;;###autoload
+(defun my:oracle-toggle-serveroutput ()
+  "`DBMS_OUTPUT' の取得を入り切りする。"
+  (interactive)
+  (let* ((id (my:oracle--session))
+         (info (plist-get (cdr (assoc id my:oracle--sessions)) :info))
+         (on (not (eq (plist-get info :serveroutput) t)))
+         (new (my:oracle--request 'session/serveroutput
+                                  (list :session id :on (if on t :json-false)))))
+    (setf (plist-get (cdr (assoc id my:oracle--sessions)) :info) new)
+    (message "SERVEROUTPUT %s" (if (eq (plist-get new :serveroutput) t) "ON" "OFF"))))
+
+;;; [11] キーバインド
 
 (use-package sql
   :defer t

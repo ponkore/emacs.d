@@ -143,6 +143,22 @@ func (s *server) Handle(c *rpc.Conn, id json.RawMessage, method string,
 		}
 		return sess.Info(), nil
 
+	case "session/serveroutput":
+		sess, rerr := s.session(params)
+		if rerr != nil {
+			return nil, rerr
+		}
+		var p struct {
+			On bool `json:"on"`
+		}
+		if err := unmarshal(params, &p); err != nil {
+			return nil, err
+		}
+		if err := sess.SetServerOutput(context.Background(), p.On); err != nil {
+			return nil, dbError(err)
+		}
+		return sess.Info(), nil
+
 	case "tx/autocommit":
 		sess, rerr := s.session(params)
 		if rerr != nil {
@@ -221,14 +237,13 @@ func (s *server) exec(c *rpc.Conn, params json.RawMessage) (any, *rpc.Error) {
 		if err.Error() == "busy" {
 			return nil, rpc.Errorf(rpc.CodeBusy, "その session は別の文を走らせている")
 		}
+		// 【重要】結末は応答だけで返す。通知でも返すと Emacs 側が
+		// 2 回処理して、対話バッファにプロンプトが 2 つ出る（実機で踏んだ）。
+		// エラーの前に出た DBMS_OUTPUT も一緒に渡す（SQL*Plus と同じ）。
 		oe := oradb.Classify(err)
-		c.Notify("stmt/error", map[string]any{
-			"session": sess.ID, "code": oe.Code, "message": oe.Message,
-			"position": oe.Position,
-		})
+		oe.Output = sess.LastOutput()
 		return nil, &rpc.Error{Code: rpc.CodeDBError, Message: oe.Message, Data: oe}
 	}
-	c.Notify("stmt/result", withSession(sess.ID, res))
 	return res, nil
 }
 
@@ -258,16 +273,7 @@ func (s *server) more(c *rpc.Conn, params json.RawMessage) (any, *rpc.Error) {
 		oe := oradb.Classify(err)
 		return nil, &rpc.Error{Code: rpc.CodeDBError, Message: oe.Message, Data: oe}
 	}
-	c.Notify("stmt/result", withSession(sess.ID, res))
 	return res, nil
-}
-
-func withSession(id string, res *oradb.Result) map[string]any {
-	b, _ := json.Marshal(res)
-	var m map[string]any
-	_ = json.Unmarshal(b, &m)
-	m["session"] = id
-	return m
 }
 
 func (s *server) session(params json.RawMessage) (*oradb.Session, *rpc.Error) {

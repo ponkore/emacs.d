@@ -8,9 +8,10 @@ SQLcl を介さずに直接 DB と話す。
 Emacs ──stdio (JSON-RPC 2.0 / Content-Length)──> oracled ──TCP──> Oracle
 ```
 
-**現状: Phase 1 完了（2026-10-28）。** daemon（`cmd/oracled`）と Elisp
-（`../user-lisp/my-oracle.el`）が動いている。`.sql` バッファから送って表で見て、
-走っている文を止められる。対話バッファ（`SQL> `）と `@file` は Phase 2。
+**現状: Phase 2 完了（2026-10-28）。** daemon（`cmd/oracled`）と Elisp
+（`../user-lisp/my-oracle.el`）が動いている。`.sql` バッファからの送信に加えて、
+**`SQL> ` プロンプトの対話バッファ**・**`@file`**・**`DBMS_OUTPUT`** が使える。
+残るのは `DESCRIBE` / オブジェクト一覧 / 補完（Phase 2.5）。
 
 | | |
 |---|---|
@@ -120,6 +121,7 @@ export ORACLED_PASSWORD=...     # これだけは環境変数
 |---|---|
 | ~~**Phase 0**~~ | 完了。繋ぐ / 割り込む / 日本語 / 型 / 書き込みと tx を実測 → [docs/phase0-findings.md](docs/phase0-findings.md) |
 | ~~**Phase 1**~~ | 完了。JSON-RPC・session・`sql/exec` + 行の分割送信・`sql/split` + テスト・エラーの構造化。Emacs 側は送信・結果の表・割り込み・tx |
+| ~~**Phase 2**~~ | 完了。対話バッファ（`SQL> `）・`@file`・`DBMS_OUTPUT`・tx 表示 |
 | Phase 2 | **対話バッファ**（`SQL> `）・**`@file`**・`DBMS_OUTPUT`・autocommit と tx 表示。ここで日常用途が置き換わる |
 | Phase 2.5 | `meta/describe` / `meta/objects` / 補完 |
 | Phase 3 | バインド変数・縦表示・CSV/JSON 書き出し・`EXPLAIN PLAN` |
@@ -138,7 +140,39 @@ export ORACLED_PASSWORD=...     # これだけは環境変数
 | `C-c q c` / `C-c q b` | commit / rollback |
 | `C-c q a` | autocommit の切り替え（tx 中は daemon が拒否する） |
 | `C-c q m` | 止めたカーソルから続きを取る |
+| `C-c q r` | **対話バッファ**（`SQL> ` プロンプト）を開く |
+| `C-c q f` | スクリプトを選んで実行（`@file` と同じ） |
+| `C-c q s` | `DBMS_OUTPUT` の入り切り |
 | `C-c q i` / `C-c q q` | 状態を出す / 切る |
+
+### 対話バッファ（`*oracle(接続名)*`）
+
+`comint` 派生。入力履歴（`M-p` / `M-n`）とプロンプトの read-only が効く。
+
+| キー | |
+|---|---|
+| `RET` | **文が閉じていれば送る。閉じていなければ改行**（判定は daemon の `sql/split`） |
+| `C-j` | 常に改行 |
+| `C-c C-c` | 閉じていなくても強制的に送る |
+| `C-c C-k` | 割り込み |
+
+PL/SQL ブロックは SQL\*Plus と同じく**単独行の `/` で終わる**まで待つ。
+トランザクション中はプロンプトが `SQL*> ` になる（**実際に書いたときだけ**。
+`SELECT` だけでは付かない）。
+
+### `@file`
+
+対応するのは **DML / DDL / PL/SQL ブロック / `@` / `@@` / `EXEC` / `PROMPT` /
+`EXIT` / `COMMIT` / `ROLLBACK`** まで。`SET`（`SERVEROUTPUT` を除く）/
+`COLUMN` / `SPOOL` / `DEFINE` / `&1` / `WHENEVER` は**未対応**。
+
+**【重要】未対応のコマンドは Oracle に送らず、「12 行目: SPOOL は未対応
+（無視しました）」と報告し、最後に「無視 n」を要約に入れる。** 送ると
+ORA-00900 の山で本当のエラーが埋もれ、黙って飛ばすとスクリプトが半分だけ
+効いたことに気づけない。
+
+エラーが出たら既定で止まり（`my:oracle-script-on-error`）、
+**トランザクションはそのまま残す**（自動 commit も自動 rollback もしない）。
 
 結果は `*oracle(接続名):rows*` に表で出る（桁は `string-width` で揃えるので
 **日本語を含む列でもずれない**）。履歴は `*oracle(接続名):log*`。
