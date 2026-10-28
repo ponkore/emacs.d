@@ -305,6 +305,28 @@ daemon 側に「いま tx を持っているか」の状態が増えるので、
 tx 表示はこの内部状態と `DBMS_TRANSACTION.LOCAL_TRANSACTION_ID` の
 両方で確かめる（下記）。
 
+#### 【重要】tx とカーソルは「セッション寿命の context」で作る（2026-10-28）
+
+Phase 1 の統合テストで 3 件まとめて落ちた。**原因は 1 つで、tx と
+開いたままのカーソルを「文の context」で作っていたこと。**
+
+| 症状 | |
+|---|---|
+| `rows/more` が `context canceled` | `Exec` から戻るときの `cancel()` でカーソルの context が死ぬ |
+| 割り込み後に `sql: transaction has already been committed or rolled back` | 文を cancel すると `database/sql` が tx を道連れにロールバックする |
+| そのあとの `tx/rollback` が `ORA-01013` | 同じ。tx が既に死んでいる |
+
+`conn.BeginTx(ctx, …)` の `ctx` が死ぬと、`database/sql` は
+**awaitDone で勝手に tx をロールバックして閉じる**。したがって:
+
+- tx は `session.baseCtx`（セッション寿命）で張る
+- 文は `baseCtx` の**子**で作る。cancel しても tx に波及しない
+- 行を残すとき（`more` が真）は、**その文の `cancel` をカーソルに持たせて
+  手放す**。`rows/close` か次の文のときに呼ぶ
+
+**割り込みが「効く」ことと「tx が生き残る」ことは別に確かめる。**
+前者だけ見ていると、ユーザーは「止めたらトランザクションが消えた」に出会う。
+
 #### 【重要】DDL は保留中の DML を巻き込んでコミットする（実測）
 
 tx の中で `CREATE TABLE` を実行したら、**その前の未コミットの INSERT が

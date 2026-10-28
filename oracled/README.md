@@ -8,7 +8,9 @@ SQLcl を介さずに直接 DB と話す。
 Emacs ──stdio (JSON-RPC 2.0 / Content-Length)──> oracled ──TCP──> Oracle
 ```
 
-**現状: Phase 0 完了（2026-10-28）。Phase 1 待ち。** daemon と Elisp はまだ無い。
+**現状: Phase 1 完了（2026-10-28）。** daemon（`cmd/oracled`）と Elisp
+（`../user-lisp/my-oracle.el`）が動いている。`.sql` バッファから送って表で見て、
+走っている文を止められる。対話バッファ（`SQL> `）と `@file` は Phase 2。
 
 | | |
 |---|---|
@@ -70,8 +72,11 @@ SQLcl が **CLI** であることに由来するコストを払い続けてい�
 
 | | |
 |---|---|
-| `cmd/probe/` | **Phase 0 の計測用コマンド。**daemon の前に「成立するか」を測る |
-| `cmd/oracled/` | daemon 本体（Phase 1 から） |
+| `cmd/oracled/` | **daemon 本体。**JSON-RPC の捌き（`main.go`）と統合テスト |
+| `internal/sqlsplit/` | **文の切り分け（lexer）。**終端子・コメント・`q'[]'`・`@file` の規則はここだけが持つ。テーブル駆動テスト 37 件 |
+| `internal/oradb/` | session（固定した `*sql.Conn`、tx、行の分割送信、割り込み、型変換） |
+| `internal/rpc/` | stdio 上の JSON-RPC 2.0（`Content-Length`） |
+| `cmd/probe/` | Phase 0 の計測用コマンド。設計の前提を測り直すときに使う |
 | `docs/` | 設計と実測の記録 |
 | `oracled.exe` | ビルド成果物。**git 管理外**（`ptyd.exe` と同じ扱い） |
 
@@ -81,9 +86,13 @@ Go のツールチェインが要る（`ptyd` と同じ）。依存は go-ora �
 
 ```sh
 cd ~/.emacs.d/oracled
-go build -o probe.exe ./cmd/probe     # Phase 0
-go build -o oracled.exe ./cmd/oracled # Phase 1 以降
+go build -o oracled.exe ./cmd/oracled
+go build -o probe.exe ./cmd/probe     # Phase 0 の計測用
+go test ./...                         # DB 無しでも通る（lexer と RPC）
+ORACLED_PASSWORD=... go test ./cmd/oracled/   # 実 DB に繋ぐ統合テスト
 ```
+
+Emacs 側は `M-x my:oracle-build` でも作れる。
 
 ### 【重要】パスワードはコマンドライン引数に載せない
 
@@ -109,10 +118,28 @@ export ORACLED_PASSWORD=...     # これだけは環境変数
 
 | | 内容 |
 |---|---|
-| **Phase 0** | 繋ぐ / 1 文投げる / **重い文を割り込む** / 日本語の往復 / 型の表現。**ここが駄目なら企画をやめる** |
-| Phase 1 | JSON-RPC・session・`sql/exec` + 行の分割送信・`sql/split`（文の切り分け）+ テスト。Emacs 側は `.sql` からの `C-c C-c` と結果の表、割り込みだけ |
+| ~~**Phase 0**~~ | 完了。繋ぐ / 割り込む / 日本語 / 型 / 書き込みと tx を実測 → [docs/phase0-findings.md](docs/phase0-findings.md) |
+| ~~**Phase 1**~~ | 完了。JSON-RPC・session・`sql/exec` + 行の分割送信・`sql/split` + テスト・エラーの構造化。Emacs 側は送信・結果の表・割り込み・tx |
 | Phase 2 | **対話バッファ**（`SQL> `）・**`@file`**・`DBMS_OUTPUT`・autocommit と tx 表示。ここで日常用途が置き換わる |
 | Phase 2.5 | `meta/describe` / `meta/objects` / 補完 |
 | Phase 3 | バインド変数・縦表示・CSV/JSON 書き出し・`EXPLAIN PLAN` |
 
-**Phase 0 の数字が出る前に Phase 1 を書かない。**
+## Emacs 側（`my-oracle.el`）
+
+`.sql` バッファで使う。SQLcl 版（`my:sql-sqlcl`）と衝突しないよう、
+送信は `C-c C-q`、残りは `C-c q` のプレフィクスに固めてある。
+
+| キー | |
+|---|---|
+| `C-c q o` | 接続（`my:oracle-connections` から選ぶ。パスワードは `auth-source`） |
+| `C-c C-q` | **点のある文を送る**（文の範囲は daemon の `sql/split` が決める） |
+| `C-c M-q` | リージョンを送る |
+| `C-c C-k` | **割り込み**（実測 165〜260 ms。セッションは残る） |
+| `C-c q c` / `C-c q b` | commit / rollback |
+| `C-c q a` | autocommit の切り替え（tx 中は daemon が拒否する） |
+| `C-c q m` | 止めたカーソルから続きを取る |
+| `C-c q i` / `C-c q q` | 状態を出す / 切る |
+
+結果は `*oracle(接続名):rows*` に表で出る（桁は `string-width` で揃えるので
+**日本語を含む列でもずれない**）。履歴は `*oracle(接続名):log*`。
+エラーは `ORA-NNNNN` と本文を出し、**位置が取れればソースのその場所へ飛ぶ**。
