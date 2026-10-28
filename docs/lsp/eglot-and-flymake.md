@@ -63,6 +63,79 @@ root に置換する）も `string-prefix-p` が大文字小文字を区別す�
 `eglot-events-buffer-config` を一時的に有効にして
 `publishDiagnostics` の uri を見る（既定では `:size 0` で記録されない）。
 
+## 【重要】eglot はプロジェクト配下の全ディレクトリを監視する（2026-10-28）
+
+`eglot-max-file-watches` の警告と、そのあと数秒〜十数秒 Emacs が固まる件。
+
+`eglot--watch-globs`（`eglot.el`）は `workspace/didChangeWatchedFiles` の
+動的登録を受けると、**プロジェクト配下のディレクトリ 1 つにつき
+`file-notify-add-watch` を 1 つ**張る。しかも**登録 ID ごとに別の集合**を
+作るので、同じディレクトリが登録数ぶん重複する。
+
+**Windows では watch 1 本につき OS スレッドが 1 本**（`w32notify`）。
+
+実測（`oracled/` を置いたあと、`.go` を開いたとき）:
+
+| | |
+|---|---|
+| gopls の root | **`~/.emacs.d`**（`oracled/go.mod` ではなく VC / projectile のルート） |
+| その watch | **6751 本**（登録 4 つ × 約 1700） |
+| `.emacs.d` の実ディレクトリ | 4973（**うち `straight/` が 3913**） |
+| 別プロジェクトの TS サーバ | 3249 本 |
+| 合計 | **ちょうど 10000 本**（`eglot-max-file-watches` の既定）で頭打ち |
+| Emacs プロセス | **スレッド 7345 本 / ハンドル 28105 / 556 MB** |
+
+上限に達すると eglot は警告のあと `jsonrpc-error` を投げ、`unwind-protect`
+で**その登録ぶんの watch を全部捨てる**。つまり**数千本張ってから全部外す**
+だけの時間で、その間ずっと固まる。2 つ目の大きいプロジェクトの LSP が
+起動したときに越えやすいので「初めて開く言語で起きる」ように見える。
+
+### 対処 — eglot のときだけプロジェクトを小さくする
+
+`project-vc-extra-root-markers` に `go.mod` / `Cargo.toml` を足して、
+`oracled/`（10 ディレクトリ）`gitd/`（107）`ptyd/`（1）をそれぞれの
+ルートにする。`.emacs.d` 全体（4973）を舐めなくなる。
+
+**【重要】マーカーを足すだけでは効かない。** `project-find-functions` の
+**先頭が `project-projectile`** なので、マーカーを見る `project-try-vc` まで
+到達しない（実測: マーカー設定後も `oracled/cmd/oracled/` のルートは
+`~/.emacs.d/` のまま。`project-try-vc--search` を直に呼ぶと
+`~/.emacs.d/oracled/` を返す）。
+
+eglot には **`eglot-lsp-context`**（LSP の文脈でプロジェクトを探している
+間だけ非 nil）という、まさにこのための変数がある。これを見て
+**eglot のときだけ** VC + マーカーで決める関数を
+`project-find-functions` の先頭に置く（`my-project.el`）。
+
+```elisp
+(defun my:project-root-for-eglot (dir)
+  (and (bound-and-true-p eglot-lsp-context)
+       (fboundp 'project-try-vc)
+       (project-try-vc dir)))
+(add-hook 'project-find-functions #'my:project-root-for-eglot -10)
+```
+
+実測の効き（`eglot-lsp-context` を t に束縛して `project-root` を見る）:
+
+| 場所 | eglot のとき | 通常（`C-c p` / `C-x p`） |
+|---|---|---|
+| `oracled/cmd/oracled/` | **`~/.emacs.d/oracled/`** | `~/.emacs.d/`（変わらず） |
+| `gitd/src/` | **`~/.emacs.d/gitd/`** | `~/.emacs.d/` |
+| `ptyd/` | **`~/.emacs.d/ptyd/`** | `~/.emacs.d/` |
+| `user-lisp/` | `~/.emacs.d/`（マーカーが無いので従来どおり） | `~/.emacs.d/` |
+| 別リポジトリ（`WebCoreSystem_v1`） | 変わらず | 変わらず |
+
+**すでに動いている LSP には効かない。** `M-x eglot-shutdown` してから
+開き直すと新しいルートで繋がる。
+
+### 採らなかった手
+
+| | |
+|---|---|
+| 動的登録そのものを断る（`eglot-client-capabilities` を書き換えて `:dynamicRegistration :json-false`） | 監視が完全に無くなるので、外部でファイルが変わってもサーバが気づかない。効果は最大だが、まずプロジェクトを小さくする側から試す |
+| `eglot-max-file-watches` を下げる | 警告は出るし、張った watch はどのみち捨てられるので**無駄な時間は残る** |
+| `straight/` だけ除外 | **eglot 側に除外のフックが無い** |
+
 ## php-mode は 1.28 (2026-08) で cc-mode 依存が外れた
 
 `c-set-style` / `c-basic-offset` は使えない（`Buffer ... is not a CC Mode buffer`）。

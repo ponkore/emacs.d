@@ -971,6 +971,20 @@ gopls は大文字のドライブレターで返す（§1「Windows 固有」）
 間に合わない。`init.el` で `elisp-flymake-byte-compile` を外す処理も同じ理由で
 `prog-mode-hook` + depth `-100`。
 
+### 【重要】eglot はプロジェクト配下の全ディレクトリを監視する
+
+`eglot-max-file-watches` の警告と、そのあと Emacs が固まる件。
+**Windows では watch 1 本につき OS スレッドが 1 本**（`w32notify`）で、
+`.emacs.d` を root にした gopls が 6751 本張ってスレッド 7345 本になっていた
+（実測 2026-10-28）。上限に達すると eglot は**張った watch を全部捨てる**ので、
+数千本張って全部外すだけの時間になる。
+
+対処は `my-project.el`。`project-vc-extra-root-markers` に `go.mod` /
+`Cargo.toml` を足し、**`eglot-lsp-context` が非 nil のときだけ**
+`project-try-vc` を使う関数を `project-find-functions` の先頭に置く
+（**マーカーを足すだけでは `project-projectile` が先に答えるので効かない**）。
+→ [docs](docs/lsp/eglot-and-flymake.md)
+
 ### php-mode は 1.28 で cc-mode 依存が外れた
 
 `c-set-style` / `c-basic-offset` は使えない。インデントは `php-mode-coding-style`。
