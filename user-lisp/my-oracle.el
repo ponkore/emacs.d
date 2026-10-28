@@ -25,6 +25,9 @@
 ;;   地方時に変換すると 9 時間ずれる。そのまま出す
 ;; - 【重要】文の切り分けは daemon の `sql/split' に任せる。`;' と `/' の
 ;;   規則を Emacs 側にも書くと lexer が 2 つになって必ず食い違う
+;; - 【重要】対話バッファに書く色は `face' ではなく `font-lock-face'。
+;;   comint は font-lock を有効にするので `face' は表示時に消える
+;;   （`my:oracle--repl-faces' が変換する）
 ;; - SQLcl 版（`my:sql-sqlcl'）は消していない。`ddl' やフルスペックの
 ;;   スクリプトはあちらを使う
 
@@ -101,6 +104,18 @@ autoCommit は既定 true で、tx の外の DML は即コミットされるた�
 `sql-interactive-remove-continuation-prompt' が本物のプロンプトを
 食ったのと同種の事故になる）。"
   :type 'string)
+
+(defcustom my:oracle-repl-highlight t
+  "非 nil なら対話バッファの**入力**を SQL としてハイライトする。
+`comint-fontify-input-mode' + `sql-mode' の indirect バッファで塗る
+（§9）。出力（表・メッセージ）は対象外。"
+  :type 'boolean)
+
+(defcustom my:oracle-repl-highlight-product 'oracle
+  "入力のハイライトに使う `sql-product'。
+`sql-product-alist' にある製品名。`sqlcl'（`my-lang-misc' が足すもの）は
+font-lock を `oracle' から流用しているので、どちらでも色は同じ。"
+  :type 'symbol)
 
 (defcustom my:oracle-script-path nil
   "`@file' でスクリプトを探すディレクトリ。
@@ -849,6 +864,41 @@ NO-DISPLAY が非 nil ならウィンドウには出さない（対話バッフ�
 (define-key my:oracle-repl-mode-map (kbd "C-c C-d") #'ignore)
 (define-key my:oracle-repl-mode-map (kbd "C-c C-z") #'ignore)
 
+;; 入力の SQL ハイライト。
+;;
+;; `comint-fontify-input-mode'（Emacs 29 以降。`shell-mode' が既定で使って
+;; いる）は、**indirect バッファの major mode で入力だけを塗る**。
+;; `font-lock-fontify-region-function' に advice を張り、
+;; `comint--intersect-regions' で `field' を見て出力と入力に切り分ける
+;; （出力は `field' が `output'、確定した入力は `input'、まだ送っていない
+;; 入力は nil。後ろ 2 つが「入力」として塗られる）。
+;;
+;; 【重要】「`SQL> ' から `point-max' までを SQL と見なす」自前の実装にしない。
+;; Emacs 31 の `comint--intersect-regions' は fontify の前に**その field だけ
+;; に narrow する**ので、閉じていない引用符やブロックコメントが
+;; 隣の入力や出力へ漏れない。実測（出力の `O'BRIEN' と、閉じていない
+;; `where namae = 'zzz' を挟んでも、次の入力の `update' は keyword face の
+;; まま）。自前で範囲を決めると、この「文ごとに独立して解析される」性質を
+;; 失う。`sql-interactive-mode' が `(sql-product-font-lock t nil)' と
+;; KEYWORDS-ONLY で逃げているのは、その仕掛けが無かった時代の妥協。
+
+(defun my:oracle--repl-indirect-setup ()
+  "入力をハイライトするための indirect バッファを SQL にする。
+`comint-indirect-setup-function' から呼ばれる（`delay-mode-hooks' が t で
+`change-major-mode-hook' / `after-change-major-mode-hook' は nil に束縛
+されているので、`sql-mode-hook' は走らない）。
+
+【重要】`sql-set-product' を呼んではいけない。中が `setq-local' ではなく
+`setq' なので、**ユーザーの `.sql' バッファに効くグローバル値**を書き換えて
+しまう（`sql-product' がまだバッファローカルでないため）。"
+  (require 'sql)
+  (sql-mode)
+  (setq-local sql-product my:oracle-repl-highlight-product)
+  ;; 構文テーブル・font-lock・mode-name を製品に合わせる。KEYWORDS-ONLY は
+  ;; nil なので、文字列とコメントも塗られる（上記のとおり field 単位に
+  ;; narrow されるので、出力の引用符には影響されない）
+  (sql-highlight-product))
+
 (define-derived-mode my:oracle-repl-mode comint-mode "Oracle"
   "oracled と話す対話バッファ。"
   (setq comint-prompt-regexp my:oracle--prompt-regexp
@@ -861,6 +911,29 @@ NO-DISPLAY が非 nil ならウィンドウには出さない（対話バッフ�
   ;; 【重要】履歴にパスワードを残さない。
   (add-hook 'comint-input-filter-functions #'my:oracle--repl-input-filter nil t)
   (setq-local truncate-lines t)
+  ;; 入力だけを SQL としてハイライトする（出力は field = output なので
+  ;; 対象外）。setup 関数は `my:oracle-repl-highlight' が nil でも入れる
+  ;; （`M-x comint-fontify-input-mode' で後から入り切りできるように）。
+  ;;
+  ;; 【重要】`comint-use-prompt-regexp' が非 nil だと
+  ;; `comint-fontify-input-mode' は error を投げる。上の `setq' で nil に
+  ;; してあるので、この順序を入れ替えてはいけない。
+  (setq-local comint-indirect-setup-function #'my:oracle--repl-indirect-setup)
+  (when my:oracle-repl-highlight
+    ;; 【重要】`comint-highlight-input' を nil にする。非 nil のままだと
+    ;; `comint-send-input' が確定した入力に
+    ;; `comint--fontify-input-inhibit-fontification' を付け（comint.el）、
+    ;; `comint--fontify-input-fontify-region' がその領域を**素通しする**ので、
+    ;; **送った瞬間に色が消える**（実測: 送信前は `font-lock-keyword-face'、
+    ;; 送信後は `comint-highlight-input' 一色）。docstring の
+    ;; 「Otherwise keep the original highlighting untouched」が nil 側。
+    ;;
+    ;; 引き換えに、確定した入力に `mouse-face' / `help-echo'（mouse-2 で
+    ;; 過去の入力をプロンプトに挿すヒント）が付かなくなる。comint が
+    ;; それも `(when comint-highlight-input …)' の中でやっているため。
+    ;; `comint-insert-input' 自体は `field' を見るので動作は変わらない。
+    (setq-local comint-highlight-input nil)
+    (comint-fontify-input-mode 1))
   (my:oracle--setup-completion)
   (comint-read-input-ring t)
   (add-hook 'kill-buffer-hook #'comint-write-input-ring nil t))
@@ -895,11 +968,38 @@ NO-DISPLAY が非 nil ならウィンドウには出さない（対話バッフ�
   (let ((trimmed (string-trim-right my:oracle-prompt)))
     (concat (string-remove-suffix ">" trimmed) "*> ")))
 
+(defun my:oracle--repl-faces (text)
+  "TEXT の `face' を `font-lock-face' に移した複製を返す。
+
+【重要】対話バッファに `face' で色を付けてはいけない。`comint-mode' が
+`font-lock-defaults' を `(nil t)' にするので font-lock が有効になり
+（`font-lock-specified-p' が真）、`font-lock-default-fontify-region' が
+先頭で無条件に呼ぶ `font-lock-unfontify-region' が **`face' を消す**
+（keywords が nil でも走る）。jit-lock がその行を最初に表示した瞬間に
+色が落ちるので、`my-dired-k' とまったく同じ壊れ方をする。comint 自身が
+プロンプトに `font-lock-face' を使い、ansi-color も同じなのはこれが理由。
+
+結果バッファ（`my:oracle-rows-mode' = `special-mode' 派生）は
+`font-lock-defaults' が nil で `font-lock-specified-p' が偽なので
+fontify が一度も走らない。あちらは `face' のままでよい。"
+  (let ((s (copy-sequence text))
+        (pos 0)
+        (len (length text)))
+    (while (< pos len)
+      (let ((next (or (next-single-property-change pos 'face s) len))
+            (face (get-text-property pos 'face s)))
+        (when face
+          (remove-text-properties pos next '(face nil) s)
+          (put-text-property pos next 'font-lock-face face s))
+        (setq pos next)))
+    s))
+
 (defun my:oracle--repl-insert (text)
   "【重要】`comint-output-filter' を通して書く。
 `insert' を直書きすると `process-mark' と `comint-last-output-start' が
 ずれ、プロンプトの read-only 境界と M-p の挿入位置が壊れる。"
-  (let ((proc (get-buffer-process (current-buffer))))
+  (let ((proc (get-buffer-process (current-buffer)))
+        (text (my:oracle--repl-faces text)))
     (if proc
         (comint-output-filter proc text)
       (let ((inhibit-read-only t))

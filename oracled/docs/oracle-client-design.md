@@ -788,6 +788,100 @@ comint は `process-send-string` 先のプロセスが無いと `comint-send-inp
 **`my-claude` の `my:claude--at-end` と同じ役割の関数を 1 つ作り、
 会話バッファへの書き込みは全部そこを通す。**
 
+#### 【重要】対話バッファに `face` で色を付けてはいけない（2026-10-28）
+
+`comint-mode` は `font-lock-defaults` を `(nil t)` にする。つまり
+**キーワードが 1 つも無くても font-lock は有効になり**（`font-lock-specified-p`
+が真）、`font-lock-default-fontify-region` が先頭で無条件に呼ぶ
+`font-lock-unfontify-region` が **`face` テキストプロパティを消す**。
+`font-lock-face` は消えない。
+
+```elisp
+;; comint バッファで実測（2026-10-28）
+:before (my:oracle-header-face my:oracle-header-face)  ; face / font-lock-face
+:after  (nil                   my:oracle-header-face)  ; jit-lock が通ったあと
+```
+
+**jit-lock がその行を最初に表示した瞬間に色が落ちる**ので、
+`my-dired-k` とまったく同じ壊れ方（「最初は付いていてスクロールすると消える」）を
+する。実際に、表の見出し・エラーの赤・`shadow` の灰が**全部落ちていた**。
+comint 自身がプロンプトに `font-lock-face` を使い、ansi-color も同じなのは
+これが理由。
+
+`my:oracle--repl-faces` が `my:oracle--repl-insert` の中で
+`face` → `font-lock-face` に移し替える。**出す側（`my:oracle--format-table`
+など）は `face` のままでよい**。結果バッファ（`my:oracle-rows-mode` =
+`special-mode` 派生）は `font-lock-defaults` が nil で `font-lock-specified-p`
+が偽なので、**fontify が一度も走らず `face` が生き残る**。同じ関数が
+両方のバッファに文字列を出すので、**変換は対話バッファ側の入口 1 か所**で
+やるのが正しい。
+
+#### 入力の SQL ハイライトは `comint-fontify-input-mode`（2026-10-28）
+
+`SQL> ` の後ろに打っている文と、**すでに送った文・貼り付けた文**を SQL として
+色分けする。自前で範囲を決めず、Emacs 29 で入った
+`comint-fontify-input-mode`（`shell-mode` が既定で使っている）に載せる。
+
+| | |
+|---|---|
+| 仕掛け | `font-lock-fontify-region-function` に advice を張り、**indirect バッファの major mode** で入力部分だけを塗る |
+| 入力と出力の区別 | `field` プロパティ。出力は `output`、確定した入力は `input`、**まだ送っていない入力は nil**。後ろ 2 つが「入力」として塗られる |
+| indirect バッファ | `comint-indirect-setup-function`（`my:oracle--repl-indirect-setup`）で `sql-mode` にし、`sql-product` を `oracle` にする |
+
+**【重要】「`SQL> ` から `point-max` までを SQL と見なす」自前実装にしない。**
+Emacs 31 の `comint--intersect-regions` は fontify の前に**その field だけに
+narrow する**（`syntax-propertize` が widen できない件への対処も入っている）。
+そのため**閉じていない引用符やブロックコメントが隣の入力や出力へ漏れない**。
+実測（2026-10-28、偽の出力と入力を並べて `jit-lock-fontify-now`）。
+
+```
+出力:   NAME / O'BRIEN          ← ' が奇数個
+送信済: select … where namae = 'zzz   ← 閉じていない
+現在:   update shain /* nokori */ set kyuuyo = 1
+          where tsuki = to_date('2026-10-01'
+```
+
+| 語 | face |
+|---|---|
+| `select`（送信済） | `font-lock-keyword-face` |
+| `'zzz`（送信済） | `font-lock-string-face`（その field の中だけ） |
+| **`update`（現在の入力）** | **`font-lock-keyword-face`**（漏れていない） |
+| `nokori`（複数行の `/* */`） | `font-lock-comment-face` |
+| `to_date` | `font-lock-builtin-face` |
+
+`sql-interactive-mode` が `(sql-product-font-lock t nil)` と KEYWORDS-ONLY で
+逃げている（docstring に「`SELECT 'x' FROM DUAL` の見出しで引用符が 1 つに
+なると havoc」と書いてある）のは、**この仕掛けが無かった時代の妥協**。
+
+**【重要】`comint-highlight-input` を nil にしないと、送った瞬間に色が消える。**
+`comint-send-input` は、`comint-highlight-input` が非 nil のとき確定した入力に
+`font-lock-face comint-highlight-input` と
+**`comint--fontify-input-inhibit-fontification`** を付ける（comint.el）。後者が
+付いた領域は `comint--fontify-input-fontify-region' が**素通しする**ので、
+打っている間は色が付いているのに `RET` したとたん単色に戻る（実機で踏んだ）。
+
+| `comint-highlight-input` | 打っている間 | 送ったあと |
+|---|---|---|
+| `t`（既定） | `font-lock-keyword-face` | **`comint-highlight-input` 一色**（inhibit プロパティ t） |
+| **`nil`** | `font-lock-keyword-face` | **`font-lock-keyword-face`** |
+
+docstring の「Otherwise keep the original highlighting untouched」が nil 側で、
+これがこの用途の正しい設定。引き換えに確定した入力の `mouse-face` /
+`help-echo`（mouse-2 で過去の入力をプロンプトに挿すヒント）が付かなくなる
+—— comint がそれも `(when comint-highlight-input …)` の中でやっているため。
+**動作は変わらない**（`comint-insert-input` は `field` を見る。実測で
+`field-at-pos` = nil、`field-string-no-properties` は入力そのもの、
+`comint-accum-marker` も非 nil なので挿入の分岐に入る）。
+
+**【重要】indirect バッファで `sql-set-product` を呼んではいけない。**
+中が `setq-local` ではなく `setq` なので、`sql-product` がまだバッファ
+ローカルでない時点では**グローバル値**を書き換える = ユーザーの `.sql`
+バッファの製品まで変わる（検証中に実際に `postgres` → `oracle` にしてしまった）。
+`(setq-local sql-product …)` のあと `sql-highlight-product` を呼ぶ。
+
+コストは無視できる。18983 文字（8 列 × 200 行）の表を出して
+バッファ全体を fontify して **0.47 ms**（挿入が 0.45 ms）。
+
 #### 【重要】プロセスにシグナルを送る comint のキーを全部潰す
 
 | 既定 | 潰さないとどうなるか |

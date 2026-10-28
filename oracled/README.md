@@ -167,6 +167,15 @@ PL/SQL ブロックは SQL\*Plus と同じく**単独行の `/` で終わる**�
 トランザクション中はプロンプトが `SQL*> ` になる（**実際に書いたときだけ**。
 `SELECT` だけでは付かない）。
 
+**入力は SQL としてハイライトされる**（打っている途中・貼り付けたもの・
+すでに送った文のすべて。結果の表やメッセージは対象外）。`sql-mode` の
+Oracle 用 font-lock を `comint-fontify-input-mode` で入力部分だけに当てて
+いるので、**閉じていない引用符や複数行の `/* */` が隣の入力へ漏れない**。
+送った文の色を残すために `comint-highlight-input` は nil にしてある
+（確定した入力を太字にする代わりに、SQL の色をそのまま残す）。
+切るなら `my:oracle-repl-highlight` を nil（バッファごとに
+`M-x comint-fontify-input-mode` でも入り切りできる）。
+
 ### `@file`
 
 対応するのは **DML / DDL / PL/SQL ブロック / `@` / `@@` / `EXEC` / `PROMPT` /
