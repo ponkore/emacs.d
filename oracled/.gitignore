@@ -1,0 +1,10 @@
+# ビルド成果物（ptyd.exe と同じ扱いで、マシンごとに作る）
+/probe.exe
+/oracled.exe
+*.exe~
+
+# Phase 0 の検証用。パスワードを 1 行で置く。検証が終わったら消す
+/.probe-pass
+
+# 計測の生ログ（まとめたものは docs/ に置く）
+/docs/_raw/

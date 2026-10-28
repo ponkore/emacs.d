@@ -1,0 +1,118 @@
+# oracled
+
+Emacs から Oracle を使うための軽量クライアント。**Go の常駐プロセス
+（`oracled.exe`）+ Elisp（`user-lisp/my-oracle.el`）**の 2 枚で、
+SQLcl を介さずに直接 DB と話す。
+
+```
+Emacs ──stdio (JSON-RPC 2.0 / Content-Length)──> oracled ──TCP──> Oracle
+```
+
+**現状: Phase 0 完了（2026-10-28）。Phase 1 待ち。** daemon と Elisp はまだ無い。
+
+| | |
+|---|---|
+| 設計 | [docs/oracle-client-design.md](docs/oracle-client-design.md) |
+| **Phase 0 の実測** | [docs/phase0-findings.md](docs/phase0-findings.md) |
+
+Phase 0 で確かめたこと（21c XE / RTT 54 ms の回線）。
+
+| | |
+|---|---|
+| 起動〜使える状態 | **567〜837 ms**（SQLcl は 7〜8 秒） |
+| **割り込み** | CPU を回している文が **165〜181 ms で停止**。`ORA-01013` が返り**セッションは生存** |
+| 日本語 | bind とリテラルで**バイト列が完全一致**（`𠮟` / 絵文字 / `〜—−` も） |
+| 型 | NUMBER は**常に文字列**で精度が落ちない。NULL と空文字も区別できる |
+| 1 文の往復 | **125.8 ms**。中身はネットワーク（RTT の 2 往復）で、**時間は往復の回数で決まる** |
+
+## なぜ必要か
+
+`sql.el` から SQLcl を使う形（`M-x my:sql-sqlcl`、
+[../docs/languages/sqlcl.md](../docs/languages/sqlcl.md)）は動いているが、
+SQLcl が **CLI** であることに由来するコストを払い続けている。
+
+| | |
+|---|---|
+| 起動 | **7〜8 秒**（JVM + 接続） |
+| やりとり | **テキスト**。プロンプト同期・列幅・ANSI escape・右埋めを読み合う |
+| 文字コード | stdin だけ native（cp932）。`JDK_JAVA_OPTIONS` で揃えている |
+| 割り込み | **手段が無い**（走っている SELECT を止められない） |
+| SQL\*Plus 互換の残骸 | 裸の `/` が直前の文を再実行する、`SHOW` が 1 語しか取らない |
+
+**値を構造のまま受け取れば、この 5 つはどれも消える。**
+桁揃えも Emacs 側でやったほうが正しい（SQLcl の列幅は DB 側のバイト幅なので、
+日本語を含む列は端末で必ずずれる）。
+
+## 設計の要点
+
+- **ドライバは [sijms/go-ora](https://github.com/sijms/go-ora)（純 Go）。**
+  Oracle Instant Client が要らないので、`gitd` / `ptyd` と同じ
+  「`M-x my:oracle-build` で作って終わり」になる
+- **daemon は表示を作らない。** 型付きの値を JSON で返し、整形は Emacs 側
+- **daemon は SQL しか知らない。** `SET` / `COLUMN` / `SPOOL` は実装しない。
+  ただし**「それが SQL でないこと」を見分ける責任は持つ**（`@foo.sql` は
+  `;` ではなく行末で終わる。文の切り分けに必要）
+- **`sql.DB` のプールを使わない。** session は `*sql.Conn` を 1 本握り続ける
+  （トランザクション・`ALTER SESSION`・`DBMS_OUTPUT` が壊れるため）
+- **割り込みは 3 段構え。** `context` cancel（go-ora の break）→
+  `ALTER SYSTEM CANCEL SQL` → 接続破棄
+- **SQLcl 版は消さない。** `ddl` / `datapump` / フルスペックのスクリプトは
+  あちらに任せる
+
+### 【重要】Oracle は正常 logoff でコミットする
+
+未コミットのトランザクションを持ったまま普通に切断すると、Oracle は
+**ロールバックではなくコミットする**。セッションを閉じる全経路
+（`session/close` / `shutdown` / stdin EOF / Emacs 終了）で**必ず明示
+`ROLLBACK` を先に出す**。`os.Exit` に直行する道を作らない。
+
+## ディレクトリ
+
+| | |
+|---|---|
+| `cmd/probe/` | **Phase 0 の計測用コマンド。**daemon の前に「成立するか」を測る |
+| `cmd/oracled/` | daemon 本体（Phase 1 から） |
+| `docs/` | 設計と実測の記録 |
+| `oracled.exe` | ビルド成果物。**git 管理外**（`ptyd.exe` と同じ扱い） |
+
+## ビルドと実行
+
+Go のツールチェインが要る（`ptyd` と同じ）。依存は go-ora のみ。
+
+```sh
+cd ~/.emacs.d/oracled
+go build -o probe.exe ./cmd/probe     # Phase 0
+go build -o oracled.exe ./cmd/oracled # Phase 1 以降
+```
+
+### 【重要】パスワードはコマンドライン引数に載せない
+
+`tasklist` から見えてしまうので、**`probe` も daemon も引数では受け取らない。**
+probe は環境変数から読む。daemon は stdio の RPC パラメータで受け取る。
+
+```sh
+export ORACLED_PASSWORD=...     # これだけは環境変数
+./probe.exe info -host 192.168.66.101 -service XEPDB1 -user TEST2TAX
+```
+
+| サブコマンド | |
+|---|---|
+| `info` | 接続して時間を測る。版・キャラクタセット・sid/serial を出す |
+| `types` | 型マッピングの実測（`NUMBER` / `DATE` / LOB / NULL と空文字） |
+| `jp` | 日本語の往復（`DUMP(..., 1016)` で突き合わせる） |
+| `cancel` | 重い文を投げて割り込む。**止まるか / 何 ms か / 後でセッションが使えるか** |
+| `plsql` | PL/SQL ブロックと `DBMS_OUTPUT` の取り出し |
+| `bench` | 1 行の往復と 1000 行の取得 |
+| `query` | 任意の SQL を投げて Go 側の型を出す |
+
+## 段階
+
+| | 内容 |
+|---|---|
+| **Phase 0** | 繋ぐ / 1 文投げる / **重い文を割り込む** / 日本語の往復 / 型の表現。**ここが駄目なら企画をやめる** |
+| Phase 1 | JSON-RPC・session・`sql/exec` + 行の分割送信・`sql/split`（文の切り分け）+ テスト。Emacs 側は `.sql` からの `C-c C-c` と結果の表、割り込みだけ |
+| Phase 2 | **対話バッファ**（`SQL> `）・**`@file`**・`DBMS_OUTPUT`・autocommit と tx 表示。ここで日常用途が置き換わる |
+| Phase 2.5 | `meta/describe` / `meta/objects` / 補完 |
+| Phase 3 | バインド変数・縦表示・CSV/JSON 書き出し・`EXPLAIN PLAN` |
+
+**Phase 0 の数字が出る前に Phase 1 を書かない。**
