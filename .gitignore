@@ -1,6 +1,7 @@
 /elpa/
 /auto-save-list/
 /history
+/oracle-history
 /url/cookies
 /server/*
 *.elc

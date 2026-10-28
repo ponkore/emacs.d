@@ -122,7 +122,6 @@ export ORACLED_PASSWORD=...     # これだけは環境変数
 | ~~**Phase 0**~~ | 完了。繋ぐ / 割り込む / 日本語 / 型 / 書き込みと tx を実測 → [docs/phase0-findings.md](docs/phase0-findings.md) |
 | ~~**Phase 1**~~ | 完了。JSON-RPC・session・`sql/exec` + 行の分割送信・`sql/split` + テスト・エラーの構造化。Emacs 側は送信・結果の表・割り込み・tx |
 | ~~**Phase 2**~~ | 完了。対話バッファ（`SQL> `）・`@file`・`DBMS_OUTPUT`・tx 表示 |
-| Phase 2 | **対話バッファ**（`SQL> `）・**`@file`**・`DBMS_OUTPUT`・autocommit と tx 表示。ここで日常用途が置き換わる |
 | Phase 2.5 | `meta/describe` / `meta/objects` / 補完 |
 | Phase 3 | バインド変数・縦表示・CSV/JSON 書き出し・`EXPLAIN PLAN` |
 
