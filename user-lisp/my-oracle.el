@@ -83,8 +83,27 @@ autoCommit は既定 true で、tx の外の DML は即コミットされるた�
   "表示するときの 1 列の最大幅（文字）。超えたら切り詰める。"
   :type 'integer)
 
-(defcustom my:oracle-null-string "∅"
-  "NULL の表示。空文字と区別が付くようにしてある。"
+(defcustom my:oracle-null-string "-"
+  "NULL の表示。値が空のときと見分けるために出す。
+
+【重要】`string-width' と**実際の描画幅**が一致する文字しか使えない。
+一致しないと、その列から右が 1 桁ずれる（桁を揃えるのがこの表の目的なので、
+ずれると読めなくなる）。判定は次で行う。
+
+  (= (* (string-pixel-width \"a\") (string-width S)) (string-pixel-width S))
+
+実測（HackGen 11.6pt の GUI。ASCII 1 文字 = 8px）。
+
+  - `∅'(U+2205) / `⌀' / `␀'  幅 1 と数えるのに **16px で描かれる**。
+    Unicode 上 Neutral なので eaw.el も幅 1 とする（eaw.el の表に
+    #x2205 が無いのは正しい）。HackGen に字が無く、代替フォントが
+    全角で描くためずれる。**既定にしていて実際にずれた**
+  - `·' / `•'                幅 2 と数えるのに 8px。逆向きにずれる
+  - `ø' / `×' / `¤'          幅 2 / 16px で揃うが、**eaw.el 依存**。
+    `my-pty' の端末（ambiguous を幅 1 に倒す）では崩れる
+  - `-' / `~' / `_' / `.'    幅 1 / 8px。**フォントにも端末にも依存しない**
+
+曖昧さを嫌うなら \"(null)\" でもよい（6 桁ぶん列が広がる）。"
   :type 'string)
 
 (defface my:oracle-null-face '((t :inherit shadow))
