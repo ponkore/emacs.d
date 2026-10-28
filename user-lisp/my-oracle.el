@@ -526,7 +526,8 @@ LOB-LIMIT は LOB を切り詰める文字数。"
     (when query-p (my:oracle--remember-result id columns rows))
     (if query-p
         (progn
-          (my:oracle--render id columns rows params)
+          ;; 対話バッファに出すときは結果バッファをポップアップしない
+          (my:oracle--render id columns rows params (and dest t))
           (when dest
             (my:oracle--emit
              dest (concat (my:oracle--format-table columns rows)
@@ -683,7 +684,16 @@ LOB-LIMIT は LOB を切り詰める文字数。"
         names)
        " │ "))
      "\n"
-     (string-join (mapcar (lambda (w) (make-string w ?─)) widths) "─┼─")
+     ;; 【重要】区切り線の横棒に `─'（U+2500）を使ってはいけない。
+     ;; `─' `┼' `│' はどれも East Asian Ambiguous で、この設定では
+     ;; `eaw.el' が**幅 2** にしている（実測: どれも 16px）。横棒を
+     ;; 幅ぶん並べると線だけが約 2 倍の長さになり、`┼' がヘッダの
+     ;; `│' と合わなくなる（実測: ヘッダ 16 桁に対し線は 30 桁）。
+     ;;
+     ;; 横棒は ASCII の `-'（幅 1）、交点は `┼' にする。交点は
+     ;; ヘッダの `│' と**同じ字幅のもの同士**なので、ambiguous を
+     ;; 幅 1 に倒す端末（`my-pty'）でも揃う。
+     (string-join (mapcar (lambda (w) (make-string w ?-)) widths) "-┼-")
      "\n"
      ;; 行末の詰め物は落とす（コピーしたときに余分な空白が付かないように）
      (mapconcat
@@ -699,8 +709,10 @@ LOB-LIMIT は LOB を切り詰める文字数。"
       cells "\n")
      (if cells "\n" ""))))
 
-(defun my:oracle--render (id columns rows params)
-  "結果の表を結果バッファに出す。"
+(defun my:oracle--render (id columns rows params &optional no-display)
+  "結果の表を結果バッファに出す。
+NO-DISPLAY が非 nil ならウィンドウには出さない（対話バッファに同じ
+ものを出しているときに、見ていたバッファを裏に追いやらないため）。"
   (let ((buf (my:oracle--rows-buffer id)))
     (with-current-buffer buf
       (let ((inhibit-read-only t))
@@ -712,7 +724,7 @@ LOB-LIMIT は LOB を切り詰める文字数。"
                    'face 'shadow)))
         (goto-char (point-min))
         (setq header-line-format (my:oracle--header-line id params (length rows)))))
-    (display-buffer buf)
+    (unless no-display (display-buffer buf))
     (my:oracle--log (format "完了: %d 行 (%.1f ms)%s" (length rows)
                             (or (plist-get params :elapsed_ms) 0)
                             (if (eq (plist-get params :more) t) " ＋続きあり" "")))
@@ -773,28 +785,32 @@ LOB-LIMIT は LOB を切り詰める文字数。"
              (if (eq (plist-get info :in_tx) t) "あり" "なし")
              (if (eq (plist-get info :can_cancel_sql) t) "可" "不可"))))
 
-(defvar my:oracle-prefix-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map "o" #'my:oracle-connect)
-    (define-key map "r" #'my:oracle-repl)
-    (define-key map "c" #'my:oracle-commit)
-    (define-key map "b" #'my:oracle-rollback)
-    (define-key map "a" #'my:oracle-toggle-autocommit)
-    (define-key map "s" #'my:oracle-toggle-serveroutput)
-    (define-key map "f" #'my:oracle-run-script)
-    (define-key map "d" #'my:oracle-describe)
-    (define-key map "l" #'my:oracle-objects)
-    (define-key map "g" #'my:oracle-refresh-metadata)
-    (define-key map "x" #'my:oracle-toggle-vertical)
-    (define-key map "w" #'my:oracle-write-result)
-    (define-key map "e" #'my:oracle-explain)
-    (define-key map "m" #'my:oracle-more)
-    (define-key map "i" #'my:oracle-info)
-    (define-key map "q" #'my:oracle-disconnect)
-    map)
+(defvar my:oracle-prefix-map (make-sparse-keymap)
   "`C-c q' に置くキーマップ（q = query）。
-【重要】対話バッファのキーマップから参照するので、ここより後ろで
-定義してはいけない（void-variable になる）。")
+
+【重要】`defvar' で作った**あと**に `define-key' で中身を入れること。
+`(defvar VAR (let ((map ...)) ... map))' と書くと、**リロードしても
+中身が更新されない**（`defvar' は既に束縛されている変数に再代入しない）。
+このマップは `sql-mode-map' に埋め込まれているので、新しいコマンドを
+足しても古いマップのままになり「キーが効かない」ことになる（実際に
+`C-c q d' が効かなくなった）。")
+
+(define-key my:oracle-prefix-map "o" #'my:oracle-connect)
+(define-key my:oracle-prefix-map "r" #'my:oracle-repl)
+(define-key my:oracle-prefix-map "c" #'my:oracle-commit)
+(define-key my:oracle-prefix-map "b" #'my:oracle-rollback)
+(define-key my:oracle-prefix-map "a" #'my:oracle-toggle-autocommit)
+(define-key my:oracle-prefix-map "s" #'my:oracle-toggle-serveroutput)
+(define-key my:oracle-prefix-map "f" #'my:oracle-run-script)
+(define-key my:oracle-prefix-map "d" #'my:oracle-describe)
+(define-key my:oracle-prefix-map "l" #'my:oracle-objects)
+(define-key my:oracle-prefix-map "g" #'my:oracle-refresh-metadata)
+(define-key my:oracle-prefix-map "x" #'my:oracle-toggle-vertical)
+(define-key my:oracle-prefix-map "w" #'my:oracle-write-result)
+(define-key my:oracle-prefix-map "e" #'my:oracle-explain)
+(define-key my:oracle-prefix-map "m" #'my:oracle-more)
+(define-key my:oracle-prefix-map "i" #'my:oracle-info)
+(define-key my:oracle-prefix-map "q" #'my:oracle-disconnect)
 
 ;;; [9] 対話バッファ（SQL> プロンプト）
 
@@ -818,21 +834,20 @@ LOB-LIMIT は LOB を切り詰める文字数。"
 (defvar-local my:oracle--repl-queue nil
   "応答待ちの間に打たれた入力（逆順）。")
 
-(defvar my:oracle-repl-mode-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "RET") #'my:oracle-repl-return)
-    (define-key map (kbd "C-j") #'my:oracle-repl-newline)
-    (define-key map (kbd "C-c C-k") #'my:oracle-cancel)
-    (define-key map (kbd "C-c q") my:oracle-prefix-map)
-    ;; 【重要】comint の「プロセスにシグナルを送る」キーを全部潰す。
-    ;; ダミープロセスを殺すと**画面は死ぬのに Oracle 側の文は走り続ける**
-    ;; という最悪の壊れ方をする。
-    (define-key map (kbd "C-c C-c") #'my:oracle-repl-send-force)
-    (define-key map (kbd "C-c C-\\") #'my:oracle-cancel)
-    (define-key map (kbd "C-c C-d") #'ignore)
-    (define-key map (kbd "C-c C-z") #'ignore)
-    map)
-  "対話バッファのキーマップ。")
+(defvar my:oracle-repl-mode-map (make-sparse-keymap)
+  "対話バッファのキーマップ（上と同じ理由で中身は後から入れる）。")
+
+(define-key my:oracle-repl-mode-map (kbd "RET") #'my:oracle-repl-return)
+(define-key my:oracle-repl-mode-map (kbd "C-j") #'my:oracle-repl-newline)
+(define-key my:oracle-repl-mode-map (kbd "C-c C-k") #'my:oracle-cancel)
+(define-key my:oracle-repl-mode-map (kbd "C-c q") my:oracle-prefix-map)
+;; 【重要】comint の「プロセスにシグナルを送る」キーを全部潰す。
+;; ダミープロセスを殺すと**画面は死ぬのに Oracle 側の文は走り続ける**
+;; という最悪の壊れ方をする。
+(define-key my:oracle-repl-mode-map (kbd "C-c C-c") #'my:oracle-repl-send-force)
+(define-key my:oracle-repl-mode-map (kbd "C-c C-\\") #'my:oracle-cancel)
+(define-key my:oracle-repl-mode-map (kbd "C-c C-d") #'ignore)
+(define-key my:oracle-repl-mode-map (kbd "C-c C-z") #'ignore)
 
 (define-derived-mode my:oracle-repl-mode comint-mode "Oracle"
   "oracled と話す対話バッファ。"
