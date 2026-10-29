@@ -147,7 +147,11 @@ nil なら毎回聞く。"
   :type '(choice (const :tag "毎回聞く" nil) regexp function))
 
 (defcustom my:claude-answer-questions t
-  "非 nil なら AskUserQuestion の質問をミニバッファで答える。
+  "非 nil なら AskUserQuestion の質問に Emacs で答える。
+
+1 つ選ぶ質問はミニバッファ (`completing-read')、`multiSelect' の
+質問は専用バッファのチェックリスト
+ (`my:claude--read-answer-checklist')。
 
 AskUserQuestion は **ホスト側が実行するツール**で、選択 UI を出して
 答えを `tool_result' の `answers' に載せるのは端末 TUI の仕事になって
@@ -3612,29 +3616,326 @@ nil のときや `can_use_tool\' が飛んで来ないときは `?\' 行が出�
                            'my:claude-meta-face)))))
 
 (defun my:claude--read-answer (q)
-  "質問 Q をミニバッファで聞いて答えの文字列を返す。
+  "質問 Q を聞いて答えの文字列を返す。
+
+`multiSelect' が `t' のときだけ専用バッファのチェックリスト
+ (`my:claude--read-answer-checklist')。1 つ選ぶだけならミニバッファの
+ほうが速いので、そちらは従来どおり。
 
 候補に無い文字列も返せる (本家の UI の「Other」に当たる) ので
 `require-match' は nil。空で確定されたら聞き直す。中断は `quit' が
 そのまま外へ飛び、呼び出し元が deny を返す。"
-  (let* ((opts (my:claude--question-options q))
-         (multi (eq t (alist-get 'multiSelect q)))
-         (prompt (format "%s%s: "
-                         (string-trim (or (alist-get 'question q) "回答"))
-                         (if multi " (複数可)" "")))
-         (table (my:claude--question-table opts))
-         ;; 許可プロンプトと同じくプロセスフィルタの中で聞くので、
-         ;; ミニバッファが既に開いていることがある。
-         (enable-recursive-minibuffers t)
-         (ans ""))
-    (my:claude--notify-input-wait)
-    (while (string-empty-p ans)
-      (setq ans
-            (string-trim
-             (if multi
-                 (string-join (completing-read-multiple prompt table) ", ")
-               (completing-read prompt table)))))
-    ans))
+  (if (eq t (alist-get 'multiSelect q))
+      (my:claude--read-answer-checklist q)
+    (let* ((opts (my:claude--question-options q))
+           (prompt (format "%s: "
+                           (string-trim (or (alist-get 'question q) "回答"))))
+           (table (my:claude--question-table opts))
+           ;; 許可プロンプトと同じくプロセスフィルタの中で聞くので、
+           ;; ミニバッファが既に開いていることがある。
+           (enable-recursive-minibuffers t)
+           (ans ""))
+      (my:claude--notify-input-wait)
+      (while (string-empty-p ans)
+        (setq ans (string-trim (completing-read prompt table))))
+      ans)))
+
+;;; --------------------------------------------------
+;;; AskUserQuestion — 複数選択のチェックリスト
+;;; --------------------------------------------------
+
+(defvar-local my:claude--checklist-items nil
+  "チェックリストの候補。各要素は (LABEL DESC CHECKED) のリスト。
+`o' (`my:claude-checklist-other') で足した候補外の答えも同じ形で
+末尾に積む。")
+
+(defvar-local my:claude--checklist-question nil
+  "見出しに出す質問文 (`my:claude--question-line' の戻り値)。")
+
+(defvar-local my:claude--checklist-done nil
+  "`my:claude-checklist-confirm' で抜けたときだけ t。
+
+**抜け道が確定コマンドだけではない**ので、これを見て答えと中断を
+分ける。`C-M-c' (`exit-recursive-edit') はグローバルに生きているし、
+バッファを kill しても抜ける。")
+
+(defvar-local my:claude--checklist-active nil
+  "`recursive-edit' で待っている間だけ t。
+
+`my:claude--checklist-kill-abort' がこれを見る。立てたままにすると、
+片付けの `kill-buffer' が**外側の** `recursive-edit' を抜いてしまう。")
+
+(defvar my:claude-checklist-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "SPC") #'my:claude-checklist-toggle)
+    (define-key map (kbd "n") #'my:claude-checklist-next)
+    (define-key map (kbd "p") #'my:claude-checklist-previous)
+    (define-key map (kbd "C-n") #'my:claude-checklist-next)
+    (define-key map (kbd "C-p") #'my:claude-checklist-previous)
+    (define-key map (kbd "<down>") #'my:claude-checklist-next)
+    (define-key map (kbd "<up>") #'my:claude-checklist-previous)
+    (define-key map (kbd "a") #'my:claude-checklist-select-all)
+    (define-key map (kbd "u") #'my:claude-checklist-unselect-all)
+    (define-key map (kbd "o") #'my:claude-checklist-other)
+    (define-key map (kbd "RET") #'my:claude-checklist-confirm)
+    (define-key map (kbd "C-c C-c") #'my:claude-checklist-confirm)
+    (define-key map (kbd "q") #'my:claude-checklist-abort)
+    (define-key map (kbd "C-g") #'my:claude-checklist-abort)
+    (define-key map (kbd "C-c C-k") #'my:claude-checklist-abort)
+    (dotimes (i 9)
+      (define-key map (kbd (number-to-string (1+ i)))
+                  #'my:claude-checklist-toggle-digit))
+    map)
+  "`my:claude-checklist-mode' のキーマップ。
+
+【重要】**親 (`special-mode-map') の `q' と `SPC' を必ず潰すこと。**
+`quit-window' や `scroll-up-command' のままだと、`recursive-edit' の
+中でウィンドウだけ消えて**抜ける手段が無くなる**。ミニバッファと違って
+「待っている」ことがモードライン (`[...]') にしか出ないので、固まった
+ようにしか見えない。
+
+`C-g' も張り替える。`keyboard-quit' の `quit' はコマンドループが
+受け止めるだけで `recursive-edit' を抜けない (ミニバッファで
+`minibuffer-keyboard-quit' が `abort-recursive-edit' を呼んでいるのと
+同じ事情)。")
+
+(define-derived-mode my:claude-checklist-mode special-mode "Claude-Select"
+  "AskUserQuestion の複数選択に、チェックを入れ替えて答えるモード。
+
+  SPC    この行のチェックを入れ替える
+  1-9    番号で入れ替える
+  n / p  候補を移動する (循環する)
+  a / u  全部チェック / 全部外す
+  o      候補に無い答えを書いて足す (本家 UI の「Other」)
+  RET    確定する (`C-c C-c' でも)
+  C-g    答えずに閉じる (`q' / `C-c C-k' でも)
+
+答えを待つのは `recursive-edit'。プロセスフィルタの中から同期で
+文字列を返す必要があるため (`my:claude--read-answer-checklist')。
+
+【重要】**候補の設定はこの関数を呼んだ後に行う。** `special-mode'
+派生なので `kill-all-local-variables' を通り、先に入れた
+`my:claude--checklist-items' は消える。"
+  (setq-local truncate-lines nil)
+  (setq-local header-line-format
+              (concat " SPC 入れ替え  1-9 番号  n/p 移動  a 全部  u 解除"
+                      "  o 自由入力  RET 確定  C-g 中断"))
+  (hl-line-mode 1))
+
+(defun my:claude--checklist-index ()
+  "point のある行の候補番号。候補行でなければ nil。"
+  (get-text-property (line-beginning-position) 'my:claude--checklist-index))
+
+(defun my:claude--checklist-seek (index)
+  "INDEX の候補行に point を置く。INDEX が nil なら最初の候補行へ。
+見つかれば非 nil。"
+  (goto-char (point-min))
+  (catch 'found
+    (while (not (eobp))
+      (let ((i (my:claude--checklist-index)))
+        (when (and i (or (null index) (= i index)))
+          (throw 'found t)))
+      (forward-line 1))
+    nil))
+
+(defun my:claude--checklist-selection ()
+  "チェックが入っている候補のラベルをリストで返す。並びは表示順。"
+  (delq nil (mapcar (lambda (item) (and (nth 2 item) (nth 0 item)))
+                    my:claude--checklist-items)))
+
+(defun my:claude--checklist-render (&optional index)
+  "チェックリストを描き直して、INDEX (nil なら今の行) に point を置く。
+
+**毎回まるごと書き直す。** 1 行だけ貼り替えるより桁がずれる心配が
+無く、候補は多くても十数個なので測るほどのコストにならない。
+
+候補行には `my:claude--checklist-index' を載せる。移動と `SPC' は
+この印で行を探すので、**説明行には載せない** (載せると説明の上でも
+`SPC' が効いてしまい、どちらの候補を指しているのか分からなくなる)。"
+  (let ((inhibit-read-only t)
+        (target (or index (my:claude--checklist-index)))
+        (n 0))
+    (erase-buffer)
+    (insert (propertize (concat "? " (or my:claude--checklist-question "") "\n")
+                        'font-lock-face 'my:claude-tool-face)
+            "\n")
+    (dolist (item my:claude--checklist-items)
+      (let ((beg (point))
+            (on (nth 2 item)))
+        (insert (propertize (format "  [%s] %d. %s\n"
+                                    (if on "x" " ") (1+ n) (nth 0 item))
+                            'font-lock-face
+                            (if on
+                                'my:claude-answer-face
+                              'my:claude-assistant-face)))
+        (put-text-property beg (point) 'my:claude--checklist-index n)
+        (unless (string-empty-p (nth 1 item))
+          (insert (propertize (format "        %s\n" (nth 1 item))
+                              'font-lock-face 'my:claude-meta-face)))
+        (setq n (1+ n))))
+    (set-buffer-modified-p nil)
+    (or (my:claude--checklist-seek target)
+        (my:claude--checklist-seek nil))
+    (let ((win (get-buffer-window)))
+      (when (window-live-p win)
+        (fit-window-to-buffer win)))))
+
+(defun my:claude--checklist-set (index on)
+  "INDEX の候補のチェックを ON にして描き直す。"
+  (setcar (cddr (nth index my:claude--checklist-items)) on)
+  (my:claude--checklist-render index))
+
+(defun my:claude-checklist-toggle ()
+  "この行の候補のチェックを入れ替える。"
+  (interactive)
+  (let ((i (my:claude--checklist-index)))
+    (unless i
+      (user-error "ここには候補が無い"))
+    (my:claude--checklist-set i (not (nth 2 (nth i my:claude--checklist-items))))))
+
+(defun my:claude-checklist-toggle-digit ()
+  "打った数字の候補のチェックを入れ替える。"
+  (interactive)
+  (let ((i (- last-command-event ?1)))
+    (unless (and (>= i 0) (< i (length my:claude--checklist-items)))
+      (user-error "%c 番の候補は無い" last-command-event))
+    (my:claude--checklist-set i (not (nth 2 (nth i my:claude--checklist-items))))))
+
+(defun my:claude--checklist-move (dir)
+  "候補を DIR 個ぶん移動する。端では回り込む。"
+  (let ((n (length my:claude--checklist-items)))
+    (when (> n 0)
+      (my:claude--checklist-seek
+       (mod (+ (or (my:claude--checklist-index) 0) dir) n)))))
+
+(defun my:claude-checklist-next ()
+  "次の候補へ。"
+  (interactive)
+  (my:claude--checklist-move 1))
+
+(defun my:claude-checklist-previous ()
+  "前の候補へ。"
+  (interactive)
+  (my:claude--checklist-move -1))
+
+(defun my:claude-checklist-select-all ()
+  "全部チェックする。"
+  (interactive)
+  (dolist (item my:claude--checklist-items)
+    (setcar (cddr item) t))
+  (my:claude--checklist-render))
+
+(defun my:claude-checklist-unselect-all ()
+  "全部のチェックを外す。"
+  (interactive)
+  (dolist (item my:claude--checklist-items)
+    (setcar (cddr item) nil))
+  (my:claude--checklist-render))
+
+(defun my:claude-checklist-other ()
+  "候補に無い答えを書いて足す (本家 UI の「Other」に当たる)。
+
+足したものはチェック済みで末尾に並ぶ。`SPC' で外せる。"
+  (interactive)
+  (let* ((enable-recursive-minibuffers t)
+         (s (string-trim (read-string "候補に無い答え: "))))
+    (if (string-empty-p s)
+        (message "何も足さなかった")
+      (setq my:claude--checklist-items
+            (append my:claude--checklist-items (list (list s "" t))))
+      (my:claude--checklist-render (1- (length my:claude--checklist-items))))))
+
+(defun my:claude-checklist-confirm ()
+  "チェックしたものを答えとして確定する。"
+  (interactive)
+  (unless (my:claude--checklist-selection)
+    (user-error "1 つ以上チェックするか、o で答えを書く"))
+  (setq my:claude--checklist-done t)
+  (exit-recursive-edit))
+
+(defun my:claude-checklist-abort ()
+  "答えずに閉じる。claude には「キャンセルした」が deny で返る。"
+  (interactive)
+  (setq my:claude--checklist-done nil)
+  (abort-recursive-edit))
+
+(defun my:claude--checklist-kill-abort ()
+  "チェックリストを kill されたら `recursive-edit' を抜ける。
+
+これが無いと、バッファを消した時点で**抜ける手段が無くなる**
+ (`C-M-c' を知っていれば抜けられるが、何が起きているのかは分からない)。
+
+`my:claude--checklist-active' を必ず見ること。片付けの `kill-buffer' は
+`recursive-edit' を出た後に走るので、素で呼ぶと**外側の**
+`recursive-edit' を抜いてしまう。"
+  (when my:claude--checklist-active
+    (setq my:claude--checklist-active nil)
+    (abort-recursive-edit)))
+
+(defun my:claude--read-answer-checklist (q)
+  "質問 Q の候補をチェックリストに出して、選んだ答えを返す。
+
+`multiSelect' が `t' の質問専用。`completing-read-multiple' では
+カンマ区切りを打ち終わるまで何を選んだか見えず、説明も注釈の 1 行に
+しか出ない。
+
+答えは選んだラベルを `, ' で連結した文字列 (単一選択のときと同じ形)。
+
+【重要】**確定コマンド以外で抜けたら `quit' を投げる。**
+`recursive-edit' は `C-M-c' でもバッファの kill でも抜けられるので、
+`my:claude--checklist-done' が立っていないときに空の答えを返すと
+claude が「何も選ばなかった」ではなく**空文字列を選んだ**ものとして
+受け取る。呼び出し元の `condition-case' に deny を返させるのが正しい。
+
+片付けは `unwind-protect' で。**返事を返さずに抜けると claude が
+待ち続ける**ので、ウィンドウもバッファも必ず閉じて `quit' を外へ出す。"
+  (let ((buf (generate-new-buffer "*claude-select*"))
+        (answers nil)
+        (done nil))
+    (unwind-protect
+        (progn
+          (with-current-buffer buf
+            ;; 【重要】候補を入れるのはモードを立てた後。
+            (my:claude-checklist-mode)
+            (setq my:claude--checklist-question (my:claude--question-line q)
+                  my:claude--checklist-items
+                  (mapcar (lambda (o)
+                            (list (car o)
+                                  ;; 説明の改行は字下げを崩すので潰す。
+                                  ;; 長い行はウィンドウ幅で折り返る。
+                                  (replace-regexp-in-string
+                                   "[ \t\n]+" " " (string-trim (cdr o)))
+                                  nil))
+                          (my:claude--question-options q))
+                  my:claude--checklist-active t)
+            (my:claude--checklist-render)
+            (add-hook 'kill-buffer-hook #'my:claude--checklist-kill-abort nil t))
+          (my:claude--notify-input-wait)
+          ;; 【重要】会話バッファのウィンドウを選び直さない。
+          ;; `with-selected-window' はそのバッファの `point' を
+          ;; window-point へ飛ばす (CLAUDE.md「Windows 固有」の隣、
+          ;; `window-max-chars-per-line' と同じ罠)。突然開くものは
+          ;; ミニバッファと同じく「いま見ているところ」の下に出す。
+          (pop-to-buffer buf '((display-buffer-reuse-window
+                                display-buffer-below-selected)
+                               (window-height . fit-window-to-buffer)
+                               (window-min-height . 4)))
+          (recursive-edit)
+          (when (buffer-live-p buf)
+            (with-current-buffer buf
+              (setq done my:claude--checklist-done
+                    answers (my:claude--checklist-selection)))))
+      (when (buffer-live-p buf)
+        (with-current-buffer buf
+          (setq my:claude--checklist-active nil)
+          (remove-hook 'kill-buffer-hook #'my:claude--checklist-kill-abort t))
+        (let ((win (get-buffer-window buf)))
+          (when (window-live-p win)
+            (quit-window nil win)))
+        (kill-buffer buf)))
+    (unless (and done answers)
+      (signal 'quit nil))
+    (string-join answers ", ")))
 
 (defun my:claude--answer-questions (session rid input)
   "AskUserQuestion の質問に Emacs で答えて control_response を返す。

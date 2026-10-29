@@ -1283,13 +1283,102 @@ Emacs 側で覚える従来動作に落ちる。
   ままにする**（推奨が先頭に来ることがある）
 - `require-match` は nil。候補に無い文字列も返せる（本家 UI の「Other」）。
   空で確定されたら聞き直す
-- `multiSelect` が `t` なら `completing-read-multiple`。答えは `, ` で連結する
+- `multiSelect` が `t` なら**専用バッファのチェックリスト**（下記）。
+  答えは選んだラベルを `, ` で連結した文字列で、単一選択と同じ形で返す
 - **`C-g` でも必ず応答を返す**（`condition-case` の `quit` 節）。返さないと
   claude が待ち続ける。エラー時も同じ
 - 切るときは `my:claude-answer-questions` を nil にする（従来の許可プロンプトに
   戻る）。ただし `--permission-mode` が `dontAsk` / `bypassPermissions` のときや
   `permissions.allow` に `AskUserQuestion` があるときは `can_use_tool` 自体が
   飛んで来ないので、そもそもこの経路は効かない
+
+### 複数選択はチェックリストで答える（`multiSelect`、2026-10-30）
+
+`multiSelect` が `t` の質問は `completing-read-multiple` で聞いていたが、
+**カンマ区切りを打ち終わるまで何を選んだのか見えない**。説明も注釈の 1 行に
+しか出ないので、選びながら読み比べることができない。
+
+専用バッファ（`*claude-select*`、`my:claude-checklist-mode`）を出して、
+`recursive-edit` で答えを待つ形にした（`my:claude--read-answer-checklist`）。
+**1 つ選ぶだけの質問は従来どおりミニバッファ**。そのほうが速いうえ、
+`completing-read` の絞り込みが効く。
+
+```
+? どの項目に手を付けますか？ [次の作業]
+
+  [x] 1. dired の拡張
+        サイズ・日時の追従を 入れる
+  [ ] 2. magit の高速化
+        gitd に寄せる
+  [x] 3. SQLcl
+```
+
+| キー | |
+|---|---|
+| `SPC` | この行のチェックを入れ替える |
+| `1`-`9` | 番号で入れ替える |
+| `n` / `p` | 候補を移動（端で回り込む） |
+| `a` / `u` | 全部チェック / 全部外す |
+| `o` | 候補に無い答えを書いて足す（本家 UI の「Other」。チェック済みで末尾に並ぶ） |
+| `RET` / `C-c C-c` | 確定 |
+| `C-g` / `q` / `C-c C-k` | 答えずに閉じる（claude には「キャンセルした」が deny で返る） |
+
+操作説明は `header-line`、今いる行は `hl-line`。候補行には
+`my:claude--checklist-index` をテキストプロパティで載せ、移動とトグルは
+その印で行を探す。**説明行には載せない**（載せると説明の上でも `SPC` が
+効いて、どちらの候補を指しているのか分からなくなる）。
+
+トグルのたびに**バッファをまるごと描き直す**。1 行だけ貼り替えるより桁が
+ずれる心配が無く（dired の `my:ls-lisp-narrow-single-entry` と同じ話）、
+候補は多くても十数個なので測るほどのコストにならない。
+
+#### 【重要】`recursive-edit` の抜け道を全部見張る
+
+プロセスフィルタの中から**同期で**答えの文字列を返す必要があるので、
+ミニバッファと同じく `recursive-edit` で待つ。ミニバッファと違って
+**待っていることが画面にほとんど出ない**（モードラインの `[...]` だけ）ので、
+抜けられなくなると「Emacs が固まった」ようにしか見えない。塞いだのは 4 つ。
+
+| 抜け道 | 塞ぎ方 |
+|---|---|
+| 親の `q`（`quit-window`） | 自分のマップで `my:claude-checklist-abort` に張り替える。**ウィンドウだけ消えて抜ける手段が無くなる** |
+| 親の `SPC`（`scroll-up-command`） | 同じく上書き（トグルに使う） |
+| `C-g`（`keyboard-quit`） | 張り替える。`quit` はコマンドループが受け止めるだけで `recursive-edit` を抜けない（ミニバッファで `minibuffer-keyboard-quit` が `abort-recursive-edit` を呼んでいるのと同じ事情） |
+| バッファの `kill` | `kill-buffer-hook` から `abort-recursive-edit` |
+
+**`C-M-c`（`exit-recursive-edit`）はグローバルに生きている。** 確定コマンド
+以外で抜けたときに空の答えを返すと、claude は「何も選ばなかった」ではなく
+**空文字列を選んだ**ものとして受け取る。`my:claude--checklist-done` を
+確定コマンドだけで立て、立っていなければ `quit` を投げて
+`my:claude--answer-questions` の `condition-case` に deny を返させる。
+
+**`kill-buffer-hook` の abort には札（`my:claude--checklist-active`）が要る。**
+片付けの `kill-buffer` は `recursive-edit` を出た後に走るので、素で
+`abort-recursive-edit` を呼ぶと**外側の** `recursive-edit`（別の質問や
+`C-M-c` の先）を抜いてしまう。札を下ろしてからフックを外し、それから kill する。
+
+#### 会話バッファのウィンドウを選び直さない
+
+出す先は `display-buffer-below-selected`、つまり**いま見ているウィンドウの下**。
+会話バッファのウィンドウを探して `with-selected-window` で選ぶと、
+**そのバッファの `point` が window-point へ飛ぶ**（別節の
+`window-max-chars-per-line` と同じ罠）。突然開くものはミニバッファと同じく
+手元に出るのが自然でもある。高さは `fit-window-to-buffer`（`o` で候補が
+増えたら追従する）。
+
+#### 実測（2026-10-30、GUI でタイマーから操作して確認）
+
+| 見たもの | 結果 |
+|---|---|
+| 確定（`[x] 1` と `[x] 3`） | `"dired の拡張, SQLcl"`。並びは表示順 |
+| `recursion-depth` | 待っている間 1 → 抜けた後 0 |
+| ウィンドウ数 | 2 → 2（`quit-window` で戻る）。バッファも残らない |
+| `C-g`（abort） | `quit` が外へ飛ぶ。バッファ・ウィンドウとも残らない |
+| バッファを `kill` | 同じく `quit`。閉じ込められない |
+| 候補 3 つ（説明 2 つ）のウィンドウ高さ | 7 行 |
+| 説明の改行 | 空白に潰す（字下げが崩れるため）。長い行はウィンドウ幅で折り返る |
+| 0 件で `RET` | `user-error` で止める（空の答えを返さない） |
+| 親マップとの競合 | `SPC` / `q` / `C-g` / `RET` / `3` / `n` すべて自分のコマンドに解決 |
 
 ### 質問は 1 行だけ出す（2026-09-15）
 

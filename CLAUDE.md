@@ -1102,6 +1102,19 @@ gopls は大文字のドライブレターで返す（§1「Windows 固有」）
   （ツールが動かないときの第一容疑者）
 - **`default-process-coding-system` を束縛して起動する**（stdin は utf-8）
 - **AskUserQuestion の答えは `deny` の `message` に載せる**のが唯一の回答経路
+- **【重要】`multiSelect` の質問は `recursive-edit` で待つ**（2026-10-30、
+  `*claude-select*` のチェックリスト）。**抜け道を全部塞ぐこと。** 親
+  （`special-mode-map`）の `q` = `quit-window` と `SPC`、それに `C-g`
+  （`keyboard-quit` の `quit` は `recursive-edit` を抜けない）を張り替え、
+  バッファの kill は `kill-buffer-hook` から abort する。塞ぎ損なうと
+  **ウィンドウだけ消えて抜ける手段が無くなる**（待っていることはモードラインの
+  `[...]` にしか出ないので固まったようにしか見えない）。`kill-buffer-hook` の
+  abort には札（`my:claude--checklist-active`）が要る。片付けの `kill-buffer` は
+  `recursive-edit` を出た後に走るので、素で呼ぶと**外側**の `recursive-edit` を
+  抜く。**`C-M-c` でも抜けられる**ので、確定コマンドで立てた
+  `my:claude--checklist-done` を見て、立っていなければ `quit` を投げる
+  （空の答えを返すと claude が「空文字列を選んだ」と受け取る）
+  → [docs](docs/claude/my-claude.md)
 - **許可の拒否に `updatedInput` を付けてはいけない。`message` は必須**
 - バッファ名にプロジェクト名が入るので、**「claude のバッファか」を名前で判定しない**
   （`my:claude--buffer-p` はメジャーモードで見る）
