@@ -1046,6 +1046,15 @@ gopls は大文字のドライブレターで返す（§1「Windows 固有」）
 - **監視表の引きは `my:magit-watch--lookup`**（`gethash` ではない）。
   Windows はドライブレターの大小が食い違うので、素の `gethash` だと
   **同じリポジトリに watch が 2 本張られトークンが 2 つに割れる**
+- **【重要】ファイルが 700〜800 件を超える dired では diff-hl の
+  `ls-files-ignored` 段が必ず落ちる**（2026-10-29）。あの段には
+  **一覧の全ファイル名が引数で渡る**ので、Windows のコマンドライン上限
+  （32768 文字）を超えて `Spawning child process: Exec format error`
+  （= `ENOEXEC`。実行形式の問題ではない）になる。センチネルから起動される
+  段なので `error in process sentinel` の形で、**revert のたびに繰り返す**。
+  `my:diff-hl-dired--skip-huge-ignored` が長すぎるときだけこの段を飛ばす。
+  **`.gitignore` に入れても直らない**（一覧は git ではなく dired の表示から
+  作られる） → [docs](docs/dired/dired-extensions.md)
 
 ## `my-claude`
 

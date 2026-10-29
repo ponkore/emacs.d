@@ -927,3 +927,88 @@ Windows は ls-lisp が既定、macOS は `my-dired.el` が
 `dired-relist-entry` で 1 行だけ貼り替えたあと（30000 → 300000 バイト）も
 `orange` / `white` に更新された。`my:dired-k-mode -1` のあとは両方 nil に
 なる。
+
+---
+
+## 【重要】ファイルが多いと diff-hl の extra indicators が必ず落ちる（2026-10-29 に対処）
+
+ファイル数の多いディレクトリを dired で開くと、revert のたびにこれが出続ける。
+
+```
+error in process sentinel: vc-git-command: Spawning child process: Exec format error
+error in process sentinel: Spawning child process: Exec format error
+```
+
+発見したのは `.playwright-mcp/`（`console-*.log` が 4374 件）。
+
+### 「実行形式が壊れている」ではない
+
+`Exec format error` は `ENOEXEC`。Windows の `CreateProcess` は**コマンドライン
+全体で 32768 文字**までで、それを超えると Emacs はこの errno を返す。
+**長さの問題であってファイルの問題ではない。**
+
+### 誰がその長さを作るのか
+
+diff-hl の extra indicators（unregistered / ignored の色分け）。
+
+| | |
+|---|---|
+| `diff-hl-dired-update` | `dired-after-readin-hook` から |
+| `diff-hl-dired-nondirectory-files` | **一覧の全ファイル名**を集める（git ではなく dired の表示から作る） |
+| `diff-hl-dir-status-ignored-files` | `diff-hl-dired.el:188` |
+| `vc-git-dir-status-goto-stage` の `ls-files-ignored` 段 | `vc-git.el:755` |
+
+```
+git ls-files -z -o -i --directory --no-empty-directory --exclude-standard -- <全ファイル名>
+```
+
+**チェーンの 1〜5 段目はファイル名を渡さないので通り、最後のこの段だけが必ず
+落ちる。** センチネルから起動される段なので `error in process sentinel` になり、
+`dired-after-readin-hook` は autorevert / `my-dired-watch` / `my-magit-watch` の
+更新でも走るので、revert のたびに繰り返す。
+
+**`.gitignore` に入れても直らない。** 渡す一覧は git の状態ではなく dired の表示
+から作られる。git リポジトリ配下なら**どのディレクトリでも 700〜800 件を超えた
+時点で起きる**。
+
+### 実測
+
+`emacs -Q --batch` に使い捨てリポジトリを与え、`ls-files-ignored` の段を直接
+叩いた。
+
+| ファイル数 | 引数の総長 | 結果 |
+|---|---|---|
+| 700 | 28,669 | OK |
+| **800** | **32,769** | **Spawning child process: Exec format error** |
+| 4375 | 179,344 | 同上 |
+
+境界はちょうど 32768。生きている Emacs で `call-process "git"` の引数長を
+二分探索すると、成功する最大は **32,719 文字**だった。
+
+### 対処: 長すぎるときはこの段だけ飛ばす
+
+`my-vc.el` の `my:diff-hl-dired--skip-huge-ignored`（`diff-hl-dir-status-ignored-files`
+への `:around`）。引数の総長が `my:diff-hl-dired-max-ignored-args`（30000）を
+超えたら git を起こさず、`update-function` を「ignored は 0 件・続きは無い」で
+呼ぶ。呼び出し側（`diff-hl-dired-status-files` の内側のラムダ）が本来の entries で
+チェーンを締めるので、**一時バッファもきちんと畳まれる**。
+
+報告は**ディレクトリごとに 1 回だけ**（`my:diff-hl-dired--huge-reported`）。
+revert のたびに言うと、直したはずのものがまた騒がしくなる。
+
+検証（GUI、4377 ファイル + 変更 1・未追跡 1・無視 1 の使い捨てリポジトリ）:
+
+| 見たもの | 結果 |
+|---|---|
+| チェーンが畳まれたか（`my:diff-hl-dired--in-flight-p`） | **nil**（完了） |
+| エラー | 無し |
+| `tracked.txt`（変更あり） | `change` |
+| `untracked.txt` | `unknown` |
+| `ignored-1.txt` | マーク無し（**これだけが代償**） |
+| 2 回チェーンを流したときのメッセージ | 1 回だけ |
+
+### 分割しないことにした理由
+
+一覧を複数回に分けて渡せば ignored も出せるが、`ls-files-ignored` の段は結果を
+まとめてから `update-function` を呼ぶ作りなので、**リレーを自前で回すことに
+なる**。上流（diff-hl）側のバグなので、そちらに投げるのが筋。

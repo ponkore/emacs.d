@@ -424,6 +424,93 @@ autorevert が revert したバッファに無駄な取り直しが残らない�
               #'my:diff-hl-dired--mark-chain)
 
   ;; --------------------------------------------------
+  ;; 【重要】ファイルが多いと extra indicators の段が必ず落ちる (2026-10-29)
+  ;;
+  ;; 症状: ファイル数の多いディレクトリを dired で開くと、revert のたびに
+  ;;
+  ;;   error in process sentinel: vc-git-command: Spawning child process: Exec format error
+  ;;   error in process sentinel: Spawning child process: Exec format error
+  ;;
+  ;; が出続ける。**「実行形式が壊れている」という意味ではない。** ENOEXEC で、
+  ;; Windows の `CreateProcess' のコマンドライン上限 (32768 文字) を超えた
+  ;; ときの表示。
+  ;;
+  ;; 出所は diff-hl の extra indicators (unregistered / ignored の色分け)。
+  ;;
+  ;;   diff-hl-dired-update                `dired-after-readin-hook' から
+  ;;   -> diff-hl-dired-nondirectory-files **一覧の全ファイル名**を集める
+  ;;                                       (git ではなく dired の表示から作る)
+  ;;   -> diff-hl-dir-status-ignored-files
+  ;;   -> vc-git-dir-status-goto-stage の `ls-files-ignored' 段
+  ;;   -> git ls-files -z -o -i --directory --no-empty-directory
+  ;;        --exclude-standard -- <全ファイル名>
+  ;;
+  ;; 実測 (emacs -Q --batch、使い捨てリポジトリで段を直接叩いた):
+  ;;
+  ;;    700 ファイル  引数  28669 文字  OK
+  ;;    800 ファイル  引数  32769 文字  **Exec format error**
+  ;;   4375 ファイル  引数 179344 文字  同上
+  ;;
+  ;; 境界はちょうど 32768。生きている Emacs で `call-process "git"' の引数を
+  ;; 二分探索すると、成功する最大は 32719 文字だった。
+  ;;
+  ;; **チェーンの 1〜5 段目はファイル名を渡さないので通り、最後のこの段だけが
+  ;; 必ず落ちる。** センチネルから起動される段なので "error in process
+  ;; sentinel" になり、revert のたびに繰り返す。
+  ;;
+  ;; **`.gitignore' に入れても直らない。** 渡す一覧は git の状態ではなく
+  ;; dired の表示から作られる。git リポジトリ配下なら、どのディレクトリでも
+  ;; 700〜800 件を超えた時点で起きる。
+  ;;
+  ;;; 対処: 長すぎるときはこの段だけ飛ばす
+  ;;
+  ;; update-function を「ignored は 0 件」として呼べば、呼び出し側
+  ;; (`diff-hl-dired-status-files' の内側のラムダ) が本来の entries で
+  ;; チェーンを締める。**変更・追加のマークは通常どおり出る**ので、失うのは
+  ;; そのディレクトリの unregistered / ignored の色分けだけ。
+  ;;
+  ;; 一覧を分割して複数回に分ける手もあるが、あの段は結果をまとめてから
+  ;; update-function を呼ぶ作りなので、リレーを自前で回すことになる。
+  ;; 上流 (diff-hl) 側のバグなので、そちらに投げるのが筋。
+
+  (defvar my:diff-hl-dired-max-ignored-args 30000
+    "`ls-files-ignored' の段に渡せる引数の総文字数。超えたらその段を飛ばす。
+
+Windows の `CreateProcess' はコマンドライン全体で 32768 文字まで。
+git 自身のパスと固定の引数、`vc-do-command' が空白を含む名前に付ける
+引用の分を引いた安全側の値。")
+
+  (defvar my:diff-hl-dired--huge-reported (make-hash-table :test #'equal)
+    "飛ばしたことを既に報告したディレクトリ。revert のたびに言わないため。")
+
+  (defun my:diff-hl-dired--args-length (files)
+    "FILES を引数に並べたときのおおよその文字数。
+空白を含む名前は引用されるので、1 件につき 3 文字 (区切り + 引用符 2) 見る。"
+    (seq-reduce (lambda (acc f) (+ acc (length f) 3)) files 0))
+
+  (defun my:diff-hl-dired--report-huge (dir n len)
+    "DIR で段を飛ばしたことを 1 度だけ報告する。"
+    (let ((key (let ((d (file-name-as-directory (expand-file-name dir))))
+                 (if (file-name-case-insensitive-p d) (downcase d) d))))
+      (unless (gethash key my:diff-hl-dired--huge-reported)
+        (puthash key t my:diff-hl-dired--huge-reported)
+        (message "diff-hl-dired: %s は %d ファイル (引数 %d 文字) なので ignored の判定を省きます"
+                 (abbreviate-file-name dir) n len))))
+
+  (defun my:diff-hl-dired--skip-huge-ignored (orig backend dir files update-function)
+    "引数が長すぎるときは `ls-files-ignored' の段を飛ばす。"
+    (let ((len (my:diff-hl-dired--args-length files)))
+      (if (<= len my:diff-hl-dired-max-ignored-args)
+          (funcall orig backend dir files update-function)
+        (my:diff-hl-dired--report-huge dir (length files) len)
+        ;; 「ignored は 0 件、続きは無い」。呼び出し側がここで本来の entries を
+        ;; 流してチェーンを締めるので、一時バッファも畳まれる。
+        (funcall update-function nil nil))))
+
+  (advice-add 'diff-hl-dir-status-ignored-files :around
+              #'my:diff-hl-dired--skip-huge-ignored)
+
+  ;; --------------------------------------------------
   ;; commit のあとに dired のマークを取り直す (2026-09-17)
   ;;
   ;; `diff-hl-dired' がマークを更新する経路は **1 つしかない**。
