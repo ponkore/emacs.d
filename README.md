@@ -273,6 +273,14 @@ PFN の翻訳特化 LLM **PLaMo 3 Translate** を、このマシンの中だけ�
 連続した行コメントは 1 つにまとめて訳し、**既に日本語で書かれたコメント・
 shebang・機械向けの指示・`TODO` のような断片は飛ばす**。
 
+**README は `C-c T m` で構造ごと訳す。** 散文だけをモデルに渡し、
+**コードブロック・URL・インラインコード・バッジはそもそも渡さない**ので、
+構造は確率ではなく構成的に保たれる。見出しには原文を併記して目次のリンクを
+生かし、表はセルごとに訳してから `string-width` で桁を取り直す。
+識別子が訳文から消えた単位は**原文のまま残す**。
+実測では 645 行の README が 0.8b で 68 秒、コードフェンス 6/6・見出し 22/22・
+URL 21 種と識別子 132 種が**すべて保存**された。
+
 **モデルが置いてなければコマンドがそう言うだけ**で、他の設定には影響しない。
 → [docs/translate/plamo-3-translate-study.md](docs/translate/plamo-3-translate-study.md)
 
@@ -325,7 +333,7 @@ shebang・機械向けの指示・`TODO` のような断片は飛ばす**。
 | `C-c l` | eglot（`r` rename / `a` code-actions / `f` format / `d` doc / `h` inlay hints / `R` reconnect / `q` shutdown） |
 | `C-c !` | flymake（`n` / `p` 移動、`l` / `P` 一覧、`h` hydra） |
 | `C-c p` | projectile（`s` は検索 dwim） |
-| `C-c T` | 翻訳（`t` リージョン／段落 / `c` コメントを overlay で / `x` その訳を消す / `s` サーバの状態 / `k` サーバ停止。`C-u` で丁寧なモデル） |
+| `C-c T` | 翻訳（`t` リージョン／段落 / `c` コメントを overlay で / `m` markdown を構造ごと / `x` コメントの訳を消す / `s` サーバの状態 / `k` サーバ停止。`C-u` で丁寧なモデル） |
 | `C-x i` | yasnippet（`TAB` expand / `i` insert / `n` new / `v` visit / `l` tables / `g` reload） |
 | `C-x t` | タブ（`0` 閉じる / `1` 他を閉じる / `2` 新規 / `RET` 選択 / `u` 戻す / `r` 改名。組み込み） |
 

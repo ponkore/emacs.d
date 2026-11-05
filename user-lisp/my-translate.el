@@ -29,6 +29,7 @@
 ;;   C-c T t   リージョンか段落を訳して *translation* に出す
 ;;   C-c T c   リージョンかバッファのコメントを訳し、各コメントの下に
 ;;             overlay で出す (ソースを読むときはこれ)
+;;   C-c T m   markdown を構造ごと訳して別バッファに出す (README はこれ)
 ;;   C-c T x   貼ったコメントの訳を消す
 ;;   C-c T s   サーバの状態を見る
 ;;   C-c T k   サーバを止める
@@ -167,11 +168,11 @@ PATH。見つからなければ翻訳コマンドは「未設定」と言って�
   "コメントがこの数を超えたら、訳す前に確認する。"
   :type 'integer)
 
-(defcustom my:translate-comment-max-cjk 1
-  "日本語の文字がこの数を超えるコメントは訳さない。
+(defcustom my:translate-max-cjk 1
+  "日本語の文字がこの数を超える単位は訳さない（コメント・markdown 共通）。
 
 **既に日本語で書かれているものを訳し返さないための判定。**
-この設定を自分のリポジトリで使うと、日本語のコメントが大半になる。
+この設定を自分のリポジトリで使うと、日本語のコメントや文書が大半になる。
 
 【重要】非 ASCII の「比率」で見てはいけない。識別子・URL・コード片が
 多いコメントでは比率が下がってすり抜ける。実測では
@@ -206,6 +207,16 @@ PATH。見つからなければ翻訳コマンドは「未設定」と言って�
 (defface my:translate-comment-face
   '((t :inherit (shadow italic)))
   "コメントの訳文を表示する face。")
+
+(defcustom my:translate-markdown-keep-heading-original t
+  "非 nil なら、訳した見出しに原文を括弧で併記する。
+
+【重要】切ると目次のリンクが全部外れる。markdown の目次は
+`* [Contribute!](#contribute)' の形で **原文の見出しから生成された
+アンカー**を指すので、見出しだけ訳すと指す先が無くなる（実測）。
+併記しておけば GFM のアンカーは原文側からも作られるのでリンクが生きる。
+目次の行そのものは「リンクだけの行」として訳さず素通しする。"
+  :type 'boolean)
 
 ;;; --------------------------------------------------
 ;;; 実行ファイルとモデルを探す
@@ -745,12 +756,12 @@ tree-sitter のパーサが無いモード用 (この設定が文法を入れて
 - 英字が足りないもの。`TODO' `ok' `=====' のような断片や、
   コメントアウトされた記号だけの行
 - **既に日本語で書かれているもの**
-  (`my:translate-comment-max-cjk')。この設定を自分のリポジトリで
+  (`my:translate-max-cjk')。この設定を自分のリポジトリで
   使うと大半がこれになるので、入れておかないと訳し返してしまう。"
   (and (not (string-empty-p text))
        (not (string-match-p my:translate-comment-skip-regexp text))
        (>= (my:translate--letters text) my:translate-comment-min-letters)
-       (<= (my:translate--cjk-count text) my:translate-comment-max-cjk)))
+       (<= (my:translate--cjk-count text) my:translate-max-cjk)))
 
 (defun my:translate--shebang-p (range)
   "RANGE がファイル先頭の shebang 行なら非 nil。
@@ -851,6 +862,243 @@ current なのは対象のバッファではない。実測では、ユーザー
     (when (called-interactively-p 'interactive)
       (message (if (zerop n) "コメントの訳は貼っていない"
                  (format "コメントの訳を %d 件消した" n))))))
+
+;;; --------------------------------------------------
+;;; markdown を分割する
+;;; --------------------------------------------------
+;; 【重要】構造の保持はモデルに頼めない。PFML3 に「markdown を壊すな」と
+;; 書く欄が無い (docs §6)。**記法・URL・コードブロックはモデルに渡さない**
+;; ことで、構造を確率ではなく構成的に保証する。
+;;
+;; 1 行は (TYPE . 部品のリスト) で表す。TYPE は `table' か `other'。
+;; 部品は
+;;   (lit . STRING)  そのまま出す（記法・URL・コード）
+;;   (tr  . STRING)  訳す
+;; 段落なら (other (lit . "- ") (tr . "本文"))、表の行ならセルが交互に並ぶ。
+;;
+;; 【重要】TYPE を持たせているのは、**どこが表かをパーサだけが決める**ため。
+;; 出力を `^|' で探し直して整形すると、コードブロックの中のシェルの
+;; パイプ（`    | xargs ...'）を表と誤認して書き換えてしまう（実測で踏んだ）。
+
+(defun my:translate--md-separator-cell-p (cell)
+  "CELL が表の区切り（`---' や `:--:'）なら非 nil。"
+  (string-match-p "\\`:?-+:?\\'" (string-trim cell)))
+
+(defun my:translate--md-separator-row-p (line)
+  "LINE が表の区切り行なら非 nil。"
+  (string-match-p "\\`[ \t]*|[ \t:|-]+|?[ \t]*\\'" line))
+
+(defun my:translate--md-prose-remainder (text)
+  "TEXT から記法（リンク・画像・インラインコード・URL）を除いた残りを返す。
+
+**バッジだけの行を見分けるために使う。** バッジは
+`[![Build Status](img)](link)' の形で、リンクを除くと何も残らない。
+`[dash.el](https://...)' のように文の一部なら、周りの散文が残る。"
+  (let ((s text))
+    (setq s (replace-regexp-in-string "!?\\[[^]]*\\]([^)]*)" " " s))
+    (setq s (replace-regexp-in-string "`[^`]*`" " " s))
+    (setq s (replace-regexp-in-string "https?://[^ \t]+" " " s))
+    s))
+
+(defun my:translate--md-translatable-p (text)
+  "TEXT を訳す価値があれば非 nil。
+
+落とすのは、英単語が無いもの、**リンクや画像だけの行（バッジ）**、
+HTML だけ、インラインコードだけ、そして**既に日本語のもの**。"
+  (let ((s (string-trim text)))
+    (and (not (string-empty-p s))
+         ;; 記法を除いた残りに英単語があること。これでバッジだけの行と
+         ;; 目次（リンクだけの行）がまとめて落ちる。
+         (string-match-p "[A-Za-z]\\{2\\}" (my:translate--md-prose-remainder s))
+         (not (string-match-p "\\`<.*>\\'" s))
+         (<= (my:translate--cjk-count s) my:translate-max-cjk))))
+
+(defun my:translate--md-block-start-p (line)
+  "LINE が新しいブロックの始まりなら非 nil（段落の継続行ではない）。"
+  (or (string-match-p "\\`[ \t]*\\'" line)
+      (string-match-p "\\`[ \t]*\\(```\\|~~~\\)" line)
+      (string-match-p "\\`[ \t]*#\\{1,6\\}[ \t]" line)
+      (string-match-p "\\`[ \t]*|" line)
+      (string-match-p "\\`[ \t]*\\([-*+]\\|[0-9]+[.)]\\)[ \t]" line)
+      (string-match-p "\\`[ \t]*>" line)
+      (string-match-p "\\`\\(    \\|\t\\)" line)
+      (string-match-p "\\`[ \t]*<" line)
+      (string-match-p "\\`[ \t]*\\[[^]]+\\]:[ \t]" line)))
+
+(defun my:translate--md-parse (lines)
+  "LINES（文字列のリスト）を 1 行ずつ「部品のリスト」にして返す。
+
+表の行だけは `(table . 部品のリスト)' の形になる。どこが表かを
+**パーサだけが決める**ための印（冒頭の解説を参照）。
+
+素通しにするのは、フェンスドコードブロック・YAML フロントマター・
+字下げコードブロック・HTML・リンクの参照定義・空行・表の区切り行。
+
+【重要】字下げ 4 文字の行は無条件に素通しにする。GFM ではリストの
+継続行と字下げコードブロックが紛らわしく、**訳して壊すより
+訳さずに残すほうが害が小さい**。"
+  (let ((out nil)
+        (i 0)
+        (n (length lines))
+        (fence nil)
+        (vec (vconcat lines)))
+    ;; YAML フロントマター
+    (when (and (> n 0) (string-match-p "\\`---[ \t]*\\'" (aref vec 0)))
+      (push (list (cons 'lit (aref vec 0))) out)
+      (setq i 1)
+      (while (and (< i n) (not (string-match-p "\\`\\(---\\|\\.\\.\\.\\)[ \t]*\\'" (aref vec i))))
+        (push (list (cons 'lit (aref vec i))) out)
+        (setq i (1+ i)))
+      (when (< i n)
+        (push (list (cons 'lit (aref vec i))) out)
+        (setq i (1+ i))))
+    (while (< i n)
+      (let ((line (aref vec i)))
+        (cond
+         ;; フェンスの開閉と中身
+         (fence
+          (push (list (cons 'lit line)) out)
+          (when (string-match-p (concat "\\`[ \t]*" (regexp-quote fence)) line)
+            (setq fence nil))
+          (setq i (1+ i)))
+         ((string-match "\\`[ \t]*\\(```\\|~~~\\)" line)
+          (setq fence (match-string 1 line))
+          (push (list (cons 'lit line)) out)
+          (setq i (1+ i)))
+         ;; そのまま出すもの
+         ((or (string-match-p "\\`[ \t]*\\'" line)
+              (string-match-p "\\`\\(    \\|\t\\)" line)
+              (string-match-p "\\`[ \t]*<" line)
+              (string-match-p "\\`[ \t]*\\[[^]]+\\]:[ \t]" line))
+          (push (list (cons 'lit line)) out)
+          (setq i (1+ i)))
+         ;; 表。**ここだけ `table' の印を付ける**（他は部品リストのまま。
+         ;; 部品の car は `lit' / `tr' なので `table' と混ざらない）。
+         ((string-match-p "\\`[ \t]*|" line)
+          (push (cons 'table
+                      (if (my:translate--md-separator-row-p line)
+                          (list (cons 'lit line))
+                        (my:translate--md-row-parts line)))
+                out)
+          (setq i (1+ i)))
+         ;; 見出し
+         ((string-match "\\`\\([ \t]*#\\{1,6\\}[ \t]+\\)\\(.*\\)\\'" line)
+          (let ((pre (match-string 1 line))
+                (body (match-string 2 line)))
+            (push (if (my:translate--md-translatable-p body)
+                      ;; 【重要】原文を併記する。見出しだけ訳すと、目次が
+                      ;; 指している原文由来のアンカーが全部外れる (docs §4.5-1)。
+                      ;; ただし**リンクや画像を含む見出しには併記しない。**
+                      ;; バッジの並んだタイトル行で、同じバッジ群が 2 回
+                      ;; 並ぶことになる（実測で踏んだ）。
+                      (if (and my:translate-markdown-keep-heading-original
+                               (not (string-match-p "](" body)))
+                          (list (cons 'lit pre) (cons 'tr body)
+                                (cons 'lit (format " (%s)" (string-trim body))))
+                        (list (cons 'lit pre) (cons 'tr body)))
+                    (list (cons 'lit line)))
+                  out))
+          (setq i (1+ i)))
+         ;; リスト項目 / 引用 / 段落（継続行をまとめて 1 単位にする）
+         (t
+          (let (pre body)
+            (cond
+             ((string-match "\\`\\([ \t]*\\([-*+]\\|[0-9]+[.)]\\)[ \t]+\\)\\(.*\\)\\'" line)
+              (setq pre (match-string 1 line) body (match-string 3 line)))
+             ((string-match "\\`\\([ \t]*>[ \t]*\\)\\(.*\\)\\'" line)
+              (setq pre (match-string 1 line) body (match-string 2 line)))
+             (t (setq pre "" body line)))
+            (setq i (1+ i))
+            ;; 【重要】継続行は空白で繋ぐ。改行を残すと、そこで文が
+            ;; 切れたものとして訳される。
+            (while (and (< i n)
+                        (not (my:translate--md-block-start-p (aref vec i))))
+              (setq body (concat body " " (string-trim (aref vec i))))
+              (setq i (1+ i)))
+            (push (if (my:translate--md-translatable-p body)
+                      (list (cons 'lit pre) (cons 'tr body))
+                    (list (cons 'lit (concat pre body))))
+                  out))))))
+    (nreverse out)))
+
+(defun my:translate--md-row-parts (line)
+  "表の行 LINE をセルごとの部品に分ける。"
+  (let* ((trimmed (string-trim line))
+         (inner (string-trim trimmed "|" "|"))
+         (cells (split-string inner "|"))
+         (parts (list (cons 'lit "|"))))
+    (dolist (cell cells)
+      (let ((c (string-trim cell)))
+        (push (cons (if (my:translate--md-translatable-p c) 'tr 'lit)
+                    (if (string-empty-p c) " " (concat " " c " ")))
+              parts)
+        (push (cons 'lit "|") parts)))
+    (nreverse parts)))
+
+;;; --------------------------------------------------
+;;; 表の桁を取り直す
+;;; --------------------------------------------------
+
+(defun my:translate--md-align-table (beg end)
+  "BEG..END の表の桁を揃える。
+
+【重要】桁は `length' ではなく `string-width' で測る。訳文は日本語に
+なって表示幅が原文とまったく変わるので、取り直さないと崩れる
+\(この設定は East Asian Width に手を入れている。docs/japanese/)。"
+  (let* ((lines (split-string (buffer-substring-no-properties beg end) "\n" t))
+         (rows (mapcar (lambda (l)
+                         (mapcar #'string-trim
+                                 (split-string (string-trim (string-trim l) "|" "|")
+                                               "|")))
+                       lines))
+         (ncol (apply #'max (mapcar #'length rows)))
+         (widths (make-list ncol 3)))
+    (dolist (row rows)
+      (let ((i 0))
+        (dolist (cell row)
+          (when (< i ncol)
+            (unless (my:translate--md-separator-cell-p cell)
+              (setf (nth i widths) (max (nth i widths) (string-width cell)))))
+          (setq i (1+ i)))))
+    (let ((text
+           (mapconcat
+            (lambda (row)
+              (concat
+               "|"
+               (let ((i -1))
+                 (mapconcat
+                  (lambda (cell)
+                    (setq i (1+ i))
+                    (let ((w (or (nth i widths) 3)))
+                      (if (my:translate--md-separator-cell-p cell)
+                          (concat (if (string-prefix-p ":" cell) ":" "-")
+                                  (make-string (max 1 w) ?-)
+                                  (if (string-suffix-p ":" cell) ":" "-"))
+                        (concat " " cell
+                                (make-string (max 0 (- w (string-width cell))) ?\s)
+                                " "))))
+                  row "|"))
+               "|"))
+            rows "\n")))
+      (save-excursion
+        (delete-region beg end)
+        (goto-char beg)
+        (insert text)))))
+
+(defun my:translate--md-align-tables (buffer runs)
+  "BUFFER の RUNS（(START-MARKER . END-MARKER) のリスト）の桁を取り直す。
+
+【重要】RUNS はパーサが「表だ」と判定した範囲だけ。**出力を `^|' で
+探し直してはいけない。** コードブロックの中のシェルのパイプ
+\(`    | xargs -I {} -0 ls -l {}'）を表と誤認して書き換えてしまう
+\(実測で踏んだ。原文に表が 1 つも無いのに出力に表の行が 1 つ増えた)。"
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (dolist (run runs)
+        (let ((beg (car run)) (end (cdr run)))
+          (when (and (marker-position beg) (marker-position end)
+                     (< beg end))
+            (my:translate--md-align-table beg end)))))))
 
 ;;; --------------------------------------------------
 ;;; 直列に訳す
@@ -1033,9 +1281,115 @@ GPU への要求は llama-server の側で直列化されるので、同時に�
          ;; 互いに無関係なコメントなので context は繋がない。
          nil)))))
 
+(defun my:translate-markdown (&optional arg)
+  "markdown のバッファ（かリージョン）を訳して、別バッファに出す。
+
+**記法・コードブロック・URL はモデルに渡さず、散文だけを訳す**ので、
+構造は確率ではなく構成的に保たれる（docs §6.1）。
+見出しには原文を併記する（`my:translate-markdown-keep-heading-original'）。
+表はセルごとに訳し、最後に桁を取り直す。
+
+前置引数 ARG を付けると `my:translate-alt-profile'（丁寧なモデル）を使う。
+
+【重要】元のバッファもファイルも書き換えない。結果は新しいバッファに出る。
+訳し終わるまでは原文が入っていて、訳せた単位から置き換わる。"
+  (interactive "P")
+  (let ((profile (my:translate--pick-profile arg))
+        (src (current-buffer)))
+    (my:translate--check-ready profile)
+    (let* ((beg (if (use-region-p) (region-beginning) (point-min)))
+           (end (if (use-region-p) (region-end) (point-max)))
+           (parsed (my:translate--md-parse
+                    (split-string (buffer-substring-no-properties beg end) "\n")))
+           (out (get-buffer-create (format "*translation: %s*" (buffer-name src))))
+           (units nil)
+           (runs nil)                   ; 表の範囲 (START . END) のリスト
+           (run-start nil))
+      ;; まず原文のまま流し込み、訳す部分にマーカーを打つ。
+      ;; 訳せた単位から置き換わるので、それが進捗表示になる。
+      (with-current-buffer out
+        (when (fboundp 'markdown-mode) (markdown-mode))
+        (let ((inhibit-read-only t))
+          (erase-buffer)
+          (dolist (entry parsed)
+            ;; 表の行は (table . 部品) の形。連続する表の範囲を覚えておき、
+            ;; 訳し終わってから桁を取り直す。
+            (let* ((table (eq (car entry) 'table))
+                   (parts (if table (cdr entry) entry)))
+              (cond ((and table (null run-start))
+                     (setq run-start (point-marker)))
+                    ((and (not table) run-start)
+                     (push (cons run-start (copy-marker (max (point-min) (1- (point)))))
+                           runs)
+                     (setq run-start nil)))
+              (dolist (part parts)
+                (if (eq (car part) 'lit)
+                    (insert (cdr part))
+                (let ((s (point-marker)))
+                  (insert (cdr part))
+                  ;; 【重要】`insertion-type' は両方とも nil のままにする
+                  ;; (`point-marker' の既定)。E に t を立ててはいけない。
+                  ;; 流し込みは末尾への追記の繰り返しなので、**t を立てた
+                  ;; マーカーは以後の追記のたびに前へ送られ、最後には
+                  ;; `point-max' まで引きずられる**。すると置換のときの
+                  ;; `delete-region' が「その単位から文末まで」を消す。
+                  ;; 実測では 26805 文字の出力が 837 文字まで溶けた。
+                  ;; 置換が終わった E を読み直すことは無いので、t は要らない。
+                  (push (cons (cons s (point-marker)) (cdr part)) units))))
+              (insert "\n")))
+          ;; 末尾が表で終わっていた場合
+          (when run-start
+            (push (cons run-start (copy-marker (max (point-min) (1- (point))))) runs)
+            (setq run-start nil)))
+        (setq units (nreverse units)
+              runs (nreverse runs))
+        (set-buffer-modified-p nil)
+        (goto-char (point-min)))
+      (unless units
+        (kill-buffer out)
+        (user-error "訳すものが無い（既に日本語か、記法だけ）"))
+      (display-buffer out)
+      (let ((kept 0))
+        (my:translate--sequential
+         units profile
+         (lambda (markers source translation error index total)
+           (message "markdown を翻訳中... %d/%d" index total)
+           (let ((text
+                  (cond
+                   (error nil)
+                   ;; 識別子や URL が落ちた訳文は採らない。壊れた訳文を
+                   ;; 入れるより、その単位だけ英語のまま残すほうが安全。
+                   ((my:translate--lost source translation) nil)
+                   (t translation))))
+             (if (not text)
+                 (setq kept (1+ kept))
+               (when (buffer-live-p out)
+                 (with-current-buffer out
+                   (let ((inhibit-read-only t)
+                         (s (car markers))
+                         (e (cdr markers)))
+                     (save-excursion
+                       (delete-region s e)
+                       (goto-char s)
+                       ;; 【重要】訳文は折り返さない。GFM は段落内の
+                       ;; 単独改行を空白 1 個として描画するので、
+                       ;; 日本語の文の途中で改行すると字間に空白が入る。
+                       (insert text))))))))
+         (lambda (total errors)
+           (my:translate--md-align-tables out runs)
+           (when (buffer-live-p out)
+             (with-current-buffer out (set-buffer-modified-p nil)))
+           (message "markdown の翻訳が終わった (%d 単位%s%s)"
+                    total
+                    (if (zerop errors) "" (format "、%d 件失敗" errors))
+                    (if (zerop kept) ""
+                      (format "、%d 件は原文のまま残した" kept))))
+         t)))))
+
 (use-package emacs
   :bind (("C-c T t" . my:translate-dwim)
          ("C-c T c" . my:translate-comments)
+         ("C-c T m" . my:translate-markdown)
          ("C-c T x" . my:translate-clear-overlays)
          ("C-c T s" . my:translate-server-status)
          ("C-c T k" . my:translate-stop-servers)))
