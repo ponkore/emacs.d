@@ -629,13 +629,13 @@ tree-sitter のパーサが無いモード用 (この設定が文法を入れて
         (let* ((state (syntax-ppss))
                (start (nth 8 state)))
           (if (nth 4 state)
-              ;; コメントの中にいる。頭に戻って末尾まで食う
+              ;; コメントの中にいる。頭に戻って末尾まで食う。
+              ;; `forward-comment' は終端の改行まで食うが、落とすのは
+              ;; `my:translate--comment-ranges' の側でまとめてやる。
               (let ((from (or start (point))))
                 (goto-char from)
                 (if (forward-comment 1)
-                    (push (cons from (my:translate--trim-range-end
-                                      from (min (point) end)))
-                          acc)
+                    (push (cons from (min (point) end)) acc)
                   (goto-char end)))
             ;; 次のコメントの開始を探す
             (if (and comment-start-skip
@@ -649,10 +649,30 @@ tree-sitter のパーサが無いモード用 (この設定が文法を入れて
     (nreverse acc)))
 
 (defun my:translate--comment-ranges (beg end)
-  "BEG..END のコメントの範囲。tree-sitter があればそちら、無ければ構文解析。"
-  (if (and (fboundp 'treesit-parser-list) (treesit-parser-list))
-      (my:translate--comment-ranges-treesit beg end)
-    (my:translate--comment-ranges-syntax beg end)))
+  "BEG..END のコメントの範囲。tree-sitter があればそちら、無ければ構文解析。
+
+【重要】**どちらの経路でも、末尾の改行と空白をここで必ず落とす。**
+改行が範囲に残っていると 2 つが同時に壊れ、しかも**エラーは出ない**。
+
+- 隣接判定 (`my:translate--comment-adjacent-p') の隙間に改行が入らず、
+  **連続した行コメントが 1 単位にまとまらない**。1 行ずつ訳されるので
+  文が途中で切れた訳文が並ぶ
+- `after-string' が改行の後ろに付くので、**訳文が 1 行ずれて次の
+  コメント行と同じ行に出る**
+
+範囲に改行が入るかは**経路でも文法でも変わる**ので、個別に対処しない。
+
+- `forward-comment' (構文解析) は行コメントの終端の改行まで食う
+- tree-sitter は文法しだい。**Python の `comment' は含まないが、
+  Rust の `line_comment' は含む**（実測。Python だけで試すと
+  この問題は表面化しない）"
+  (seq-filter
+   (lambda (r) (< (car r) (cdr r)))
+   (mapcar (lambda (r)
+             (cons (car r) (my:translate--trim-range-end (car r) (cdr r))))
+           (if (and (fboundp 'treesit-parser-list) (treesit-parser-list))
+               (my:translate--comment-ranges-treesit beg end)
+             (my:translate--comment-ranges-syntax beg end)))))
 
 (defun my:translate--comment-adjacent-p (a b)
   "範囲 A の直後の行が範囲 B で、字下げも同じなら非 nil。"
