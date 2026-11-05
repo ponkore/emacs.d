@@ -1158,6 +1158,14 @@ gopls は大文字のドライブレターで返す（§1「Windows 固有」）
   コメント**なので飛ばす → [docs](docs/claude/my-claude.md)
 - **コミットバッファの `default-directory` は `.git/`。** claude を起こす cwd は
   `magit-toplevel` で取り直す（ずれると claude が `CLAUDE.md` を見つけられない）
+- **【重要】`kill-buffer-hook` の中でユーザーに聞いてはいけない**（2026-11-02、
+  `*claude-log(PROJ)*` を消すかの確認）。あのフックの中のエラーと `C-g` は
+  **kill そのものを中止する**ので、先にセッションを畳んでいる
+  `my:claude--kill-buffer-hook` では「セッションは終わったのに会話バッファだけ
+  残る」状態になる。`run-at-time` 0 でコマンドループに戻してから聞く
+  （`my:claude--query-kill-log`）。**ログを kill する前に `log-buffer`
+  フィールドを nil に戻すこと**（EOF 後 sentinel までの間に届いた行で
+  `with-current-buffer` が落ちる） → [docs](docs/claude/my-claude.md)
 
 ## `my-pty`
 

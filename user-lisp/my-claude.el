@@ -5749,6 +5749,7 @@ org バッファで `my:org-yank-image' に潰しているのと同じ流儀。�
 **このバッファを kill するとセッションも終わる** (`C-c a q' 相当)。
 会話が消えたあとにプロセスだけ残しても送り先が無く、次の `C-c a a' が
 それを掴んで失敗するため。書きかけがあるときは確認する。
+`*claude-log(PROJ)*' も kill するかは、このバッファが消えたあとに聞く。
 
 セッションはプロジェクトごとに持てるので、別プロジェクトで
 `C-c a a' すれば `*claude(別のプロジェクト)*' が並ぶ。ここを kill
@@ -5790,10 +5791,49 @@ org バッファで `my:org-yank-image' に潰しているのと同じ流儀。�
 
 `my:claude-quit-session' は EOF を送るだけなので、プロセスが実際に
 死ぬのは少しあと。一覧からはここで外しておく
- (`my:claude--live-sessions' も同じ判断をするが、こちらが先に効く)。"
+ (`my:claude--live-sessions' も同じ判断をするが、こちらが先に効く)。
+
+生の JSON のバッファ (`*claude-log(PROJ)*') は記録として残したい
+ことがあるので、**消すかどうかは聞いてから**
+ (`my:claude--query-kill-log')。"
   (when-let* ((session my:claude--session))
     (my:claude-quit-session session)
-    (my:claude--forget-session session)))
+    (my:claude--forget-session session)
+    (when (buffer-live-p (my:claude-session-log-buffer session))
+      ;; 【重要】ここで聞いてはいけない。`kill-buffer-hook' の中の
+      ;; エラーと `C-g' は **kill そのものを中止する**ので、
+      ;; 「セッションは畳んだのに会話バッファは残っている」状態に
+      ;; なる。バッファが消えたあとのコマンドループで聞く。
+      (run-at-time 0 nil #'my:claude--query-kill-log session))))
+
+(defun my:claude--query-kill-log (session)
+  "SESSION のログバッファを kill してよいか聞いて、yes なら kill する。
+
+会話バッファが kill された**あと**に `run-at-time' で呼ばれる
+ (`my:claude--kill-buffer-hook')。
+
+【重要】kill する前に `log-buffer' を nil に戻すこと。
+`my:claude--filter' と `my:claude--send-json' はこのフィールドを
+`when-let*' で見るだけなので、死んだバッファが入っていると
+`with-current-buffer' が落ちる。EOF を送ってから sentinel が走るまでの
+間に行が届くので、実際に起こりうる。
+
+タイマーの中なので `condition-case' で囲む。`C-g' は「残す」と同じ。"
+  (condition-case err
+      (let ((log (my:claude-session-log-buffer session)))
+        (when (and (buffer-live-p log)
+                   ;; 立て直し (`my:claude--start' の OLD) はログを
+                   ;; 引き継ぐので、生きているセッションの書き込み先に
+                   ;; なっていることがある。そのときは消さない。
+                   (not (seq-find (lambda (s)
+                                    (eq (my:claude-session-log-buffer s) log))
+                                  my:claude--sessions))
+                   (yes-or-no-p (format "%s も kill する? " (buffer-name log))))
+          (setf (my:claude-session-log-buffer session) nil)
+          (kill-buffer log)))
+    (quit nil)
+    (error (message "claude: ログバッファの片付けに失敗 (%s)"
+                    (error-message-string err)))))
 
 (defun my:claude--disable-line-numbers ()
   "会話バッファでは行番号を出さない。
