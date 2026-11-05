@@ -507,6 +507,10 @@ tr-ime / Windows 側が IME のトグルとして処理するので、Emacs 側�
 | **`my:pty-console-font` の既定は nil（フォントを切り替えない）** | | 切り替えると `char-width-table` と同じく **Emacs 全体**のフォントが変わり、編集中のバッファまで巻き込む |
 | **SQLcl は `oracle` を書き換えず `sqlcl` という別製品として足す** | 2026-10-27 | `oracle` は SQL*Plus 前提で、直すと SQL*Plus が使えなくなる。合わないのは `SHOW` を通る 3 つだけなので、`sql-add-product` で足して font-lock と文の開始語は流用するのが安い → [docs](docs/languages/sqlcl.md) |
 | **SQLcl 用の専用パッケージ（`uhellstr/sqlcl-shell`）は入れない** | 2026-10-07 | **PTY 前提**（JLine が自前でエコーする）の Linux 向け。Windows の Emacs はパイプなので条件が逆で、素の comint でそのまま動く |
+| **翻訳に PFN 公式の `plamo-translate-cli` を使わない**（my-translate） | 2026-11-05 | インストール手順が **macOS 前提**で既定バックエンドは MLX（Apple Silicon 専用）。常駐モードは **MCP サーバ**で Emacs から話すには遠回り。**用語集・文脈・敬体/常体を渡すオプションが無く**モデルの機能を塞いでいる。要るのはその下の `llama-server` だけ → [docs](docs/translate/plamo-3-translate-study.md) |
+| **翻訳モデルに「構造を保て」と頼まない**（my-translate） | 2026-11-05 | **PFML3 に指示文の欄が存在しない**（渡せるのは target_lang / source_lang / context / glossary / form の 5 つだけ）。構造は Emacs 側の分割で保証する。**頼む必要も無かった**——分割して渡せば記法と識別子は素通しされる（実測で 132 種中 132 件保存） |
+| **識別子を守るための恒等写像 `glossary` は積まない**（my-translate） | 2026-11-05 | 実測で**有無によって出力が変わらなかった**。プロンプトが伸びるだけ。守られているかは検証で見る |
+| **31b は使わない**（my-translate） | 2026-11-05 | Q4_K_M が 19.5 GB で、iGPU から使える **17.6 GB に収まらない**。速度も 3〜4 tok/s で対話に使えない |
 
 ---
 
@@ -1208,6 +1212,52 @@ gopls は大文字のドライブレターで返す（§1「Windows 固有」）
   成功時の `kill-buffer` でその編集が黙って消える。札
   （`my:htnblog--posting`）は二重送信と `C-u M-x htnblog` の入れ直しも断る
 
+## `my-translate` — ローカル LLM で翻訳する
+
+→ [docs/translate/plamo-3-translate-study.md](docs/translate/plamo-3-translate-study.md)
+
+PLaMo 3 Translate を `llama-server` に持たせて常駐させ、localhost へ HTTP で
+投げる。**実装は Phase 1（リージョン/段落を別バッファに訳す）までで、
+markdown 構造の分割・コメントの overlay・help バッファ対応は未着手。**
+
+- **【重要】`my:translate-disable-coopmat` を nil にしてはいけない。**
+  `GGML_VK_DISABLE_COOPMAT=1` が無いと Intel の iGPU で **GPU が落ちて
+  `llama-server` がプロセスごと死ぬ**（終了コード 9）。実測で 3 回再現。
+  **落ちるまでの時間が毎回違い（175 / 26 / 34 秒）、Windows の
+  イベントログに 4101 も出ない**ので、知らずに当たると原因が分からない。
+  `-b` / `-ub` の縮小も `--parallel 1` も効かない。
+  切っても**生成速度は落ちない**（123.5 対 121.5 tok/s。プロンプト処理だけ
+  57% 落ちるが、翻訳は生成律速なので実質タダ）
+- **【重要】訳文の検証は `string-search` で行う。`string-match` は使えない。**
+  保護対象（インラインコード・URL）にはバッククォート・括弧・ドットが
+  含まれるので、正規表現として解釈されると**全件が「消失」と誤報される**
+  （実測で 132 件中 132 件。本当の消失 1 件が埋もれた）
+- **【重要】リクエストごとにプロセスを起こさない。** Windows の
+  `call-process` はプロセス生成だけで 59〜76 ms 払う（§1）。段落ごとに
+  起こすと翻訳と無関係なコストだけで数秒積む。だから常駐 + HTTP
+- **サーバは死ぬ前提で書く。** `my:translate--post` が、接続できなければ
+  起こし直して応答するまで待って投げ直す。**起動待ちと死亡からの復帰を
+  同じ経路で処理している**ので、呼ぶ側は気にしなくてよい
+- **`url-request-data` は unibyte にする**（`my-htnblog` と同じ罠）。
+  `encode-coding-string ... 'utf-8` を通さないと日本語が化ける
+- **本文に `<|plamo:` が混ざったら拒否する**（`my:translate--check-text`）。
+  PFML3 の特殊トークンなので、通すとプロトコルの構造が壊れ、翻訳の指定を
+  外から上書きできてしまう。公式の chat テンプレートも同じ理由で弾いている
+- **元のバッファは書き換えない。** 用途が「clone してきた他人のリポジトリを
+  読む」なので、読んでいる最中に差分を作らない。結果は必ず別バッファ
+- **1 単位の中に改行を残さない**（`my:translate--segments` が空白に畳む）。
+  原文が `fill-column` で折り返されていると、そこで文が切れたものとして訳される
+- **訳した段落を折り返して保存してはいけない。** GFM は段落内の単独改行を
+  **空白 1 個**として描画するので、日本語の文の途中で改行するとレンダラに
+  よって文字の間に空白が入る。1 段落 1 行のまま置く
+- **`form`（常体/敬体）は指示ではなくヒント。** 全段落に `plain` を渡しても
+  **敬体が混ざる**（実測）。揃えたいなら対訳履歴か後処理
+- **見出しを訳すと目次のアンカーが壊れる**（Phase 2 で踏む）。目次は原文の
+  英語から生成されたアンカーを指すので、見出しだけ訳すとリンクが全部外れる。
+  **見出しに原文を併記する**のがいちばん安い
+- 実行ファイルとモデルは `~/.local` 以下から glob で探す。
+  **マシンごとに違う絶対パスをリポジトリに書かない**（§1「反映と検証」と同じ方針）
+
 ## `my-utils` — カレンダーの祝日
 
 → [docs/misc/calendar-holidays.md](docs/misc/calendar-holidays.md) / [docs/misc/pdf-preview.md](docs/misc/pdf-preview.md)
@@ -1370,3 +1420,12 @@ fringe のマーカーを最新にしたいときは手で `g` を押す。
 
 U+2605 と U+203B は手元のどのフォントでも全角。`my-pty` でこれらを含む行だけは
 揃わない。→ [docs/pty/my-pty.md](docs/pty/my-pty.md)
+
+### 翻訳は `coopmat` を切っている間、プロンプト処理が 2.3 倍遅い（2026-11-05）
+
+Intel のドライバの不具合を避けるために `GGML_VK_DISABLE_COOPMAT=1` を立てて
+いる（§3 `my-translate`）ので、プロンプト処理が 5092 → 2178 tok/s に落ちている。
+**翻訳は生成律速なので実害は無い**（生成速度は変わらない）が、
+**ドライバを更新したら切り直して測る価値がある**（32.0.101.8724 で発生）。
+SYCL / OpenVINO バックエンドで起きるかも未確認。
+→ [docs/translate/plamo-3-translate-study.md](docs/translate/plamo-3-translate-study.md)
