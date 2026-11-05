@@ -61,6 +61,7 @@ git clone git@github.com:ponkore/emacs.d.git ~/.emacs.d
 | **Go ツールチェイン** | 対話 TUI を動かす | `M-x my:pty-build`（Windows のみ） |
 | **`~/Projects` の実体** | bookmark をマシン間で共有 | Windows はジャンクション（`C:\Projects` へ）、他は symlink か実ディレクトリ |
 | **`~/.htnblog`** | はてなブログ投稿 | `userid` / `endpointurl` / `apikey` を書く |
+| **llama.cpp + PLaMo 3 Translate** | ローカル翻訳（`C-c T`） | 下の[外部依存](#外部依存)の表。**無ければコマンドがそう言うだけ** |
 | **cmigemo** | ローマ字で日本語 isearch | バイナリと辞書（`~/.emacs.d/migemo/utf-8/migemo-dict`）。無ければ黙って無効 |
 | **exceldiff / MarkText** | dired からの起動 | PATH に置くだけ |
 
@@ -134,6 +135,7 @@ git clone git@github.com:ponkore/emacs.d.git ~/.emacs.d
 | `my-htnblog` | はてなブログ AtomPub API へ投稿する（`M-x htnblog`） |
 | `my-pty` | ConPTY 経由で対話 TUI を動かす。Windows のみ |
 | `my-genpreview` | GenPreview でファイルをプレビューする（`M-x genpreview-open`、dired の `v`）。Windows のみ |
+| `my-translate` | ローカル LLM（PLaMo 3 Translate）で翻訳する（`C-c T`）。モデルが無ければ無効 |
 | `my-platform` | Windows / macOS 固有設定 |
 
 ## 設計方針
@@ -255,6 +257,19 @@ Key / Command / Context / State の 4 列で、列見出しは `header-line` な
 など、SQL*Plus との違いはすべて踏んで塞いである。
 → [docs/languages/sqlcl.md](docs/languages/sqlcl.md)
 
+### ローカル LLM で翻訳（`C-c T t`）
+
+PFN の翻訳特化 LLM **PLaMo 3 Translate** を、このマシンの中だけで動かして
+英語を日本語にする。clone してきたリポジトリの README や英語の docstring を
+読むためのもので、**ネットワークへは出ない**。
+
+常駐させた llama.cpp の `llama-server` へ localhost で JSON を投げる。
+**元のバッファは絶対に書き換えず**、結果は `*translation*` に原文と訳文の対で出る。
+0.8b が速く（1 段落 0.4 秒）、`C-u` を付けると 2b で丁寧に訳す（1.3 秒）。
+
+**モデルが置いてなければコマンドがそう言うだけ**で、他の設定には影響しない。
+→ [docs/translate/plamo-3-translate-study.md](docs/translate/plamo-3-translate-study.md)
+
 ### その他
 
 - **カレンダーに日本の祝日**（`japanese-holidays`。Emacs 本体には入っていない）
@@ -304,6 +319,7 @@ Key / Command / Context / State の 4 列で、列見出しは `header-line` な
 | `C-c l` | eglot（`r` rename / `a` code-actions / `f` format / `d` doc / `h` inlay hints / `R` reconnect / `q` shutdown） |
 | `C-c !` | flymake（`n` / `p` 移動、`l` / `P` 一覧、`h` hydra） |
 | `C-c p` | projectile（`s` は検索 dwim） |
+| `C-c T` | 翻訳（`t` リージョン／段落を訳す・`C-u` で丁寧なモデル / `s` サーバの状態 / `k` サーバ停止） |
 | `C-x i` | yasnippet（`TAB` expand / `i` insert / `n` new / `v` visit / `l` tables / `g` reload） |
 | `C-x t` | タブ（`0` 閉じる / `1` 他を閉じる / `2` 新規 / `RET` 選択 / `u` 戻す / `r` 改名。組み込み） |
 
@@ -414,6 +430,8 @@ jsdoc / json / python / rust / toml / tsx / typescript / yaml の 17 個。
 | Git 付属の `bash.exe` | Windows の `shell-file-name`（あるときだけ設定） |
 | golangci-lint | `C-c C-l` |
 | SQLcl | `M-x my:sql-sqlcl`（`scoop install sqlcl`。接続は SQLcl の `connmgr` に登録しておく。Windows では `~/bin/sql.cmd` のラッパがあればそれを使う） |
+| llama.cpp | `C-c T` の翻訳。[リリース](https://github.com/ggml-org/llama.cpp/releases)の `llama-b*-bin-win-vulkan-x64.zip` を `~/.local/opt/llama.cpp-*/` へ展開する（ビルド不要）。**Intel の iGPU では `GGML_VK_DISABLE_COOPMAT=1` が無いと GPU が落ちる**（既定で付ける） |
+| PLaMo 3 Translate | 同上。`pfnet/plamo-3-translate-{0.8b,2b}-GGUF` の Q4_K_M を `~/.local/share/plamo-models/` へ置く（計 2.2 GB）。**商用利用には[登録](https://forms.gle/mTL8tBLrMYXKNZD56)が要る**（無償） |
 
 ---
 
