@@ -267,6 +267,12 @@ PFN の翻訳特化 LLM **PLaMo 3 Translate** を、このマシンの中だけ�
 **元のバッファは絶対に書き換えず**、結果は `*translation*` に原文と訳文の対で出る。
 0.8b が速く（1 段落 0.4 秒）、`C-u` を付けると 2b で丁寧に訳す（1.3 秒）。
 
+**ソースのコメントは `C-c T c` で、各コメントの下に overlay で出る**（`C-c T x` で消える）。
+コメントの検出は tree-sitter のパーサがあればそれ、無ければ `syntax-ppss` なので、
+文法を入れていない言語（Emacs Lisp / PHP / C++）でも効く。
+連続した行コメントは 1 つにまとめて訳し、**既に日本語で書かれたコメント・
+shebang・機械向けの指示・`TODO` のような断片は飛ばす**。
+
 **モデルが置いてなければコマンドがそう言うだけ**で、他の設定には影響しない。
 → [docs/translate/plamo-3-translate-study.md](docs/translate/plamo-3-translate-study.md)
 
@@ -319,7 +325,7 @@ PFN の翻訳特化 LLM **PLaMo 3 Translate** を、このマシンの中だけ�
 | `C-c l` | eglot（`r` rename / `a` code-actions / `f` format / `d` doc / `h` inlay hints / `R` reconnect / `q` shutdown） |
 | `C-c !` | flymake（`n` / `p` 移動、`l` / `P` 一覧、`h` hydra） |
 | `C-c p` | projectile（`s` は検索 dwim） |
-| `C-c T` | 翻訳（`t` リージョン／段落を訳す・`C-u` で丁寧なモデル / `s` サーバの状態 / `k` サーバ停止） |
+| `C-c T` | 翻訳（`t` リージョン／段落 / `c` コメントを overlay で / `x` その訳を消す / `s` サーバの状態 / `k` サーバ停止。`C-u` で丁寧なモデル） |
 | `C-x i` | yasnippet（`TAB` expand / `i` insert / `n` new / `v` visit / `l` tables / `g` reload） |
 | `C-x t` | タブ（`0` 閉じる / `1` 他を閉じる / `2` 新規 / `RET` 選択 / `u` 戻す / `r` 改名。組み込み） |
 

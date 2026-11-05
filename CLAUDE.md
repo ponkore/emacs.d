@@ -1217,8 +1217,8 @@ gopls は大文字のドライブレターで返す（§1「Windows 固有」）
 → [docs/translate/plamo-3-translate-study.md](docs/translate/plamo-3-translate-study.md)
 
 PLaMo 3 Translate を `llama-server` に持たせて常駐させ、localhost へ HTTP で
-投げる。**実装は Phase 1（リージョン/段落を別バッファに訳す）までで、
-markdown 構造の分割・コメントの overlay・help バッファ対応は未着手。**
+投げる。**実装は Phase 1（リージョン/段落）と Phase 3（コメントの overlay）まで。
+markdown 構造の分割と help バッファ対応は未着手。**
 
 - **【重要】`my:translate-disable-coopmat` を nil にしてはいけない。**
   `GGML_VK_DISABLE_COOPMAT=1` が無いと Intel の iGPU で **GPU が落ちて
@@ -1257,6 +1257,36 @@ markdown 構造の分割・コメントの overlay・help バッファ対応は�
   **見出しに原文を併記する**のがいちばん安い
 - 実行ファイルとモデルは `~/.local` 以下から glob で探す。
   **マシンごとに違う絶対パスをリポジトリに書かない**（§1「反映と検証」と同じ方針）
+
+### コメントの翻訳（`C-c T c`）
+
+- **【重要】非同期のコールバックの中では current buffer が対象ではない。**
+  `make-overlay` の BUFFER を省略すると**呼ばれた時点のバッファ**に貼られる。
+  実測で、**ユーザーが開いていた dired バッファに訳文が 2 件貼られた**
+  （対象のバッファには 0 件。エラーは出ないので原因が分かりにくい）。
+  `my:translate--comment-overlay` は BUFFER を必ず受け取る。
+  **`defvar-local` な `my:translate--overlays` も同じ罠**なので、
+  `with-current-buffer` の中で `push` する
+- **【重要】コメントのノード型名を決め打ちしない。** 文法ごとに違い、
+  Go / JS / Python は `comment` だが **Rust は `line_comment` と
+  `block_comment`**。`(comment)` のクエリを決め打ちすると、その文法では
+  1 件も取れず `treesit-query-error` になる。名前に `"comment"` を含むかで見る
+- **【重要】`forward-comment` は行コメントの終端の改行まで食う。**
+  そのままだと隣接判定の隙間に改行が入らず、**連続した行コメントが
+  1 単位にまとまらない**（実測で `diff-hl.el` の 148 件が 137 件にしか減らず、
+  ライセンスと Commentary が分断された）。tree-sitter のノードは改行を
+  含まないので、構文解析側を `my:translate--trim-range-end` で揃える
+- **【重要】「既に日本語か」を非 ASCII の比率で判定してはいけない。**
+  識別子・URL・コード片が多いコメントでは比率が下がってすり抜ける。
+  実測で `gitd/src/main.rs` の日本語コメントが比率 0.19 で通り、
+  日本語を日本語に訳しに行った。**かな・漢字の「数」で見る**
+  （`my:translate-comment-max-cjk`）。英語のコメントに日本語はまず現れない
+- **中身が空のコメント行（`;;` だけの行）は段落の区切りとして扱う。**
+  まとめてしまうと、Emacs Lisp のファイルヘッダのように `;;` が続く塊が
+  1 単位になり、**ライセンスの定型文に引っ張られて読みたい Commentary まで
+  落ちる**
+- shebang は剥がすと `/usr/bin/env python3` になり、英字の数だけなら
+  閾値を超える（実測で訳しに行った）。`my:translate--shebang-p` で弾く
 
 ## `my-utils` — カレンダーの祝日
 
