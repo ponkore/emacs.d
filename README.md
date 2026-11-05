@@ -281,6 +281,13 @@ shebang・機械向けの指示・`TODO` のような断片は飛ばす**。
 実測では 645 行の README が 0.8b で 68 秒、コードフェンス 6/6・見出し 22/22・
 URL 21 種と識別子 132 種が**すべて保存**された。
 
+**`*Help*` は `C-c T h`。** `describe-function` / `describe-variable` /
+`describe-mode` のどれでも使える。**元の `*Help*` には一切触れず**
+（本文を差し替えるとリンクが全滅するため）、別バッファに原文と訳文の対で出す。
+署名・型・キーバインド表・例示コード・定型句は飛ばし、
+大文字の引数名と `‘シンボル’` が訳文に残っているかを検証する。
+`describe-mode` は長いので、**リージョンを選べばその範囲だけ**訳せる。
+
 **モデルが置いてなければコマンドがそう言うだけ**で、他の設定には影響しない。
 → [docs/translate/plamo-3-translate-study.md](docs/translate/plamo-3-translate-study.md)
 
@@ -333,7 +340,7 @@ URL 21 種と識別子 132 種が**すべて保存**された。
 | `C-c l` | eglot（`r` rename / `a` code-actions / `f` format / `d` doc / `h` inlay hints / `R` reconnect / `q` shutdown） |
 | `C-c !` | flymake（`n` / `p` 移動、`l` / `P` 一覧、`h` hydra） |
 | `C-c p` | projectile（`s` は検索 dwim） |
-| `C-c T` | 翻訳（`t` リージョン／段落 / `c` コメントを overlay で / `m` markdown を構造ごと / `x` コメントの訳を消す / `s` サーバの状態 / `k` サーバ停止。`C-u` で丁寧なモデル） |
+| `C-c T` | 翻訳（`t` リージョン／段落 / `c` コメントを overlay で / `m` markdown を構造ごと / `h` `*Help*` の散文 / `x` コメントの訳を消す / `s` サーバの状態 / `k` サーバ停止。`C-u` で丁寧なモデル） |
 | `C-x i` | yasnippet（`TAB` expand / `i` insert / `n` new / `v` visit / `l` tables / `g` reload） |
 | `C-x t` | タブ（`0` 閉じる / `1` 他を閉じる / `2` 新規 / `RET` 選択 / `u` 戻す / `r` 改名。組み込み） |
 

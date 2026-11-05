@@ -30,6 +30,7 @@
 ;;   C-c T c   リージョンかバッファのコメントを訳し、各コメントの下に
 ;;             overlay で出す (ソースを読むときはこれ)
 ;;   C-c T m   markdown を構造ごと訳して別バッファに出す (README はこれ)
+;;   C-c T h   *Help* の散文を訳して別バッファに出す
 ;;   C-c T x   貼ったコメントの訳を消す
 ;;   C-c T s   サーバの状態を見る
 ;;   C-c T k   サーバを止める
@@ -164,8 +165,11 @@ PATH。見つからなければ翻訳コマンドは「未設定」と言って�
 `ok' `TODO' `nolint' のような断片を訳しても読めるものにならない。"
   :type 'integer)
 
-(defcustom my:translate-comment-ask-threshold 40
-  "コメントがこの数を超えたら、訳す前に確認する。"
+(defcustom my:translate-ask-threshold 40
+  "訳す単位がこの数を超えたら、訳す前に確認する（コメントと help）。
+
+`C-c T m'（markdown）には掛けない。文書を丸ごと訳すのは明示的な操作で、
+単位が 100 を超えるのが普通なため。"
   :type 'integer)
 
 (defcustom my:translate-max-cjk 1
@@ -207,6 +211,11 @@ PATH。見つからなければ翻訳コマンドは「未設定」と言って�
 (defface my:translate-comment-face
   '((t :inherit (shadow italic)))
   "コメントの訳文を表示する face。")
+
+(defcustom my:translate-help-min-letters 20
+  "help バッファで訳す単位の下限。英字がこれ未満なら訳さない。
+`Its value is 70' のような短い行を落とす。"
+  :type 'integer)
 
 (defcustom my:translate-markdown-keep-heading-original t
   "非 nil なら、訳した見出しに原文を括弧で併記する。
@@ -512,26 +521,58 @@ DEADLINE は内部用。サーバの起動待ちと再試行をここで吸収�
 ;;; 訳文の検証
 ;;; --------------------------------------------------
 
-(defun my:translate--protected (text)
+(defconst my:translate--protect-common
+  '("`[^`\n]+`" "https?://[^][\s\n\"'<>)]+")
+  "どの用途でも訳文に残っていなければならないもの。")
+
+(defconst my:translate--protect-help
+  '(("‘\\([^’\n]+\\)’" . 1)            ; help が描く引用符つきシンボル
+    ("`\\([^'\n]+\\)'" . 1)            ; 生の docstring の引用符
+    "\\_<[A-Z][A-Z0-9]+\\(?:-[A-Z0-9]+\\)*\\_>")  ; 大文字の引数名
+  "help バッファで追加で守るもの。
+
+【重要】docstring の大文字の引数名 (BUFFER / NOERROR) と
+`‘replace-match’' のようなシンボルは、訳文に同じ形で残っていなければ
+意味が通らない。help でだけ見るのは、markdown や README では
+API / JSON / README のような語が普通の単語として訳されうるため。
+
+【重要】引用符つきシンボルは**中身だけを守る**（グループ 1）。
+モデルは `‘replace-match’' を「replace-match」と書くことがあり、
+**シンボル名は保たれているのに引用符の体裁だけが変わる**。丸ごとで
+照合すると毎回「消えた」と報告してしまう（実測）。
+markdown のインラインコードは体裁そのものが構造なので、
+あちらは丸ごと（グループ 0）で見る。")
+
+(defun my:translate--protected (text &optional extra)
   "TEXT の中で訳文に残っていなければならない文字列を集めて返す。
-インラインコード (`...') と URL。"
-  (let (result)
-    (dolist (re '("`[^`\n]+`" "https?://[^][\s\n\"'<>)]+"))
-      (let ((start 0))
+EXTRA は追加で見る正規表現のリスト。
+
+【重要】`case-fold-search' を nil に束縛すること。既定は t なので、
+**`[A-Z]' が小文字にも一致して普通の英単語まで保護対象になる**。
+実測では `Replace all matches for REGEXP with REP in STRING.' に対して
+Replace / all / matches / for / in / with まで拾い、訳文から消えたと
+報告した（訳文は正しかったのに「壊れた」と言う）。"
+  (let ((case-fold-search nil)
+        (result nil))
+    ;; SPEC は正規表現、または (正規表現 . 取り出すグループ番号)。
+    (dolist (spec (append my:translate--protect-common extra))
+      (let ((re (if (consp spec) (car spec) spec))
+            (group (if (consp spec) (cdr spec) 0))
+            (start 0))
         (while (string-match re text start)
-          (push (match-string 0 text) result)
-          (setq start (match-end 0)))))
+          (push (match-string group text) result)
+          (setq start (max (match-end 0) (1+ start))))))
     (delete-dups result)))
 
-(defun my:translate--lost (src dst)
-  "SRC にあって DST から消えた保護対象の一覧。
+(defun my:translate--lost (src dst &optional extra)
+  "SRC にあって DST から消えた保護対象の一覧。EXTRA は追加の正規表現。
 
 【重要】比較は `string-search' で行う。`string-match' を使うと
 バッククォート・括弧・ドットが正規表現として解釈され、
 実測で「132 件中 132 件が消失」という誤報を出した (docs §4.5-3)。
 検証器が壊れていると、本当の壊れ 1 件が埋もれる。"
   (seq-filter (lambda (s) (not (string-search s dst)))
-              (my:translate--protected src)))
+              (my:translate--protected src extra)))
 
 ;;; --------------------------------------------------
 ;;; 結果バッファ
@@ -1101,6 +1142,99 @@ HTML だけ、インラインコードだけ、そして**既に日本語のも�
             (my:translate--md-align-table beg end)))))))
 
 ;;; --------------------------------------------------
+;;; help バッファを分割する
+;;; --------------------------------------------------
+;; 【重要】`*Help*' の本文は絶対に書き換えない。help バッファは
+;; `help-xref' ボタン・`help-argument-name' face・`help-mode-revert-buffer'
+;; が前提にする元テキストの集合体で、本文を訳文に差し替えると
+;; **リンクが全滅する** (docs §6.2)。結果は別バッファに原文と訳文の対で出す。
+;;
+;; 実際の出力を見て決めた (docs §6.2)。訳す価値があるのは散文だけで、
+;; 大半は署名・型・キーバインド表・定型句。
+
+(defconst my:translate--help-skip-regexp
+  (rx (or (seq bos "Inferred type:")
+          (seq bos "Probably introduced at")
+          (seq bos "Its value is")
+          (seq bos "[back]")
+          (seq bos "Major mode ")
+          (seq bos "Key" (+ " ") "Binding" eos)
+          " is a " (seq " is a variable defined in")
+          "(this binding is currently shadowed)"))
+  "これに一致する単位は訳さない。help の定型句。")
+
+(defun my:translate--help-table-line-p (line)
+  "LINE がキーバインド表の行なら非 nil。
+
+**タブか、行頭以外の 3 連続以上の空白**で見る。2 連続にすると、
+docstring の「文末のピリオドのあと空白 2 つ」(`match.  If START')
+を表と誤認する（実測の出力にその形がある）。"
+  (string-match-p "\t\\|[^ ]   +" line))
+
+(defun my:translate--help-prose-remainder (text)
+  "TEXT から引用符つきシンボルと大文字の引数名を除いた残り。
+
+`‘checkdoc’' がただ並んでいるだけの段落（`describe-mode' の
+「キーに割り当てられていないコマンド」）を落とすために使う。
+
+【重要】`case-fold-search' を nil にする。既定の t のままだと
+`[A-Z]' が小文字にも一致して**普通の英単語まで消え**、残りが空になって
+散文の段落まで落ちる。"
+  (let ((case-fold-search nil))
+    (replace-regexp-in-string
+     "‘[^’]*’\\|`[^']*'\\|\\_<[A-Z][A-Z0-9-]+\\_>" " " text)))
+
+(defun my:translate--help-units (beg end)
+  "BEG..END（help バッファ）から訳す単位を文字列のリストで返す。
+
+空行と**字下げの変化**で切る。字下げで切るのは、docstring の中の
+例示コードが地の文と同じ段落に入っているため（実測）。
+
+  To replace only the first match (if any), make REGEXP match up to \\='
+  and replace a sub-expression, e.g.
+    (replace-regexp-in-string ...)      ← ここで切りたい"
+  (let ((lines (split-string (buffer-substring-no-properties beg end) "\n"))
+        (units nil)
+        (cur nil)
+        (indent nil))
+    (cl-labels
+        ((flush ()
+           (when cur
+             (push (nreverse cur) units)
+             (setq cur nil indent nil))))
+      (dolist (line lines)
+        (if (string-match-p "\\`[ \t]*\\'" line)
+            (flush)
+          (let ((this (- (length line) (length (string-trim-left line)))))
+            (when (and indent (/= this indent)) (flush))
+            (setq indent this)
+            (push line cur))))
+      (flush))
+    (seq-filter
+     #'identity
+     (mapcar
+      (lambda (group)
+        (let ((text (string-trim (mapconcat #'string-trim group " "))))
+          (and (my:translate--help-prose-p text group) text)))
+      (nreverse units)))))
+
+(defun my:translate--help-prose-p (text group)
+  "TEXT（GROUP を 1 行に畳んだもの）を訳す価値があれば非 nil。"
+  (and (not (string-empty-p text))
+       ;; 署名と例示コード
+       (not (string-prefix-p "(" text))
+       (not (string-prefix-p "=>" text))
+       (not (string-match-p my:translate--help-skip-regexp text))
+       ;; キーバインド表（過半数の行が表の形）
+       (< (seq-count #'my:translate--help-table-line-p group)
+          (max 1 (/ (length group) 2.0)))
+       ;; シンボルが並んでいるだけ
+       (string-match-p "[A-Za-z]\\{2\\}"
+                       (my:translate--help-prose-remainder text))
+       (>= (my:translate--letters text) my:translate-help-min-letters)
+       (<= (my:translate--cjk-count text) my:translate-max-cjk)))
+
+;;; --------------------------------------------------
 ;;; 直列に訳す
 ;;; --------------------------------------------------
 
@@ -1146,8 +1280,9 @@ GPU への要求は llama-server の側で直列化されるので、同時に�
 ;;; コマンド: リージョン / 段落
 ;;; --------------------------------------------------
 
-(defun my:translate--run (segments buffer profile)
-  "SEGMENTS を順に訳して BUFFER に足す。PROFILE のサーバを使う。"
+(defun my:translate--run (segments buffer profile &optional extra chain)
+  "SEGMENTS を順に訳して BUFFER に足す。PROFILE のサーバを使う。
+EXTRA は追加で守る正規表現、CHAIN が非 nil なら直前の原文を文脈に渡す。"
   (my:translate--sequential
    (mapcar (lambda (s) (cons nil s)) segments)
    profile
@@ -1158,7 +1293,7 @@ GPU への要求は llama-server の側で直列化されるので、同時に�
           buffer
           (format "── %d/%d ──\n%s\n\n!! 訳せなかった: %s\n\n"
                   index total src error))
-       (let ((lost (my:translate--lost src translation)))
+       (let ((lost (my:translate--lost src translation extra)))
          (my:translate--append
           buffer
           (format "── %d/%d ──\n%s\n\n%s\n" index total src translation)
@@ -1172,7 +1307,7 @@ GPU への要求は llama-server の側で直列化されるので、同時に�
      (my:translate--append buffer "\n")
      (message "翻訳が終わった (%d 段落%s)" total
               (if (zerop errors) "" (format "、%d 件失敗" errors))))
-   t))
+   chain))
 
 (defun my:translate--pick-profile (arg)
   "前置引数 ARG からプロファイルを決める。"
@@ -1220,7 +1355,60 @@ GPU への要求は llama-server の側で直列化されるので、同時に�
                my:translate-target-lang
                (if my:translate-form (format " (%s)" my:translate-form) "")))
       (display-buffer buffer)
-      (my:translate--run segments buffer profile))))
+      (my:translate--run segments buffer profile nil t))))
+
+(defun my:translate-help (&optional arg)
+  "help バッファの散文を訳して、別バッファに原文と訳文の対で出す。
+
+`*Help*' を見ている状態で呼ぶ。`describe-function' /
+`describe-variable' / `describe-mode' のどれでも使える。
+**リージョンがあればその範囲だけ**訳す（`describe-mode' は長いので、
+知りたいところだけ選ぶとよい）。
+
+【重要】`*Help*' の本文には一切触れない。本文を訳文に差し替えると
+`help-xref' ボタンが全滅するため（docs §6.2）。
+
+訳すのは散文だけ。署名・型・キーバインド表・定型句・例示コードと、
+**大文字の引数名やシンボルだけが並んだ段落**は飛ばす。
+訳文から引数名やシンボルが消えていたら、その単位は印を付ける。"
+  (interactive "P")
+  (let* ((profile (my:translate--pick-profile arg))
+         (help (cond
+                ((derived-mode-p 'help-mode) (current-buffer))
+                ((get-buffer (help-buffer)) (get-buffer (help-buffer)))
+                (t (user-error "help バッファが無い")))))
+    (my:translate--check-ready profile)
+    (let ((segments
+           (with-current-buffer help
+             ;; 【重要】同じ段落を何度も訳さない。`describe-mode' は
+             ;; 有効なマイナーモードぶんの docstring を全部並べるので、
+             ;; 「The mode's hook is called both when the mode is enabled
+             ;; and when it is disabled.」が実測で約 50 回現れる。
+             (delete-dups
+              (if (use-region-p)
+                  (my:translate--help-units (region-beginning) (region-end))
+                (my:translate--help-units (point-min) (point-max)))))))
+      (unless segments
+        (user-error "訳す散文が無い（署名と表だけ、あるいは既に日本語）"))
+      (when (and (> (length segments) my:translate-ask-threshold)
+                 (not (yes-or-no-p
+                       (format "%d 段落を訳す (%s で約 %d 秒)? "
+                               (length segments) (my:translate--label profile)
+                               (round (* (length segments)
+                                         (if (eq profile my:translate-default-profile)
+                                             0.5 1.6)))))))
+        (user-error "やめた（リージョンを選べばその範囲だけ訳せる）"))
+      (let ((buffer (my:translate--result-buffer help)))
+        (my:translate--append
+         buffer
+         (format "%s / %s → %s%s\n\n"
+                 (buffer-name help) (my:translate--label profile)
+                 my:translate-target-lang
+                 (if my:translate-form (format " (%s)" my:translate-form) "")))
+        (display-buffer buffer)
+        ;; 文脈は繋がない。help の段落は互いに独立していることが多い。
+        (my:translate--run segments buffer profile
+                           my:translate--protect-help nil)))))
 
 (defun my:translate-comments (&optional arg)
   "リージョンかバッファのコメントを訳し、各コメントの下に overlay で出す。
@@ -1250,7 +1438,7 @@ GPU への要求は llama-server の側で直列化されるので、同時に�
       (setq my:translate--overlays
             (seq-filter #'overlay-buffer my:translate--overlays))
       (let ((n (length units)))
-        (when (and (> n my:translate-comment-ask-threshold)
+        (when (and (> n my:translate-ask-threshold)
                    (not (yes-or-no-p
                          (format "コメント %d 件を訳す (%s で約 %d 秒)? "
                                  n (my:translate--label profile)
@@ -1390,6 +1578,7 @@ GPU への要求は llama-server の側で直列化されるので、同時に�
   :bind (("C-c T t" . my:translate-dwim)
          ("C-c T c" . my:translate-comments)
          ("C-c T m" . my:translate-markdown)
+         ("C-c T h" . my:translate-help)
          ("C-c T x" . my:translate-clear-overlays)
          ("C-c T s" . my:translate-server-status)
          ("C-c T k" . my:translate-stop-servers)))

@@ -36,6 +36,7 @@ CLAUDE.md の各節から、詳細はここへリンクしてある。逆にこ�
 | [misc/calendar-holidays.md](misc/calendar-holidays.md) | 日本の祝日（本体には入っていない） |
 | [misc/pdf-preview.md](misc/pdf-preview.md) | `doc-view-mode` + mupdf |
 | [misc/projects-junction.md](misc/projects-junction.md) | `~/Projects` と `directory-abbrev-alist` |
+| [translate/plamo-3-translate-study.md](translate/plamo-3-translate-study.md) | ローカル LLM（PLaMo 3 Translate）で翻訳する。実現可能性の検討・実測・実装の記録。Intel Vulkan の `coopmat` でクラッシュする罠つき |
 
 ## 設計と計画（着手前・着手中の検討）
 
@@ -48,7 +49,6 @@ CLAUDE.md の各節から、詳細はここへリンクしてある。逆にこ�
 | [magit/magit-autorefresh-stage1-design.md](magit/magit-autorefresh-stage1-design.md) | 段階 1: 自動リフレッシュ |
 | [magit/magit-gitd-2a-design.md](magit/magit-gitd-2a-design.md) | 段階 2a: 素通しプロキシ |
 | [magit/magit-gitd-2b-design.md](magit/magit-gitd-2b-design.md) | 段階 2b: キャッシュと並列先読み |
-| [translate/plamo-3-translate-study.md](translate/plamo-3-translate-study.md) | PLaMo 3 Translate をローカルで動かして翻訳する実現可能性検討（**Phase 0 実測済み・実装は未着手**。Intel Vulkan の `coopmat` でクラッシュする罠つき） |
 
 ## リファクタリングの記録
 

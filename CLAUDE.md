@@ -1217,8 +1217,8 @@ gopls は大文字のドライブレターで返す（§1「Windows 固有」）
 → [docs/translate/plamo-3-translate-study.md](docs/translate/plamo-3-translate-study.md)
 
 PLaMo 3 Translate を `llama-server` に持たせて常駐させ、localhost へ HTTP で
-投げる。**実装は Phase 1（リージョン/段落）・Phase 3（コメントの overlay）・
-Phase 2（markdown）まで。help バッファ対応（Phase 4）は未着手。**
+投げる。**Phase 1〜4（リージョン/段落・コメントの overlay・markdown・
+help バッファ）まで実装済み。**
 
 - **【重要】`my:translate-disable-coopmat` を nil にしてはいけない。**
   `GGML_VK_DISABLE_COOPMAT=1` が無いと Intel の iGPU で **GPU が落ちて
@@ -1326,6 +1326,33 @@ Phase 2（markdown）まで。help バッファ対応（Phase 4）は未着手�
   害が小さい**
 - **識別子が訳文から消えた単位は原文のまま残す**（`my:translate--lost`）。
   実測の README 1 本で 2 件あった
+
+### help バッファの翻訳（`C-c T h`）
+
+**`*Help*` の本文には一切触れない。** 本文を訳文に差し替えると
+`help-xref` ボタンが全滅する。結果は別バッファに原文と訳文の対で出す。
+
+- **【重要】保護対象を探す正規表現は `case-fold-search` を nil に束縛して
+  当てる。** 既定は t なので **`[A-Z]` が小文字にも一致し、普通の英単語まで
+  保護対象になる**。実測では `Replace all matches for REGEXP with REP in
+  STRING.` に対して Replace / all / matches / for / in / with まで拾い、
+  **訳文は正しいのに「壊れている」と報告した**。同じ理由で、記法を除いた
+  「残り」を作る関数でも束縛が要る（残りが空になって散文の段落が落ちる）
+- **【重要】引用符つきシンボルは中身だけを守る**（`‘replace-match’` の
+  グループ 1）。モデルは `‘replace-match’` を「replace-match」と書くことが
+  あり、**シンボル名は保たれているのに引用符の体裁だけ変わる**。丸ごとで
+  照合すると毎回「消えた」と報告する。**markdown のインラインコードは
+  体裁そのものが構造**なので、あちらは丸ごとで見る（区別は意図的）
+- **`describe-mode` は同じ段落が大量に重複する。** 有効なマイナーモードの
+  docstring を全部並べるので、実測で
+  「The mode's hook is called both when the mode is enabled and when it is
+  disabled.」が **51 回**現れた（178 単位中、重複を除くと 128）。
+  `delete-dups` してから訳す
+- 段落は空行だけでなく**字下げの変化でも切る**。docstring は例示コードを
+  地の文と同じ段落に置くため（`e.g.` の次の行から字下げして `(...)`）
+- キーバインド表の判定は**タブか、行頭以外の 3 連続以上の空白**で見る。
+  2 連続にすると docstring の「文末のピリオドのあと空白 2 つ」
+  （`match.  If START`）を表と誤認する
 
 ## `my-utils` — カレンダーの祝日
 
