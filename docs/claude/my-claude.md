@@ -1232,7 +1232,47 @@ JSON の断片は揃うまで意味を持たないため。
 `streamed-text` を見ずに必ず出す。見てしまうと、本体のブロックが
 開いている間はサブエージェントの発言が捨てられる。
 
-表示は字下げ + `my:claude-subagent-face` で本体と区別する。
+### 何をどこまで見せるか（`my:claude-subagent-display`、2026-11-06）
+
+| 値 | 出るもの |
+|---|---|
+| `full` | 発言もツール行も結果も全部（2026-11-06 まではこれだけだった） |
+| `tools` | ツール行と結果だけ。独り言（text）は出さない |
+| **`summary`（既定）** | **何も出さない。** 親の `▶ Agent …` 行に進捗だけ |
+
+サブエージェントは 1 回で数十のツールを呼ぶので、`full` だと**本流の
+会話が流れてしまう**。端末の TUI も既定では中身を隠し、`Task(...)` の
+1 行に畳んで「N tool uses」だけを更新する。
+
+**畳んでも失われない。** Task 自身の `tool_result` は `parent_tool_use_id`
+を持たない親の結果として届くので、終わったあとに `● Agent … N 行` から
+`TAB` で報告の全文を読める。
+
+```
+▶ Agent Verify SQL columns and message IDs    … 12 ツール
+  ● Agent … 34 行
+```
+
+#### 【重要】進捗は overlay で出す
+
+`▶` 行は `my:claude--protect` が read-only にした確定領域で、両端を
+`my:claude--output-marker` / `my:claude--input-marker` が挟んでいる。
+ツールが 1 つ進むたびにテキストを書き換えると、**undo とマーカーの
+前後関係に毎回触る**ことになる（§「区切りが消えると会話が静かに失われる」の
+経路そのもの）。帯の点を overlay に移したのと同じ理屈で、ここも
+`before-string` で出す。overlay のプロパティはバッファを変更しない。
+
+貼る先は**行末の改行 1 文字**（`my:claude--subagent-overlay`）。
+`before-string` はその手前、つまり行の末尾に描かれる。出力は overlay の
+END に挿さるが REAR-ADVANCE が nil なので overlay は伸びない。
+
+#### 【重要】進捗の表はセッション構造体に持たない
+
+`my:claude--subagent-progress` は**バッファローカル**。`cl-defstruct` に
+スロットを足すと、**既に生きているセッションの実体は古い並びのまま残る**
+ので、`C-M-x` やモジュールの読み直しをした瞬間に添字がずれる。
+overlay はバッファのものだという点でも、寿命（会話バッファは立て直しでも
+引き継がれる）という点でもこちらが合う。
 
 ## ツールの実行結果は既定で全部畳む
 
@@ -1240,10 +1280,16 @@ JSON の断片は揃うまで意味を持たないため。
 畳んだ行は 1 行の要約になり、`TAB` で全体を `*claude tool output*` に出す。
 
 ```
-  ● Read(user-lisp/my-claude.el) … 42 行
+▶ Read WebCoreSystem/wwwroot/_sys/Urikake/js/URI00300.js
+  ● Read … 60 行
 ```
 
-`Read(...)` の中身は `my:claude--tool-summary` の結果だが、
+**要約はツール名だけ**（`my:claude-tool-result-label`、既定 `short`）。
+何を読んだかは**直前の `▶` 行に出ている**ので、ここに再掲すると
+いちばん長い要素（パス）が 2 回並ぶだけになる。`full` にすると
+`● Read(…/URI00300.js) … 60 行` と以前の形に戻る。
+
+`▶` 行の要約は `my:claude--tool-summary` の結果だが、
 **`tool_result` には入力が入っていない**。`tool_use` を受けた時点で
 名前と一緒に要約も覚えておく必要があるので、`tool-names` ハッシュの値は
 `(NAME . SUMMARY)` の cons にしてある。
@@ -1252,19 +1298,72 @@ JSON の断片は揃うまで意味を持たないため。
 一律に畳むと「なぜ失敗したか」がその場から消え、雑音を減らすという
 目的とは逆にいちばん見たいものが隠れる。
 
+### 【重要】パスは作業ディレクトリからの相対にする（2026-11-06）
+
+`C:\Projects\ESC-Web\WebCoreSystem_v1\WebCoreSystem\wwwroot\_sys\Urikake\js\URI00300.js`
+は 93 桁ある。会話バッファは `truncate-lines` が nil なので、**1 件の
+`Read` が折り返して 3〜4 行**になっていた。剥がすと 49 桁で 1 行に収まる。
+
+**`file-relative-name` は使えない。** あれは `expand-file-name` を通すので、
+**ドライブレターの大小が食い違う**この設定（CLAUDE.md「Windows 固有」）では
+`c:/…` と `C:/…` が別のディレクトリと見なされ、`../../../…` という
+**元より長いもの**が返る。`my:claude--relative-path` は文字列として
+前方一致を剥がす（`file-name-case-insensitive-p` で大小を無視）。
+作業ディレクトリの外なら `abbreviate-file-name` に任せる。
+
+それでも `my:claude-summary-width`（既定 80 桁）を超えるときは、
+**上の階層から畳む**（`my:claude--shorten-path`）。パスで知りたいのは
+ファイル名のほうなので、`truncate-string-to-width` で後ろを落とすと
+肝心のところが消える。
+
+**`…` の桁は 1 ではない。** U+2026 は East Asian Ambiguous で、
+`site-lisp/eaw.el` が入っているこの設定では**幅 2**。1 と数えると
+きっちり 1 桁はみ出す（実測で 81 桁）。
+
+### 折り返した行にも字下げを出す（`wrap-prefix`）
+
+ツール行もサブエージェントの発言も、字下げで構造を見せている。
+**何もしないと折り返した先は左端に戻る**ので、長い 1 行は本文と
+見分けが付かなくなる。`my:claude--insert` が `wrap-prefix` を受け取る。
+
+**`wrap-prefix` に face を載せるなら `font-lock-face` ではなく `face`。**
+§「`wrap-prefix` の文字列には `face` を載せる」と同じ罠。
+
 ## Edit / Write の差分表示
 
 `tool_use` の入力に `old_string` と `new_string`（Write は `content`）が
-そのまま入っているので、行頭に `-` / `+` を付けて色分けする。
-`my:claude-diff-max-lines`（既定 30）を超えたら行数だけ知らせる。
+そのまま入っているので、行頭に `-` / `+` を付けて色分けできる。
 
 **外部の diff は呼ばない。** Windows に入っている保証が無いうえ、
 Edit の入力は置換前と置換後がそのまま来るので、行単位で並べれば足りる。
 
-差分に `TAB` は効かない。**「TAB で全体を表示」と案内していたのは嘘**
-だった（`my:claude--show-edit` は `my:claude-full` を設定しないので
-`ここには折りたたまれた出力が無い` になるだけ）。案内は
-`(差分 %d 行。git diff で確認)` に直してある。
+### 既定では畳む（`my:claude-diff-max-lines` = 0、2026-11-06）
+
+```
+▶ Edit .claude/docs/reverse/Urikake/URI00300/URI00300-申し送り事項-2.md
+  ● Edit +3 / -1 行
+```
+
+差分は 1 回で十数行になり、しかも 1 行が長いので折り返してさらに増える。
+**会話バッファで面積をいちばん食っていたのがこれ**だった（端末の TUI も
+`Updated foo.md with 3 additions and 1 removal` の 1 行しか出さない）。
+
+**畳んでも失われない。** 差分の全体は `my:claude-full` に載るので、
+その行で `TAB` を押せば `*claude tool output*` で読める。かつては畳むと
+見るすべが無く、`(差分 %d 行。git diff で確認)` と案内していた
+（`my:claude--show-edit` が `my:claude-full` を設定していなかったため、
+それ以前の「TAB で全体を表示」という案内は**嘘だった**）。
+
+### 成功した結果の行は出さない
+
+`The file … has been updated successfully.` を畳んだ `● Edit … 1 行` は、
+直前の `● Edit +3 / -1 行` と同じことしか言っていない。差分を見せ終えた
+`tool_use_id` を `my:claude--diff-shown` に覚えておき、**エラーでない
+結果だけ**を落とす。失敗は必ず出る（`is_error` は畳まれもしない）。
+
+**「名前が Edit なら落とす」とはしない。** `NotebookEdit` は
+`new_source` で来るので `my:claude--show-edit` は何も出せず、
+落とすと**何も残らない**。
 
 ## 許可の `permission_suggestions`
 

@@ -192,8 +192,33 @@ stat 0.043 ms で済む) なので、端末の TUI に合わせて速めにし�
 
 サブエージェントの発言は `parent_tool_use_id' 付きの assistant / user
 イベントとして届く。**このフラグが無くても一部は届く** (実測) ので、
-表示側は常に親 ID を見て字下げする。"
+表示側は常に親 ID を見て字下げする。
+
+**何をどこまで見せるかは `my:claude-subagent-display' で決める。**
+このフラグを nil にしても出力は止まらない。"
   :type 'boolean)
+
+(defcustom my:claude-subagent-display 'summary
+  "サブエージェント (Task / Agent) の出力をどこまで見せるか。
+
+| 値        | 出るもの                                                 |
+|-----------|----------------------------------------------------------|
+| `full'    | 発言もツール行も結果も全部 (2026-11-06 まではこれだけ)   |
+| `tools'   | ツール行と結果だけ。独り言 (text) は出さない             |
+| `summary' | **何も出さない。** 親の `▶ Task …' 行に進捗だけ出す      |
+
+既定は `summary' で、端末の TUI と同じ見え方になる。サブエージェントは
+1 回で数十のツールを呼ぶので、`full' だと本流の会話が流れてしまう。
+
+**畳んでも失われない。** Task 自身の `tool_result' は親の結果として
+届くので、終わったあとに `● Agent(…) … N 行' から TAB で全文を読める。
+
+進捗は `▶' 行の末尾に **overlay** で出す (`my:claude--subagent-progress')。
+確定領域のテキストを書き換えないので、read-only・マーカー・undo の
+どれにも触らない (帯の点と同じ理屈)。"
+  :type '(choice (const :tag "全部出す" full)
+                 (const :tag "ツール行だけ" tools)
+                 (const :tag "進捗だけ" summary)))
 
 (defcustom my:claude-show-thinking nil
   "非 nil なら thinking ブロックの中身も薄く表示する。
@@ -207,8 +232,9 @@ stat 0.043 ms で済む) なので、端末の TUI に合わせて速めにし�
 
 **既定は 0 = 全部畳む。** 結果の中身は読み飛ばすことのほうが多く、
 開いたままだと肝心の会話が流れてしまう。畳んだ行には 1 行要約
- (`● Read(foo.el) … 42 行') を出し、全体は TAB
- (`my:claude-toggle-fold') で別バッファに開く。"
+ (`● Read … 42 行'。何を読んだかは直前の `▶' 行にある) を出し、全体は
+TAB (`my:claude-toggle-fold') で別バッファに開く。
+要約に何を出すかは `my:claude-tool-result-label'。"
   :type 'integer)
 
 (defcustom my:claude-error-result-max-lines 30
@@ -218,6 +244,29 @@ stat 0.043 ms で済む) なので、端末の TUI に合わせて速めにし�
 消えてしまい、`my:claude-tool-result-max-lines' を 0 にした意味
  (雑音を減らす) とは逆に、いちばん見たいものが隠れる。
 ただしビルドの失敗などで数百行来ることがあるので上限は設ける。"
+  :type 'integer)
+
+(defcustom my:claude-tool-result-label 'short
+  "畳んだツール結果の 1 行に何を出すか。
+
+| 値      | 出るもの                          |
+|---------|-----------------------------------|
+| `short' | ツール名だけ (`● Read … 60 行')   |
+| `full'  | 呼び出しの要約も (`● Read(…/URI00300.js) … 60 行') |
+
+既定は `short'。**直前の `▶' 行に同じものが出ているので、`full' だと
+いちばん長い要素 (絶対パス) が 2 回並ぶ。** 折り返しが増えるだけで
+得るものが無い。"
+  :type '(choice (const :tag "ツール名だけ" short)
+                 (const :tag "呼び出しの要約も" full)))
+
+(defcustom my:claude-summary-width 80
+  "`▶' 行に出すツール呼び出しの要約を切り詰める桁数。
+
+会話バッファは `truncate-lines' が nil なので、これを超えた行は
+折り返って 2 行以上になる。ウィンドウ幅から求めない
+ (`window-body-width' は呼び出し元のウィンドウを見るうえ、同じバッファが
+複数のウィンドウに出うる)。"
   :type 'integer)
 
 (defcustom my:claude-fontify-code t
@@ -683,6 +732,23 @@ read-only なのでそれは起こらない。**区切りを挟むのはこの�
 
 **insertion-type は nil。** 入力エリアの先頭に打っても挿入テキストの
 前に留まるので、打った文字は入力エリアの側に残る。")
+
+(defvar-local my:claude--subagent-progress nil
+  "Task の tool_use_id -> (OVERLAY . 呼ばれたツールの数)。
+
+`my:claude-subagent-display' が `summary' のときの進捗
+ (`my:claude--subagent-overlay' / `my:claude--subagent-tick')。
+
+**セッション構造体のスロットではなくバッファローカルにしてある。**
+overlay はバッファのものであること、そして `cl-defstruct' にスロットを
+足すと**既に生きているセッションの実体が古い並びのまま残り、
+モジュールを読み直した瞬間に添字がずれる**ため。会話バッファは
+立て直し (`C-c a m' など) でも引き継がれるので寿命もこちらが合う。")
+
+(defvar-local my:claude--diff-shown nil
+  "差分を見せ終えた Edit / Write の tool_use_id の集合 (ハッシュ)。
+`my:claude--show-edit' が入れ、`my:claude--handle-user' が成功した
+結果の行を省くのに使って取り除く。")
 
 (defvar-local my:claude--fontify-orig nil
   "モードを立てた時点の `font-lock-fontify-region-function'。
@@ -1868,11 +1934,23 @@ undo は入力エリアのためだけにある。**出力は `buffer-undo-list'
                (setq buffer-undo-list nil))
              (set-marker ,beg nil)))))))
 
-(defun my:claude--insert (session text &optional face)
+(defun my:claude--insert (session text &optional face wrap)
   "SESSION の会話バッファの末尾に TEXT を挿入する。
-追従の作法は `my:claude--at-end\' を参照。"
+追従の作法は `my:claude--at-end\' を参照。
+
+WRAP は折り返した行の行頭に出す文字列 (`wrap-prefix\')。会話バッファは
+`truncate-lines\' が nil なので、画面幅を超えた行は必ず折り返る。
+**何も指定しないと折り返した先は左端に戻る**ので、字下げで構造を
+見せているツール行やサブエージェントの発言は本文と見分けが付かなくなる。
+
+【重要】WRAP に face を載せるなら `font-lock-face\' ではなく `face\' を
+使うこと (`my:claude--echo-prefix\' の説明)。いまは空白だけなので
+どちらでもよいが、色を付けたくなったときに静かに外れる。"
   (my:claude--at-end session
-    (insert (if face (propertize text 'font-lock-face face) text))))
+    (let ((beg (point)))
+      (insert (if face (propertize text 'font-lock-face face) text))
+      (when wrap
+        (put-text-property beg (point) 'wrap-prefix wrap)))))
 
 (defun my:claude--echo-prefix (&optional property)
   "こちらの発言の行頭に出す目印を返す。
@@ -1920,20 +1998,25 @@ PROPERTY は face を載せるプロパティ名。既定は `font-lock-face' �
         (add-text-properties beg (point)
                              `(wrap-prefix ,wrap my:claude-echo t))))))
 
-(defun my:claude--insert-block (session text face)
-  "TEXT を字下げして挿入する。"
-  (my:claude--insert
-   session
-   (mapconcat (lambda (l) (concat "  " l))
-              (split-string (string-trim-right text) "\n")
-              "\n")
-   face)
-  (my:claude--insert session "\n"))
+(defun my:claude--insert-block (session text face &optional indent)
+  "TEXT を字下げして挿入する。INDENT は字下げの文字列 (既定は空白 2)。
 
-(defun my:claude--fold (session text face &optional label)
+折り返した行にも同じ字下げを出す (`wrap-prefix\')。字下げだけでは
+**折り返した先が左端に戻って本文と混ざる**。"
+  (let ((pad (or indent "  ")))
+    (my:claude--insert
+     session
+     (mapconcat (lambda (l) (concat pad l))
+                (split-string (string-trim-right text) "\n")
+                "\n")
+     face pad)
+    (my:claude--insert session "\n")))
+
+(defun my:claude--fold (session text face &optional label indent)
   "ツールの実行結果 TEXT を畳んで 1 行にまとめる。
 
 LABEL は `Read(foo.el)\' のような呼び出しの要約 (`my:claude--tool-summary\')。
+INDENT は行頭の字下げ (既定は空白 2)。サブエージェントの結果は 1 段深い。
 
 **既定では全部畳む** (`my:claude-tool-result-max-lines\' が 0)。
 `my:claude-error-result-max-lines\' 行までのエラーだけは畳まない。
@@ -1944,25 +2027,33 @@ LABEL は `Read(foo.el)\' のような呼び出しの要約 (`my:claude--tool-su
          ;; エラーと、AskUserQuestion の答え (`my:claude-answer-face') は
          ;; 畳まない。前者はいちばん見たいもので、後者は自分の選択そのもの。
          (verbatim (memq face '(my:claude-error-face my:claude-answer-face)))
+         (pad (or indent "  "))
          (keep (if verbatim
                    my:claude-error-result-max-lines
                  my:claude-tool-result-max-lines)))
     (if (<= n keep)
-        (my:claude--insert-block session text face)
+        (my:claude--insert-block session text face pad)
       (my:claude--insert
        session
-       (format "  ● %s … %d 行\n" (or label "出力") n)
-       (if verbatim face 'my:claude-meta-face))
-      ;; 全文はテキストプロパティに持たせておく。載せる範囲はいま書いた
-      ;; 1 行だけ。確定した会話の末尾は挿入した改行の**次**の行頭にあるので、
-      ;; そこから 1 行戻ったところが要約行の先頭になる。
-      ;; 【重要】`point-max' ではなく `my:claude--output-end'。
-      ;; `point-max' は入力エリアの末尾なので、書きかけを拾ってしまう。
-      (with-current-buffer (my:claude-session-buffer session)
-        (let* ((inhibit-read-only t)
-               (end (my:claude--output-end))
-               (beg (save-excursion (goto-char end) (forward-line -1) (point))))
-          (put-text-property beg end 'my:claude-full text))))))
+       (format "%s● %s … %d 行\n" pad (or label "出力") n)
+       (if verbatim face 'my:claude-meta-face)
+       (concat pad "   "))
+      (my:claude--attach-full session text))))
+
+(defun my:claude--attach-full (session text)
+  "いま書いた 1 行に TEXT を `my:claude-full\' として載せる。
+
+TAB (`my:claude-toggle-fold\') がこれを見て別バッファに開く。
+載せる範囲はいま書いた 1 行だけ。確定した会話の末尾は挿入した改行の
+**次**の行頭にあるので、そこから 1 行戻ったところが要約行の先頭になる。
+
+【重要】`point-max\' ではなく `my:claude--output-end\'。
+`point-max\' は入力エリアの末尾なので、書きかけを拾ってしまう。"
+  (with-current-buffer (my:claude-session-buffer session)
+    (let* ((inhibit-read-only t)
+           (end (my:claude--output-end))
+           (beg (save-excursion (goto-char end) (forward-line -1) (point))))
+      (put-text-property beg end 'my:claude-full text))))
 
 ;;; --------------------------------------------------
 ;;; イベントの処理
@@ -3265,9 +3356,10 @@ JSON の null は `:null' で来るので `alist-get' の結果をそのまま�
           ;; streamed-text を見ずに必ず出す。見ると本体のブロックが
           ;; 開いている間は捨てられてしまう。字下げして本体と区別する。
           (sub
-           (my:claude--insert-block session
-                                    (string-trim-right (alist-get 'text block))
-                                    'my:claude-subagent-face))
+           (when (eq my:claude-subagent-display 'full)
+             (my:claude--insert-block session
+                                      (string-trim-right (alist-get 'text block))
+                                      'my:claude-subagent-face)))
           ;; 【重要】`my:claude-stream' ではなく「このブロックを実際に
           ;; delta で出したか」で判断する。スラッシュコマンドは
           ;; assistant で本文を返すが stream_event を伴わない
@@ -3284,17 +3376,68 @@ JSON の null は `:null' で来るので `alist-get' の結果をそのまま�
         ("tool_use"
          (let* ((name (alist-get 'name block))
                 (id (alist-get 'id block))
-                (summary (my:claude--tool-summary block)))
+                (summary (my:claude--tool-summary block session)))
            ;; 折りたたんだ結果に出す 1 行要約でも使うので、名前と一緒に
            ;; 引数の要約も覚えておく。tool_result には入力が入っていない。
+           ;; **畳んでいても覚える** (親の結果のラベルに要る)。
            (puthash id (cons name summary) (my:claude-session-tool-names session))
-           (my:claude--insert
-            session
-            (format "%s▶ %s %s\n" (if sub "  " "") name summary)
-            (if sub 'my:claude-subagent-face 'my:claude-tool-face))
-           ;; Edit / Write は入力そのものが差分なので、その場で見せる。
-           (my:claude--show-edit session name (alist-get 'input block))))
+           (if (and sub (eq my:claude-subagent-display 'summary))
+               ;; 行は出さず、親の ▶ 行に貼った進捗だけを進める。
+               (my:claude--subagent-tick session sub)
+             (my:claude--insert
+              session
+              (format "%s▶ %s %s\n" (if sub "  " "") name summary)
+              (if sub 'my:claude-subagent-face 'my:claude-tool-face)
+              (if sub "      " "    "))
+             ;; サブエージェントを起こすツールなら、いま書いた行の末尾に
+             ;; 進捗の overlay を貼る。**名前は実測で `Agent'** だが、
+             ;; SDK の呼び名 (`Task') で来ることもあるので両方見る。
+             (when (and (null sub) (member name '("Task" "Agent")))
+               (my:claude--subagent-overlay session id))
+             ;; Edit / Write は入力そのものが差分なので、その場で見せる。
+             (my:claude--show-edit session id name (alist-get 'input block)))))
         (_ nil)))))
+
+(defun my:claude--subagent-overlay (session id)
+  "いま書いた `▶\' 行の末尾に、サブエージェントの進捗を出す overlay を貼る。
+
+【重要】テキストではなく overlay で出す。`▶\' 行は `my:claude--protect\' が
+read-only にした確定領域で、両端をマーカーが挟んでいる。ツールが 1 つ
+進むたびに書き換えると、undo とマーカーの前後関係に毎回触ることになる
+ (会話が静かに失われる経路)。帯の点を overlay に移したのと同じ理屈。
+
+貼る先は行末の改行 1 文字。`before-string\' はその手前、つまり行の
+末尾に描かれる。出力は overlay の END に挿さるが REAR-ADVANCE が nil
+なので overlay は伸びない。"
+  (with-current-buffer (my:claude-session-buffer session)
+    (let ((end (my:claude--output-end)))
+      (when (> end (point-min))
+        (let ((ov (make-overlay (1- end) end nil t nil)))
+          (overlay-put ov 'my:claude-subagent-progress t)
+          ;; 会話ごと消されたら overlay も消える。
+          (overlay-put ov 'evaporate t)
+          (unless (hash-table-p my:claude--subagent-progress)
+            (setq my:claude--subagent-progress (make-hash-table :test 'equal)))
+          (puthash id (cons ov 0) my:claude--subagent-progress))))))
+
+(defun my:claude--subagent-tick (session id)
+  "サブエージェント ID がツールを 1 つ呼んだことを進捗に出す。
+
+【重要】`before-string\' は表示用の文字列なので face は `face\' で載せる。
+`font-lock-face\' が効くのはバッファのテキストだけ
+ (`my:claude--echo-prefix\' と同じ罠)。"
+  (let ((buf (my:claude-session-buffer session)))
+    (when (buffer-live-p buf)
+      (with-current-buffer buf
+        (when-let* (((hash-table-p my:claude--subagent-progress))
+                    (cell (gethash id my:claude--subagent-progress))
+                    (ov (car cell))
+                    ((overlay-buffer ov)))
+          (let ((n (1+ (cdr cell))))
+            (setcdr cell n)
+            (overlay-put ov 'before-string
+                         (propertize (format "  … %d ツール" n)
+                                     'face 'my:claude-meta-face))))))))
 
 (defun my:claude--insert-diff (session removed added)
   "REMOVED / ADDED を diff 風に見せる。
@@ -3315,61 +3458,179 @@ point が末尾から外れて自動スクロールが止まっていた**。"
             (insert (propertize (concat "    " mark l "\n")
                                 'font-lock-face (cdr pair)))))))))
 
-(defcustom my:claude-diff-max-lines 30
+(defcustom my:claude-diff-max-lines 0
   "Edit / Write の差分をそのまま見せる行数の上限。
-これを超えたら行数だけ知らせる。"
+これを超えたら `+3 / -1 行' の 1 行に畳む。
+
+**既定は 0 = 必ず畳む。** 差分は 1 回で十数行になり、しかも 1 行が
+長いので折り返してさらに増える。会話バッファで面積をいちばん食って
+いたのがこれだった (端末の TUI も
+`Updated foo.md with 3 additions and 1 removal' の 1 行しか出さない)。
+
+**畳んでも失われない。** 差分の全体は `my:claude-full' に載るので、
+その行で TAB (`my:claude-toggle-fold') を押せば別バッファで読める。
+かつては畳むと見るすべが無く「git diff で確認」と案内していた。"
   :type 'integer)
 
-(defun my:claude--show-edit (session name input)
-  "Edit / Write の入力を差分として見せる。"
+(defun my:claude--diff-string (removed added)
+  "REMOVED / ADDED を `-' / `+' 付きの 1 つの文字列にする。
+畳んだときに `my:claude-full\' へ載せるためのもの。"
+  (string-join
+   (delq nil
+         (list (and (stringp removed) (not (string-empty-p removed))
+                    (mapconcat (lambda (l) (concat "-" l))
+                               (split-string (string-trim-right removed) "\n")
+                               "\n"))
+               (and (stringp added) (not (string-empty-p added))
+                    (mapconcat (lambda (l) (concat "+" l))
+                               (split-string (string-trim-right added) "\n")
+                               "\n"))))
+   "\n"))
+
+(defun my:claude--show-edit (session id name input)
+  "Edit / Write の入力を差分として見せる。
+
+見せたときは ID を `my:claude--diff-shown\' に覚える。`my:claude--handle-user\'
+が**成功した結果の行を省く**のに使う (`The file … has been updated
+successfully.\' を畳んだ `● Edit … 1 行\' は、直前の `● Edit +3 / -1 行\' と
+同じことしか言っていない)。
+
+**覚えずに「名前が Edit なら省く」とはしない。** `NotebookEdit\' は
+`new_source\' で来るのでここでは何も出せず、省くと**何も残らない**。"
   (let* ((old (alist-get 'old_string input))
          (new (or (alist-get 'new_string input) (alist-get 'content input)))
-         (lines (+ (if (stringp old) (length (split-string old "\n")) 0)
-                   (if (stringp new) (length (split-string new "\n")) 0))))
+         (nold (if (and (stringp old) (not (string-empty-p old)))
+                   (length (split-string (string-trim-right old) "\n")) 0))
+         (nnew (if (and (stringp new) (not (string-empty-p new)))
+                   (length (split-string (string-trim-right new) "\n")) 0)))
     (when (and (member name '("Edit" "Write" "NotebookEdit"))
                (or (stringp old) (stringp new)))
-      (if (> lines my:claude-diff-max-lines)
-          ;; 【重要】TAB は案内しない。この関数は `my:claude-full' を
-          ;; 設定しないので、押しても「ここには折りたたまれた出力が無い」
-          ;; になるだけだった。全体が見たければ git diff を使う。
-          (my:claude--insert session
-                             (format "    (差分 %d 行。git diff で確認)\n" lines)
-                             'my:claude-meta-face)
-        (my:claude--insert-diff session old new)))))
+      (if (> (+ nold nnew) my:claude-diff-max-lines)
+          (progn
+            (my:claude--insert session
+                               (format "  ● %s +%d / -%d 行\n" name nnew nold)
+                               'my:claude-meta-face
+                               "     ")
+            ;; TAB で開けるように差分そのものを載せておく。
+            (my:claude--attach-full session (my:claude--diff-string old new)))
+        (my:claude--insert-diff session old new))
+      (let ((buf (my:claude-session-buffer session)))
+        (when (buffer-live-p buf)
+          (with-current-buffer buf
+            (unless (hash-table-p my:claude--diff-shown)
+              (setq my:claude--diff-shown (make-hash-table :test 'equal)))
+            (puthash id t my:claude--diff-shown)))))))
 
-(defun my:claude--tool-summary (block)
-  "tool_use の入力を 1 行にまとめる。"
+(defun my:claude--relative-path (session path)
+  "PATH を SESSION の作業ディレクトリからの相対パスにする。
+
+【重要】`file-relative-name\' は使えない。あれは `expand-file-name\' を
+通すので、**ドライブレターの大小が食い違う**この設定では `c:/…\' と
+`C:/…\' が別のディレクトリと見なされ、`../../../…\' という**元より長い**
+ものが返る (CLAUDE.md「Windows 固有」)。stat も打ちたくないので、
+文字列として前方一致を剥がす。
+
+作業ディレクトリの外なら `abbreviate-file-name\' に任せる
+ (`~/…\' と `directory-abbrev-alist\' のぶんだけ短くなる)。"
+  (let* ((dir (and session (my:claude-session-directory session)))
+         (p (subst-char-in-string ?\\ ?/ path))
+         (d (and (stringp dir)
+                 (file-name-as-directory (subst-char-in-string ?\\ ?/ dir))))
+         (fold (and d (file-name-case-insensitive-p dir))))
+    (if (and d (string-prefix-p d p fold) (> (length p) (length d)))
+        (substring p (length d))
+      (abbreviate-file-name p))))
+
+(defun my:claude--shorten-path (path width)
+  "PATH が WIDTH 桁に収まらないとき、**末尾を残して**切る。
+
+パスで知りたいのはファイル名のほうなので、`truncate-string-to-width\' の
+ように後ろを落とすと肝心のところが消える。上の階層から順に畳む。
+
+【重要】`…\' の桁は 1 ではない。**U+2026 は East Asian Ambiguous** で、
+`site-lisp/eaw.el\' が入っているこの設定では**幅 2** になる。1 と数えると
+きっちり 1 桁はみ出す (実測)。`string-width\' で測ること。"
+  (if (<= (string-width path) width)
+      path
+    (let* ((head "…/")
+           (hw (string-width head))
+           (parts (split-string path "/" t)))
+      (while (and (cdr parts)
+                  (> (+ hw (string-width (string-join parts "/"))) width))
+        (setq parts (cdr parts)))
+      (let* ((s (string-join parts "/"))
+             (w (string-width s)))
+        (if (<= (+ hw w) width)
+            (concat head s)
+          ;; ファイル名 1 つでも収まらない。右から詰める。
+          (let ((keep (max 0 (- width (string-width "…")))))
+            (concat "…" (truncate-string-to-width s w (- w keep)))))))))
+
+(defun my:claude--tool-summary (block &optional session)
+  "tool_use の入力を 1 行にまとめる。
+
+ファイルのパスは SESSION の作業ディレクトリからの相対にする。
+**絶対パスは 1 行に収まらず、必ず折り返って 2〜3 行になる。**"
   (let* ((input (alist-get 'input block))
          ;; AskUserQuestion だけは決まったキーを持たない。空のままだと
          ;; 名前しか出ないので、見出しを出す。**質問文は出さない**
          ;; (`my:claude--question-headers' を参照)。
          (questions (append (alist-get 'questions input) nil))
-         (s (or (alist-get 'command input)
-                (alist-get 'file_path input)
-                (alist-get 'pattern input)
-                (alist-get 'description input)
-                (and questions (my:claude--question-headers questions))
-                "")))
-    (truncate-string-to-width (replace-regexp-in-string "\n" " " s) 100 nil nil "…")))
+         (path (alist-get 'file_path input)))
+    (if (stringp path)
+        (my:claude--shorten-path (my:claude--relative-path session path)
+                                 my:claude-summary-width)
+      (let ((s (or (alist-get 'command input)
+                   (alist-get 'pattern input)
+                   (alist-get 'description input)
+                   (and questions (my:claude--question-headers questions))
+                   "")))
+        (truncate-string-to-width (replace-regexp-in-string "\n" " " s)
+                                  my:claude-summary-width nil nil "…")))))
 
 (defun my:claude--handle-user (obj session)
   "tool_result を表示する。"
   (let ((content (alist-get 'content (alist-get 'message obj)))
         (sub (my:claude--parent-id obj)))
     (seq-doseq (block content)
-      (when (equal (alist-get 'type block) "tool_result")
+      (when (and (equal (alist-get 'type block) "tool_result")
+                 ;; サブエージェントの結果は `summary' では出さない。
+                 ;; 親の Task 自身の結果は `sub' が nil なので必ず出る。
+                 (not (and sub (eq my:claude-subagent-display 'summary))))
         (let* ((id (alist-get 'tool_use_id block))
                (entry (gethash id (my:claude-session-tool-names session)))
                (name (or (car-safe entry) "?"))
                (summary (or (cdr-safe entry) ""))
-               (label (if (string-empty-p summary) name
+               ;; 既定ではツール名だけ。要約は直前の `▶' 行に出ており、
+               ;; 再掲すると**いちばん長い要素が 2 回並ぶ**。
+               (label (if (or (eq my:claude-tool-result-label 'short)
+                              (string-empty-p summary))
+                          name
                         (format "%s(%s)" name summary)))
                (err (eq t (alist-get 'is_error block)))
-               (text (my:claude--content-string (alist-get 'content block))))
-          (if (string-empty-p (string-trim text))
-              ;; 出力が無いものを畳んでも意味が無い。
-              (my:claude--insert session (format "  ● %s … 出力なし\n" label)
-                                 'my:claude-meta-face)
+               (text (my:claude--content-string (alist-get 'content block)))
+               ;; 差分を見せ終えた Edit / Write が成功したときは行を出さない。
+               ;; `The file … has been updated successfully.' を畳んだ
+               ;; `● Edit … 1 行' は、直前の `● Edit +3 / -1 行' と同じことしか
+               ;; 言っていない。**失敗は必ず出す** (err は畳まれもしない)。
+               ;; **バッファの生死を見ること。** ここは受信フィルタの中で、
+               ;; `my:claude--at-end' のような保護が無い。会話バッファを
+               ;; kill した直後に残りの行が届くと `with-current-buffer' が落ちる。
+               (shown (let ((buf (my:claude-session-buffer session)))
+                        (and (buffer-live-p buf)
+                             (with-current-buffer buf
+                               (and (hash-table-p my:claude--diff-shown)
+                                    (prog1 (gethash id my:claude--diff-shown)
+                                      (remhash id my:claude--diff-shown))))))))
+          (cond
+           ((and shown (not err)) nil)
+           ((string-empty-p (string-trim text))
+            ;; 出力が無いものを畳んでも意味が無い。
+            (my:claude--insert session
+                               (format "%s● %s … 出力なし\n" (if sub "    " "  ") label)
+                               'my:claude-meta-face
+                               (if sub "       " "     ")))
+           (t
             (my:claude--fold session text
                              ;; AskUserQuestion の答えは deny で返すしかない
                              ;; ので必ず `is_error' で戻ってくる。エラーでは
@@ -3380,7 +3641,7 @@ point が末尾から外れて自動スクロールが止まっていた**。"
                                    (err 'my:claude-error-face)
                                    (sub 'my:claude-subagent-face)
                                    (t 'my:claude-tool-result-face))
-                             label)))))))
+                             label (if sub "    " "  ")))))))))
 
 (defun my:claude--handle-result (obj session)
   ;; 中断されると content_block_stop が来ないことがある。

@@ -194,7 +194,12 @@ Windows の Emacs には PTY が無いので、双方向のストリーミング
 **1 つのプロジェクトに何本でも持て**（2 本目は `*claude(PROJ)-1*`）、
 アカウント（`CLAUDE_CONFIG_DIR`）もセッションごとに選べる。
 逐次表示、画像添付（`M-v`）、許可プロンプト、AskUserQuestion への応答、
-markdown 装飾、ヘッダ行のステータス表示。**複数選べる質問（`multiSelect`）は
+markdown 装飾、ヘッダ行のステータス表示。
+**出力は端末の TUI に寄せて絞ってある**（`my:claude-subagent-display` /
+`my:claude-tool-result-label` / `my:claude-diff-max-lines`）。パスは
+プロジェクト相対、ツールの結果は 1 行、Edit の差分は `+3 / -1 行`、
+サブエージェントは中身を出さず `▶ Agent …` 行に `… 12 ツール` だけ。
+**畳んだものはすべて `TAB` で全文を開ける。****複数選べる質問（`multiSelect`）は
 チェックリストで答える**（`*claude-select*`。`SPC` で入れ替え、`RET` で確定。
 1 つ選ぶだけの質問はミニバッファ）。**`[文字列](URL)` はリンクになり、
 `RET` / `mouse-1` でブラウザが開く**（相対パスなら Emacs でそのファイルを開く）。
