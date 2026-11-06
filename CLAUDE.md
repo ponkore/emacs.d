@@ -81,6 +81,15 @@ emacs --batch --debug-init -l early-init.el -l init.el --eval '(message "OK")'
 
 ### プローブの作法
 
+- **【重要】プローブのファイルは Write ツールで作る。ヒアドキュメントで
+  作らない**（2026-11-06 に実測）。**Bash ツールのヒアドキュメントは
+  非 ASCII を潰す。** `cat > tmp/probe.el <<'EOF'` で日本語を含む式を書くと、
+  ファイルには `"大小"` ではなく **`"\u{5927}\u{5c0f}"` という文字列がそのまま**
+  入り、Emacs のリーダーが `Non-hex character used for Unicode escape` で
+  落ちる。**バックスラッシュも 1 つに潰れる**（`"C:\\Projects"` →
+  `"C:\Projects"`）。クォートした `<<'EOF'` でも起きるので引用符では
+  避けられない。同じ理由で、**日本語のコミットメッセージも Write で
+  ファイルに書いて `git commit -F` で渡す**
 - **必ず `condition-case` で囲み、`unwind-protect` で `kill-emacs` する。**
   タイマーの中でエラーが出ると GUI の Emacs がそのまま残り、外からは
   「固まった」ようにしか見えない

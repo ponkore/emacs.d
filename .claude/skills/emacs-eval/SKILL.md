@@ -113,15 +113,32 @@ server の接続プロセスもそれを継承する（実測で `(raw-text-unix
 **cp932 の外を扱うとき（Windows）、および結果が長いとき（全 OS）は、
 必ずファイル経由にする。**
 
-```bash
-cat > tmp/probe.el <<'EOF'
+### 【重要】プローブのファイルは Write で作る。ヒアドキュメントで作らない
+
+**Bash ツールのヒアドキュメントは非 ASCII を潰す**（2026-11-06 に実測）。
+`cat > tmp/probe.el <<'EOF'` で日本語を含む式を書くと、ファイルには
+`"大小"` ではなく **`"\u{5927}\u{5c0f}"` という文字列がそのまま**入る。
+Emacs のリーダーは `\u{...}` を解さないので
+`Non-hex character used for Unicode escape` で落ちる。**バックスラッシュも
+1 つに潰れる**（`"C:\\Projects"` が `"C:\Projects"` になる）。
+
+クォートした `<<'EOF'` でも起きるので、引用符では避けられない。
+**Write ツールでファイルを作ること。**
+
+```elisp
+;; tmp/probe.el  ← Write ツールで書く
 (let ((coding-system-for-write 'utf-8-unix))
   (with-temp-file (expand-file-name "tmp/ec-out.txt" user-emacs-directory)
     (insert (format "%S" 調べたい式)))
   "-> tmp/ec-out.txt")
-EOF
+```
+
+```bash
 bash .claude/skills/emacs-eval/ec.sh -f tmp/probe.el
 ```
+
+バックスラッシュを含むパスを式の中に書きたいときは、ファイル経由でも
+`(string 92)` から組み立てるのが確実。
 
 書けたら `tmp/ec-out.txt` を Read で読む。`tmp/` は CLAUDE.md が定める
 「作業用の捨て場」（`.gitkeep` 以外は git 管理外）なので、プローブと出力は
@@ -248,16 +265,18 @@ ec.sh -l user-lisp/my-claude.el
 戻り値は 1 行の Lisp オブジェクトとして `\n` がエスケープされた形で返るため、
 複数行の内容は読みにくい。ファイルに書いて Read する。
 
-```bash
-# *Messages* の末尾を読む
-cat > tmp/probe.el <<'EOF'
+```elisp
+;; tmp/probe.el （Write ツールで書く。上記「プローブのファイルは Write で作る」）
+;; *Messages* の末尾を読む
 (let ((coding-system-for-write 'utf-8-unix))
   (with-temp-file (expand-file-name "tmp/ec-out.txt" user-emacs-directory)
     (insert (with-current-buffer "*Messages*"
               (buffer-substring-no-properties
                (max (point-min) (- (point-max) 4000)) (point-max)))))
   "-> tmp/ec-out.txt")
-EOF
+```
+
+```bash
 ec.sh -f tmp/probe.el
 ```
 
