@@ -39,6 +39,11 @@
 /gitd/target/
 /ptyd/ptyd.exe
 
+# --- ghostel (2026-11) ---
+# ghostel-module-directory。straight の build ツリーの外に置かないと
+# 再ビルドでロード中の .dll が消える (my-ghostel.el のコメント参照)。
+/ghostel/
+
 # --- Claude Code (2026-09) ---
 # skills/ は共有する。settings.local.json はマシン固有の許可リストなので除く。
 /.claude/settings.local.json

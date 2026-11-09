@@ -519,6 +519,7 @@ tr-ime / Windows 側が IME のトグルとして処理するので、Emacs 側�
 | **翻訳に PFN 公式の `plamo-translate-cli` を使わない**（my-translate） | 2026-11-05 | インストール手順が **macOS 前提**で既定バックエンドは MLX（Apple Silicon 専用）。常駐モードは **MCP サーバ**で Emacs から話すには遠回り。**用語集・文脈・敬体/常体を渡すオプションが無く**モデルの機能を塞いでいる。要るのはその下の `llama-server` だけ → [docs](docs/translate/plamo-3-translate-study.md) |
 | **翻訳モデルに「構造を保て」と頼まない**（my-translate） | 2026-11-05 | **PFML3 に指示文の欄が存在しない**（渡せるのは target_lang / source_lang / context / glossary / form の 5 つだけ）。構造は Emacs 側の分割で保証する。**頼む必要も無かった**——分割して渡せば記法と識別子は素通しされる（実測で 132 種中 132 件保存） |
 | **識別子を守るための恒等写像 `glossary` は積まない**（my-translate） | 2026-11-05 | 実測で**有無によって出力が変わらなかった**。プロンプトが伸びるだけ。守られているかは検証で見る |
+| **端末の残りのアイコンのために `my:console-nerd-font-ranges` を広げない** | 2026-11-09 | `powerline` のまま。`all` にすれば Ghostel のプロンプトの Windows / git / 時計（U+F0372 / U+F418 / U+F43A）も原寸になるが、**dired が不揃いになる**。`HackGen Console NF` が U+E6AD を持たずフォールバックするため、**ディレクトリだけ 15px でファイルは 8px**（実測）。アイコン 3 つのために dired の見た目を崩さない、という判断 → [docs](docs/pty/ghostel.md) |
 | **31b は使わない**（my-translate） | 2026-11-05 | Q4_K_M が 19.5 GB で、iGPU から使える **17.6 GB に収まらない**。速度も 3〜4 tok/s で対話に使えない |
 
 ---
@@ -592,15 +593,59 @@ HackGen は「全角＝半角×2」で設計されているが、Windows 実測:
 （ASCII と日本語が同じフォントなので両方が同じ比率で縮む）。確認は
 `(string-pixel-width "あ")` と `(string-pixel-width "aa")` の比較で。
 
-### `set-fontset-font` はこの設定では効かない
+### `set-fontset-font` で**本文フォントは**変えられない
 
 `nil` にも `t` にも入れ、`clear-face-cache` と `redraw-display` まで呼んでも
 `font-at` は元のフォントを返し続ける。**実際に効く経路は
 `set-face-attribute 'default nil :family`**（`emacs-font-setting` と同じ）。
-したがって**レンジごとの割り当てはできない**。
 
-**Nerd Font のアイコン領域（`#xe000`-`#xf8ff`）は触らない。**
-上書きするとアイコンが豆腐になる。
+**レンジごとの割り当ては効く**（2026-11-09 に実測して訂正。以前ここには
+「できない」と書いてあったが誤り）。`my-appearance.el` は日本語・数学記号・
+ギリシャ文字・Nerd Font の私用領域をすべてこれで割り当てていて、
+実際に動いている。効かないのは ASCII / 本文の置き換えだけ。
+
+### 【重要】fontset は face の `:family` に勝つ
+
+私用領域のように fontset が明示的に割り当てている範囲は、**face 側から
+奪い返せない**。`ghostel-default` に `:family` を当てても、その face 専用の
+fontset を作って `:font` に渡しても、`font-at` は fontset の指定を返し続けた
+（2 通り実測）。**バッファ単位でアイコンのフォントを変える方法は無い。**
+
+変えたいなら fontset 自体を触るしかなく、それは**フレーム全体に効く**。
+
+### Nerd Font のアイコン領域は置き換えではなく `prepend`
+
+`#xe000`-`#xf8ff` と第 15 面を**丸ごと別フォントに置き換えると豆腐になる**
+（そのフォントが持っていない字の逃げ場が無くなる）。
+
+`set-fontset-font` の第 5 引数に `'prepend` を渡すと**順に試す並び**になり、
+持っていない字は後ろのフォントに落ちる。`my:console-nerd-font-ranges`
+（既定 `powerline` = `#xe0a0`-`#xe0d4`）がこれを使って、端末でアイコンが
+潰れるのを防いでいる。**`prepend` は置き換えのブロックより後に置くこと**
+（ADD 無しの `set-fontset-font` は置き換えなので、先に書くと消える）。
+
+逃げ場が効いていることは実測済み（`HackGen Console NF` が持たない
+U+E6AD = dired のディレクトリアイコンは `Symbols Nerd Font Mono` に落ちる）。
+
+### 【重要】アイコンが「半分の高さ」で出るのは送り幅の問題
+
+`Symbols Nerd Font Mono` のグリフは**送り幅が em と同じ**（本文 15 px の
+とき 15 px）。本文の HackGen は半角 8 px なので、セル 1 つに対して倍近い。
+
+普通のバッファでは隣にはみ出すだけで実害が無いが、**端末
+（`my-ghostel`）では潰れる**。Ghostel はセルに収まらないグリフに
+`display` の `height` を付けて縮めるため。
+
+```
+8 / 15 = 0.5333…
+(display ((min-width ((8))) (height 0.5333333333333333)))
+```
+
+**縮小は縦横に等しくかかるので、高さだけ戻す方法は無い。** Ghostty 本体は
+Nerd Font のグリフを横だけ潰す処理を持っているが、Emacs にその経路は無い。
+直すには**送り幅が半角のまま Nerd Font を持つフォント**（Console 系）を
+使う。選定は `my:console-nerd-font-family` が実測で行う
+（**名前で決め打ちしない**）。
 
 ### テーマ（modus-themes 5.2.0、Emacs 31.1 同梱）
 
@@ -1212,6 +1257,56 @@ gopls は大文字のドライブレターで返す（§1「Windows 固有」）
   `kill-all-local-variables` を通る）。ヘッダ行を立てるのもサイズを測る前
 - **eaw.el の幅表のままだと eat が無限ループする。** 端末の中では conhost に合わせて
   ambiguous を幅 1 にする
+
+## `my-ghostel`
+
+→ [docs/pty/ghostel.md](docs/pty/ghostel.md)
+
+libghostty-vt を dynamic module で動かす端末（Ghostel）。**`my-pty` と
+比較評価中なので、どちらも消さない**（2026-11-09 に導入）。
+
+- **【重要】`ghostel-module-directory` を straight の build ツリーの中に
+  戻してはいけない。** 既定（nil）ではパッケージディレクトリ、つまり
+  `straight/build/ghostel/` に `.dll` が置かれるが、
+  `straight-rebuild-package` / `straight-prune-build` はあのディレクトリを
+  作り直すので、**Emacs がロード中の `.dll` が消える**。
+  `~/.emacs.d/ghostel/`（`.gitignore` 済み）に出してある
+- **【重要】`ghostel-shell` の既定値は Windows では `cmdproxy.exe` になる。**
+  既定は `(getenv "SHELL")` で、Windows の Emacs ではそれが cmdproxy
+  （パイプで非対話シェルを起こすための代理プロセス）。`my-shell.el` の
+  `my:windows-pwsh` を使い回して pwsh に揃えてある。**ConPTY のコンソールの
+  コードページは cp932 なので、実コンソールでも UTF-8 固定は要る**
+- **`ghostel-debug-info` の `Module file: NOT FOUND in …/straight/build/ghostel/`
+  は誤報。** あの行は resource root を見ている。本当の状態は
+  `Module loaded: yes`。terminfo と shell integration のスクリプトは
+  resource root から読まれるが、straight が再ビルドで作り直すので問題ない
+- **`compile` / `shell-command` / comint を置き換える global mode は
+  有効にしていない**（`ghostel-compile-global-mode` ほか 3 つ）。
+  `C-c c` / `C-x !` / SQL の comint を黙って変えるため。評価が済むまで触らない
+- **shell integration は PowerShell / cmd / nyagos には効かない**
+  （`etc/shell/` にあるのは bash / zsh / fish / nushell だけ）。
+  **端末として動くことと、プロンプト境界や履歴の統合が効くことは別**
+- **ConPTY には foreground process group が無い**ので
+  `foregroundPgid` は常に nil、`isPasswordMode` も Windows では無効
+- **`ghostel-ime-mode` は Windows の IME（tr-ime / w32-ime）とは無関係。**
+  Emacs Lisp の input method（quail / hangul）用なので、こちらには要らない
+- **アイコンと罫線が潰れるのは送り幅の問題**（2026-11-09）。`ghostel-default`
+  の `:family` で直るのは罫線など fontset が握っていない字だけ。**アイコン
+  （私用領域）は fontset が face に勝つので `my-appearance.el` 側で直す**
+  → §3 `my-appearance` の「fontset は face の `:family` に勝つ」
+
+検証の作法（`ec.sh` 経由）。詳細は docs。
+
+- **プローブで `sit-for` を使ってはいけない。** `ec.sh` は式を
+  `inhibit-interaction` で包むので **`sit-for` 自身が
+  「User interaction while inhibited」で落ちる**。redraw タイマーを
+  走らせたいなら **`sleep-for`**（対話ではないので通る）
+- **`let` で `ghostel-*` を束縛する前に `(require 'ghostel)` する。**
+  未ロードのまま `let` すると
+  `Defining as dynamic an already lexical var` で落ちる
+- **「出力が来たか」を `buffer-size` で見ない。** ウィンドウに出ていない
+  端末も空のグリッドを描くので、**改行だけで 76 文字になる**
+  （実測で「プロセスは生きているのに無言」と誤診した）
 
 ## `my-htnblog`
 

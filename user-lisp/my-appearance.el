@@ -42,6 +42,106 @@
                   "HackGenNerd" "HackGen35Nerd")))))
   my:nerd-font-family--cache)
 
+;;; [3] コンソール幅の Nerd Font (端末のアイコンが潰れるのを防ぐ)
+
+;; 【重要】`Symbols Nerd Font Mono' のグリフは **送り幅が em と同じ**。
+;; 本文の HackGen は半角 8 px なので、セル 1 つに対して倍近い。
+;;
+;; 普通のバッファでは隣の桁にはみ出すだけで実害が無いが、**端末
+;; (`my-ghostel') では潰れる**。Ghostel はセルに収まらないグリフに
+;; `display' の `height' を付けて縮めるので (`ghostel-glyph-scale-floor')、
+;;
+;;     8 / 15 = 0.5333…
+;;
+;; 縮小は縦横に等しくかかり、starship のプロンプトのアイコンが
+;; 「半分の高さ」で出る。**Ghostty 本体は横だけ潰す処理を持っているが、
+;; Emacs にその経路は無い。**
+;;
+;; 直すには「送り幅が半角のまま Nerd Font のグリフを持つ」フォントを
+;; 使うしかない (`HackGen Console NF' など Console 系)。しかも
+;; **fontset は face の `:family' に勝つ**ので、端末バッファ専用の face
+;; に当てても私用領域は奪い返せない (2 通り試して実測)。
+;; そのため、ここで fontset に `prepend' する。
+;;
+;; 既定は powerline の区切りだけに絞ってある。全域に広げると dired と
+;; モードラインのアイコンまで半角になって小さくなるため。
+;; **`prepend' なので、そのフォントが持っていない字は
+;; `my:nerd-font-family' のほうに落ちる** (U+E6AD で実測。豆腐にならない)。
+
+(defcustom my:console-nerd-font-ranges 'powerline
+  "セル幅の Nerd Font を優先させる範囲。
+
+`powerline' … U+E0A0-U+E0D4 だけ。プロンプトの区切りが直り、
+dired とモードラインのアイコンは変わらない。**既定。**
+`all' … 私用領域と第 15 面の全体。端末のアイコンはすべて原寸に
+なるが、dired とモードラインのアイコンも半角 (小さく) になる。
+nil … 何もしない。"
+  :type '(choice (const :tag "powerline の区切りだけ" powerline)
+                 (const :tag "アイコン全部" all)
+                 (const :tag "変更しない" nil))
+  :group 'faces)
+
+(defconst my:console-nerd-font-candidates
+  '("HackGen Console NF" "HackGen35 Console NF"
+    "HackGenNerd Console" "HackGen35Nerd Console")
+  "セル幅の Nerd Font の候補。前から試す。
+**名前では決めない。** 実際の送り幅を測って選ぶ
+\(`my:console-nerd-font-family')。")
+
+(defconst my:console-nerd-font-probe-chars
+  '(#xE0B0 #xE0B6 #xE0A0 #xE0D4)
+  "送り幅を検査するグリフ。powerline の区切りと範囲の両端。")
+
+(defconst my:console-nerd-font--probe-size 32
+  "検査でフォントを開く pixel size。
+
+フレームの状態 (`frame-char-width') に依存させないための固定値。
+比べるのは同じサイズで開いた者どうしの送り幅なので、実際の表示
+サイズと一致している必要は無い。15 と 32 で同じ結論になることは
+実測済み。32 なのは丸めで偶然一致するのを避けるため。")
+
+(defvar my:console-nerd-font-family--cache 'unset
+  "`my:console-nerd-font-family' の結果。未判定なら `unset'。")
+
+(defun my:console-nerd-font--glyph-width (font char)
+  "FONT で CHAR を描いたときの送り幅。グリフが無ければ nil。
+
+【重要】`font-get-glyphs' は font-object を取る。`font-spec' を渡すと
+何を聞いても nil が返り、「どのフォントも持っていない」という誤った
+結論になる (実測で一度踏んだ)。"
+  (let* ((glyphs (font-get-glyphs font 0 1 (vector char)))
+         (g (and (vectorp glyphs) (aref glyphs 0))))
+    (and g (aref g 4))))
+
+(defun my:console-nerd-font--open (family)
+  "FAMILY を検査用のサイズで開く。開けなければ nil。"
+  (condition-case nil
+      (when-let* ((entity (find-font (font-spec :family family))))
+        (open-font entity my:console-nerd-font--probe-size (selected-frame)))
+    (error nil)))
+
+(defun my:console-nerd-font-family (body-font)
+  "BODY-FONT と同じ送り幅で Nerd Font のグリフを持つファミリを返す。
+
+条件は 2 つ。**半角の送り幅が BODY-FONT と一致すること** (違うと
+端末の桁がずれる) と、`my:console-nerd-font-probe-chars' の
+すべてが同じ送り幅であること。見つからなければ nil。"
+  (when (eq my:console-nerd-font-family--cache 'unset)
+    (setq my:console-nerd-font-family--cache
+          (and (display-graphic-p)
+               (when-let* ((base (my:console-nerd-font--open body-font))
+                           (cell (my:console-nerd-font--glyph-width base ?a)))
+                 (seq-find
+                  (lambda (family)
+                    (when-let* ((font (my:console-nerd-font--open family)))
+                      (and (eql cell (my:console-nerd-font--glyph-width font ?a))
+                           (seq-every-p
+                            (lambda (c)
+                              (eql cell (my:console-nerd-font--glyph-width font c)))
+                            my:console-nerd-font-probe-chars))))
+                  my:console-nerd-font-candidates)))))
+  my:console-nerd-font-family--cache)
+
 ;;; [3] フォント設定
 
 ;; 疑似パッケージなので use-package の名前は emacs にする。
@@ -100,6 +200,19 @@
             (set-fontset-font nil '(#xe000 . #xf8ff) spec)
             ;; Material Design アイコンは第 15 面 (Nerd Fonts v3)
             (set-fontset-font nil '(#xf0000 . #xfffff) spec))))
+      ;; セル幅のグリフを持つフォントがあれば、上の割り当てより先に
+      ;; 試させる。端末 (my-ghostel) でアイコンが潰れるのを防ぐ。
+      ;; 上の節「コンソール幅の Nerd Font」を参照。
+      ;; 【重要】この prepend は上のブロックより後に置くこと。
+      ;; ADD 無しの `set-fontset-font' は置き換えなので、先に書くと消える。
+      (when-let* ((ranges (pcase my:console-nerd-font-ranges
+                            ('powerline '((#xe0a0 . #xe0d4)))
+                            ('all '((#xe000 . #xf8ff) (#xf0000 . #xfffff)))
+                            (_ nil)))
+                  (console (my:console-nerd-font-family asciifont)))
+        (let ((spec (font-spec :family console)))
+          (dolist (range ranges)
+            (set-fontset-font nil range spec nil 'prepend))))
       (when (eq window-system 'ns)
         (set-fontset-font t '(#x1f300 . #x1f9ff) "Apple Color Emoji" nil 'append)
         (set-fontset-font t '(#x1fa70 . #x1fbff) "Apple Color Emoji" nil 'append)
