@@ -229,6 +229,14 @@ nil … 何もしない。"
         ;;            上の Math symbols / Greek などの範囲指定を勝たせるため append
         (set-fontset-font t 'emoji (font-spec :family "Segoe UI Emoji") nil 'prepend)
         (set-fontset-font t 'symbol (font-spec :family "Segoe UI Emoji") nil 'append)
+        ;; 最後の逃げ場。U+23F5 ⏵ / U+23F4 ⏴ (メディア操作の三角) は
+        ;; HackGen にも Segoe UI Emoji にも無く、**どの経路にも乗らないので
+        ;; hex の箱**になっていた (claude の TUI が「⏵⏵ auto mode on」で使う)。
+        ;; 「そのグリフを持つフォントが無い」のではなく、**持っている
+        ;; Segoe UI Symbol が fontset に載っていなかった**のが原因。
+        ;; append なので、他のフォントで描ける字には影響しない
+        ;; (実測: U+23F8 は Segoe UI Emoji、U+25B6 は HackGen のまま)。
+        (set-fontset-font t 'symbol (font-spec :family "Segoe UI Symbol") nil 'append)
         (set-fontset-font t '(#x1f300 . #x1f9ff) "Segoe UI Emoji" nil 'append)
         (set-fontset-font t '(#x1fa70 . #x1fbff) "Segoe UI Emoji" nil 'append)
         (set-fontset-font t '(#x1f900 . #x1f9e0) "Segoe UI Emoji" nil 'append)

@@ -113,8 +113,13 @@ claude も conhost も East Asian Ambiguous を **幅 1** として桁を組む�
 
 `glyphless-char-display` の extra slot 0 を eat が `empty-box` にしている
 （`eat--setup-glyphless-chars`）。**幅の問題ではない**（U+23F5 は幅 1）。
-そのコードポイントのグリフを持つフォントが無いだけ。豆腐ではなく
-eat が意図して出している空の箱。
+豆腐ではなく eat が意図して出している空の箱。
+
+**2026-11-09 に訂正。** ここには「そのコードポイントのグリフを持つフォントが
+無いだけ」と書いてあったが**誤り**。`Segoe UI Symbol` が持っている。
+**持っているフォントが fontset に載っていなかった**のが原因で、
+`my-appearance.el` が `symbol` スクリプトの最後に足して直してある。
+→ [../appearance/fonts-theme-modeline.md](../appearance/fonts-theme-modeline.md)
 
 ## 【重要】幅表だけでは足りない。フォントも切り替える
 
