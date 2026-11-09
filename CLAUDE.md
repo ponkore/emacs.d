@@ -1335,6 +1335,47 @@ libghostty-vt を dynamic module で動かす端末（Ghostel）。**`my-pty` �
   成功時の `kill-buffer` でその編集が黙って消える。札
   （`my:htnblog--posting`）は二重送信と `C-u M-x htnblog` の入れ直しも断る
 
+## `my-ideco` — iDeCo の日次サマリ（`M-x check-ideco`）
+
+psql を 1 回起こして `ideco_daily_summary` の直近を罫線の表にするだけ
+（210 行）。`docs/` は無い。見る列・見出し・寄せ・整形は
+`my:ideco--columns` の 1 か所に書いてあり、クエリも表もそこから作る。
+
+- **【重要】psql に `-w` を必ず付ける。** 無いと psql は**パスワードを
+  stdin から読もうとして待ち続ける**。`call-process` は stdin を与えないので、
+  **Emacs が固まったようにしか見えない**（実測で踏んだ）。`-w` なら
+  0.18 秒で認証エラーを返す。`-X`（`~/.psqlrc` を読まない）も外さない
+- **【重要】stderr は stdout と別に取る**（`call-process` の DESTINATION を
+  `(t ERRFILE)` にする）。psql 16 からサーバ 18 に繋ぐと
+  `WARNING: psql major version 16, server major version 18` が stderr に出るので、
+  出力先を 1 つにすると**この警告が CSV に混ざってパースが壊れる**。
+  **終了コードは 0** なので気づけない
+- **【重要】WSL 経由では `WSLENV` に名前を書かないと環境変数が渡らない**
+  （実測）。`PGPASSWORD` は `ps` から見えるコマンドラインに載せたくないので
+  環境変数で渡しており、`WSLENV=PGPASSWORD` が無いと Linux 側の psql に
+  届かず `no password supplied` になる。**渡っているかは
+  「`password authentication failed` が返るか」で見る**（`no password
+  supplied` なら届いていない）
+- 罫線の桁は my-claude と同じ罠（`─` `│` は 1 文字 2 桁）。列幅を
+  「w+2 が罫線 1 文字の桁数の倍数」になるまで広げてある。検算は
+  **全行の `string-width` が同一か**（GUI 実測で 58 桁・464 px）
+- **auth-source から引けなかったら、プロンプトにそう書く**
+  （`[auth-source では見つからず]`）。黙って `read-passwd` に落ちると、
+  `~/.authinfo.gpg` を書いたのに訊かれたときに**書式が悪いのか・復号に
+  失敗したのか・そもそも見ていないのか**が区別できない（実際に詰まった）。
+  `*Messages*` には見に行ったファイル名も残す。**`auth-sources` のファイルが
+  1 つも無いときは普通のプロンプトのまま**にする
+- **`auth-source` が `.gpg` を読んだかは `*Messages*` の `Decrypting …` で
+  分かる。** 出ていなければファイルに触っていない（キャッシュに当たったか、
+  そのファイルを見ていない）。**「訊かれた」だけでは区別がつかない**ので、
+  まずここを見る
+- **検証で `epg-pinentry-mode` を `loopback` にしてはいけない。** 復号は
+  プロセスフィルタの中で進むので、`ec.sh`（`inhibit-interaction`）だと
+  `epa-passphrase-callback-function: User interaction while inhibited` が
+  **フィルタの中で**出て、呼び出し側は gpg の応答を待ったまま返らない
+  （実測。Emacs は固まらないが emacsclient がタイムアウトする）。
+  パスフレーズは Windows の pinentry に出させる
+
 ## `my-translate` — ローカル LLM で翻訳する
 
 → [docs/translate/plamo-3-translate-study.md](docs/translate/plamo-3-translate-study.md)

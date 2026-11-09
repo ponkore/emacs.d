@@ -184,6 +184,7 @@
 (require 'my-pty)   ; ConPTY 経由で対話 TUI を動かす (ptyd)
 (require 'my-ghostel)   ; libghostty の端末を dynamic module で動かす
 (require 'my-oracle)   ; Oracle を常駐プロセス経由で使う (oracled)
+(require 'my-ideco)   ; iDeCo の日次サマリを psql で見る (M-x check-ideco)
 (require 'my-genpreview)   ; GenPreview でファイルをプレビューする
 (require 'my-translate)   ; ローカル LLM で翻訳する (PLaMo 3 Translate)
 (require 'my-platform)   ; OS 固有設定 (Windows / macOS)

@@ -61,6 +61,7 @@ git clone git@github.com:ponkore/emacs.d.git ~/.emacs.d
 | **Go ツールチェイン** | 対話 TUI を動かす | `M-x my:pty-build`（Windows のみ） |
 | **`~/Projects` の実体** | bookmark をマシン間で共有 | Windows はジャンクション（`C:\Projects` へ）、他は symlink か実ディレクトリ |
 | **`~/.htnblog`** | はてなブログ投稿 | `userid` / `endpointurl` / `apikey` を書く |
+| **WSL の psql** | iDeCo の日次サマリ（`M-x check-ideco`） | `wsl -- sudo apt install postgresql-client`。パスワードは `~/.authinfo.gpg` に（下記） |
 | **llama.cpp + PLaMo 3 Translate** | ローカル翻訳（`C-c T`） | 下の[外部依存](#外部依存)の表。**無ければコマンドがそう言うだけ** |
 | **cmigemo** | ローマ字で日本語 isearch | バイナリと辞書（`~/.emacs.d/migemo/utf-8/migemo-dict`）。無ければ黙って無効 |
 | **exceldiff / MarkText** | dired からの起動 | PATH に置くだけ |
@@ -135,6 +136,7 @@ git clone git@github.com:ponkore/emacs.d.git ~/.emacs.d
 | `my-htnblog` | はてなブログ AtomPub API へ投稿する（`M-x htnblog`） |
 | `my-pty` | ConPTY 経由で対話 TUI を動かす。Windows のみ |
 | `my-ghostel` | libghostty の端末を dynamic module で動かす（`C-c s`）。`my-pty` と比較評価中 |
+| `my-ideco` | iDeCo の日次サマリを psql で見る（`M-x check-ideco`） |
 | `my-genpreview` | GenPreview でファイルをプレビューする（`M-x genpreview-open`、dired の `v`）。Windows のみ |
 | `my-translate` | ローカル LLM（PLaMo 3 Translate）で翻訳する（`C-c T`）。モデルが無ければ無効 |
 | `my-platform` | Windows / macOS 固有設定 |
@@ -313,6 +315,31 @@ URL 21 種と識別子 132 種が**すべて保存**された。
 **モデルが置いてなければコマンドがそう言うだけ**で、他の設定には影響しない。
 → [docs/translate/plamo-3-translate-study.md](docs/translate/plamo-3-translate-study.md)
 
+### iDeCo の日次サマリを見る（`M-x check-ideco`）
+
+毎朝スクレイピングして PostgreSQL（`ideco_db`）に溜めている
+`ideco_daily_summary` を、直近 10 日ぶんだけ罫線の表にして出す。
+見ているのは日付・資産残高・拠出金累計・損益の 4 列だけなので、
+`created_at` / `updated_at` は出さない。数字は 3 桁区切り、日付は
+`YYYY-MM-DD` に直す。
+
+```
+┌────────────┬────────────┬────────────┬────────────┐
+│ 日付       │   資産残高 │ 拠出金累計 │       損益 │
+├────────────┼────────────┼────────────┼────────────┤
+│ 2026-11-09 │ 12,831,350 │ 10,265,130 │  2,566,220 │
+```
+
+`q` で**バッファごと閉じる**（見るだけなので残さない）。`g` で取り直し、
+`C-u 30 M-x check-ideco` で行数を変えられる。psql を 1 回起こすだけ
+（Windows では WSL のもの）。**パスワードは `auth-source` から引き、
+無ければ訊く**。`~/.authinfo.gpg`（暗号化しないなら `~/.authinfo`。どちらも
+`auth-sources` の既定値に入っている）に次の 1 行を書いておけば訊かれない。
+
+```
+machine 192.168.1.5 port 5432 login postgres password ********
+```
+
 ### その他
 
 - **カレンダーに日本の祝日**（`japanese-holidays`。Emacs 本体には入っていない）
@@ -474,6 +501,7 @@ jsdoc / json / python / rust / toml / tsx / typescript / yaml の 17 個。
 | Git 付属の `bash.exe` | Windows の `shell-file-name`（あるときだけ設定） |
 | golangci-lint | `C-c C-l` |
 | SQLcl | `M-x my:sql-sqlcl`（`scoop install sqlcl`。接続は SQLcl の `connmgr` に登録しておく。Windows では `~/bin/sql.cmd` のラッパがあればそれを使う） |
+| psql | `M-x check-ideco`。**Windows には入れず WSL のものを使う**（`wsl.exe -e psql`。起動は実測 0.16 秒）。入れ替えるなら `my:ideco-psql-command` |
 | llama.cpp | `C-c T` の翻訳。[リリース](https://github.com/ggml-org/llama.cpp/releases)の `llama-b*-bin-win-vulkan-x64.zip` を `~/.local/opt/llama.cpp-*/` へ展開する（ビルド不要）。**Intel の iGPU では `GGML_VK_DISABLE_COOPMAT=1` が無いと GPU が落ちる**（既定で付ける） |
 | PLaMo 3 Translate | 同上。`pfnet/plamo-3-translate-{0.8b,2b}-GGUF` の Q4_K_M を `~/.local/share/plamo-models/` へ置く（計 2.2 GB）。**商用利用には[登録](https://forms.gle/mTL8tBLrMYXKNZD56)が要る**（無償） |
 
