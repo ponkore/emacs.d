@@ -519,6 +519,7 @@ tr-ime / Windows 側が IME のトグルとして処理するので、Emacs 側�
 | **翻訳に PFN 公式の `plamo-translate-cli` を使わない**（my-translate） | 2026-11-05 | インストール手順が **macOS 前提**で既定バックエンドは MLX（Apple Silicon 専用）。常駐モードは **MCP サーバ**で Emacs から話すには遠回り。**用語集・文脈・敬体/常体を渡すオプションが無く**モデルの機能を塞いでいる。要るのはその下の `llama-server` だけ → [docs](docs/translate/plamo-3-translate-study.md) |
 | **翻訳モデルに「構造を保て」と頼まない**（my-translate） | 2026-11-05 | **PFML3 に指示文の欄が存在しない**（渡せるのは target_lang / source_lang / context / glossary / form の 5 つだけ）。構造は Emacs 側の分割で保証する。**頼む必要も無かった**——分割して渡せば記法と識別子は素通しされる（実測で 132 種中 132 件保存） |
 | **識別子を守るための恒等写像 `glossary` は積まない**（my-translate） | 2026-11-05 | 実測で**有無によって出力が変わらなかった**。プロンプトが伸びるだけ。守られているかは検証で見る |
+| **端末の描画を Emacs の外でやらない（GenPreview 方式の自前レンダラ）** | 2026-11-09 | 動機だった **eaw の桁ずれは Ghostel が既に解いている**（`★` `※` `○` `あ` を 10 個ずつ並べた 5 行すべて 96 px で一致）。残るのは `★` / `※` が潰れる見た目だけで、フォントを 1 つ patch すれば済む見込み。対して失うものは大きく、**バッファが画像になるので `C-s` も `M-w` も他モジュールからの参照も全部消える**。`libghostty-vt` 1.0 に描画は入っていないのでレンダラは自作。**再開条件は w32 ビルドが xwidget 相当を持つこと**（Windows の Emacs に HWND を埋める API は無く、画像として貼る以外の道が無い） → [docs](docs/pty/ghostel.md) |
 | **端末の残りのアイコンのために `my:console-nerd-font-ranges` を広げない** | 2026-11-09 | `powerline` のまま。`all` にすれば Ghostel のプロンプトの Windows / git / 時計（U+F0372 / U+F418 / U+F43A）も原寸になるが、**dired が不揃いになる**。`HackGen Console NF` が U+E6AD を持たずフォールバックするため、**ディレクトリだけ 15px でファイルは 8px**（実測）。アイコン 3 つのために dired の見た目を崩さない、という判断 → [docs](docs/pty/ghostel.md) |
 | **31b は使わない**（my-translate） | 2026-11-05 | Q4_K_M が 19.5 GB で、iGPU から使える **17.6 GB に収まらない**。速度も 3〜4 tok/s で対話に使えない |
 
@@ -1634,10 +1635,15 @@ fringe のマーカーを最新にしたいときは手で `g` を押す。
 （`vc` / `grep` / `projectile`）にも効いているはずなので、原因が分かれば影響範囲は
 広い。ただし Emacs 本体の問題である可能性が高く、手元で解消できる見込みは薄い。
 
-### `★` と `※` は端末で桁が揃わない（2026-09、未解決）
+### `★` と `※` は端末で桁が揃わない（2026-09、`my-pty` のみ）
 
 U+2605 と U+203B は手元のどのフォントでも全角。`my-pty` でこれらを含む行だけは
 揃わない。→ [docs/pty/my-pty.md](docs/pty/my-pty.md)
+
+**`my-ghostel` では起きない**（2026-11-09 に実測）。Ghostel はセルに収まらない
+グリフを `min-width` と `height` で押し込むので、**桁は揃う**。残るのは
+`★` / `※` が 47% の高さに潰れる見た目だけ。
+→ [docs/pty/ghostel.md](docs/pty/ghostel.md)
 
 ### 翻訳は `coopmat` を切っている間、プロンプト処理が 2.3 倍遅い（2026-11-05）
 
