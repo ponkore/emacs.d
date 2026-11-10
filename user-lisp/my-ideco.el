@@ -3,10 +3,16 @@
 ;; 毎朝スクレイピングして PostgreSQL に溜めている ideco_daily_summary を、
 ;; 直近から数行だけ罫線の表にして見る。`M-x check-ideco'。
 ;;
-;;   ┌────────────┬────────────┬────────────┬───────────┐
-;;   │ 日付       │   資産残高 │ 拠出金累計 │      損益 │
-;;   ├────────────┼────────────┼────────────┼───────────┤
-;;   │ 2026-11-09 │ 12,831,350 │ 10,265,130 │ 2,566,220 │
+;;   ┌────────────┬────────────┬────────────┬────────────┬────────────┐
+;;   │ 日付       │   資産残高 │ 拠出金累計 │       損益 │     前日比 │
+;;   ├────────────┼────────────┼────────────┼────────────┼────────────┤
+;;   │ 2026-11-10 │ 12,914,906 │ 10,265,130 │  2,649,776 │ ↑   83,556 │
+;;   │ 2026-11-09 │ 12,831,350 │ 10,265,130 │  2,566,220 │ →        0 │
+;;
+;; 前日比は損益の「1 つ前の行」との差で、↑ は赤・↓ は緑・→ (変化なし) は灰色
+;; (国内の証券会社の慣習)。資産残高で比べないのは、拠出日に相場が下がっても
+;; 拠出の分だけ増えて ↑ になるため (実測で 2026-09-15 は資産残高 +7,255 /
+;; 損益 -15,745)。
 ;;
 ;; `psql' を 1 回起こすだけ (同期)。Windows では WSL の psql を使う。
 ;; 見終わったら `q' でバッファごと消える。`g' で取り直す。
@@ -81,6 +87,24 @@ Windows には PostgreSQL のクライアントを入れていないので WSL �
 (defconst my:ideco--null "-"
   "NULL と空欄に出す文字。")
 
+(defconst my:ideco--diff-column "soneki"
+  "前日比を出す列 (`my:ideco--columns' の列名)。
+表ではこの列の直後に「前日比」の列を挟む。
+
+資産残高ではなく損益で比べる。資産残高は拠出金が入った日に、相場が
+下がっていても拠出の分だけ増えて `↑' になる。損益 (= 資産残高 −
+拠出金累計) なら運用だけの増減が出る。")
+
+;; 色は国内の証券会社の慣習に合わせて「上昇＝赤、下落＝緑」。
+(defface my:ideco-up '((t :inherit error :weight normal))
+  "前日より増えた行の前日比 (赤)。")
+
+(defface my:ideco-down '((t :inherit success :weight normal))
+  "前日より減った行の前日比 (緑)。")
+
+(defface my:ideco-flat '((t :inherit shadow))
+  "前日と同じ行の前日比 (土日など)。")
+
 ;;; [2] 値の整形
 
 (defun my:ideco--format-date (s)
@@ -111,6 +135,57 @@ Windows には PostgreSQL のクライアントを入れていないので WSL �
     (if (string-empty-p s)
         my:ideco--null
       (funcall (nth 3 spec) s))))
+
+;;; [2.5] 前日比
+
+(defun my:ideco--int (s)
+  "S が整数なら数にして返す。そうでなければ nil。"
+  (let ((s (string-trim (or s ""))))
+    (and (string-match-p "\\`-?[0-9]+\\'" s) (string-to-number s))))
+
+(defun my:ideco--diff-index ()
+  "`my:ideco--diff-column' が `my:ideco--columns' の何番目か。"
+  (seq-position (mapcar #'car my:ideco--columns) my:ideco--diff-column))
+
+(defun my:ideco--with-diff (list value)
+  "LIST の前日比を挟む位置に VALUE を差し込んだ新しいリストを返す。
+見出し・寄せ・各行のセルのどれにも同じ位置で差し込むために使う。"
+  (let ((i (1+ (my:ideco--diff-index))))
+    (append (seq-take list i) (list value) (seq-drop list i))))
+
+(defun my:ideco--diff-cells (data)
+  "DATA (新しい順に並んだ生のセル) の各行について前日比のセルを返す。
+
+比べる相手は**次の行** (= 1 つ前の日)。だから呼ぶ側は表に出す行数より
+1 行多く取ること。最後の行は相手が無いので `my:ideco--null'。
+
+矢印はセルの左端に揃え、数字はその右で右詰めにする。セル全体を右詰めに
+すると、数字の桁数しだいで矢印の位置が行ごとにずれて縦に追えない。
+符号は付けない (矢印と色で足りる)。"
+  (let* ((i (my:ideco--diff-index))
+         (vals (mapcar (lambda (r) (my:ideco--int (nth i r))) data))
+         (deltas (seq-map-indexed
+                  (lambda (v k)
+                    (let ((p (nth (1+ k) vals)))
+                      (and v p (- v p))))
+                  vals))
+         (texts (mapcar (lambda (d)
+                          (and d (my:ideco--format-number
+                                  (number-to-string (abs d)))))
+                        deltas))
+         (w (apply #'max 0 (mapcar (lambda (s) (if s (string-width s) 0))
+                                   texts))))
+    (seq-mapn
+     (lambda (d s)
+       (if (null d)
+           my:ideco--null
+         (pcase-let ((`(,arrow . ,face)
+                      (cond ((> d 0) '("↑" . my:ideco-up))
+                            ((< d 0) '("↓" . my:ideco-down))
+                            (t       '("→" . my:ideco-flat)))))
+           (propertize (concat arrow " " (my:ideco--pad s w 'right))
+                       'face face))))
+     deltas texts)))
 
 ;;; [3] 罫線の表
 
@@ -328,12 +403,16 @@ ROWS の既定は `my:ideco-rows'。前置引数で行数を指定できる
                          (prefix-numeric-value current-prefix-arg)
                        my:ideco-rows)))
   (let* ((rows (max 1 (or rows my:ideco-rows)))
-         (data (my:ideco--psql (my:ideco--query rows)))
-         (cells (mapcar (lambda (row)
-                          (seq-map-indexed
-                           (lambda (spec i) (my:ideco--cell (nth i row) spec))
-                           my:ideco--columns))
-                        data))
+         ;; 1 行多く取る。いちばん古い行の前日比を出す相手 (表には出さない)。
+         (data (my:ideco--psql (my:ideco--query (1+ rows))))
+         (diffs (seq-take (my:ideco--diff-cells data) rows))
+         (cells (seq-mapn (lambda (row diff)
+                            (my:ideco--with-diff
+                             (seq-map-indexed
+                              (lambda (spec i) (my:ideco--cell (nth i row) spec))
+                              my:ideco--columns)
+                             diff))
+                          (seq-take data rows) diffs))
          (buf (get-buffer-create my:ideco-buffer-name)))
     (with-current-buffer buf
       (let ((inhibit-read-only t))
@@ -342,9 +421,12 @@ ROWS の既定は `my:ideco-rows'。前置引数で行数を指定できる
         (erase-buffer)
         (if (null cells)
             (insert "該当する行が無い。\n")
-          (insert (my:ideco--table (mapcar #'cadr my:ideco--columns)
-                                   cells
-                                   (mapcar #'caddr my:ideco--columns))))
+          (insert (my:ideco--table
+                   (my:ideco--with-diff (mapcar #'cadr my:ideco--columns)
+                                        "前日比")
+                   cells
+                   (my:ideco--with-diff (mapcar #'caddr my:ideco--columns)
+                                        'right))))
         (insert (propertize
                  (format "%s / %s@%s / %d 行 (%s 取得)\n"
                          my:ideco-table my:ideco-database my:ideco-host
