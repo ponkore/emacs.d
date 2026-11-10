@@ -531,6 +531,91 @@ F_drag (emacs_env *env, ptrdiff_t n, emacs_value *a, void *d)
   return tee (env);
 }
 
+/* PARENT のクライアント座標 (X, Y) の一番上が PARENT の子孫かを確かめ、画面座標を返す。
+   よそのアプリを押さないための安全確認 */
+static int
+safe_point (HWND parent, int x, int y, POINT *out, HWND *hit)
+{
+  POINT p = { x, y };
+  ClientToScreen (parent, &p);
+  HWND w = WindowFromPoint (p);
+  *out = p;
+  *hit = w;
+  return w && (w == parent || IsChild (parent, w));
+}
+
+/* (hwnd-probe-click-at PARENT X Y CTRL) その点を本物の入力でクリックする。
+   => 押した HWND のクラス名 / nil (よその窓なので押さなかった) */
+static emacs_value
+F_click_at (emacs_env *env, ptrdiff_t n, emacs_value *a, void *d)
+{
+  (void) n; (void) d;
+  HWND parent = arg_hwnd (env, a[0]);
+  POINT p, saved;
+  HWND hit;
+  if (!safe_point (parent, env->extract_integer (env, a[1]),
+                   env->extract_integer (env, a[2]), &p, &hit))
+    return nil (env);
+  int ctrl = env->is_not_nil (env, a[3]);
+  GetCursorPos (&saved);
+  SetCursorPos (p.x, p.y);
+  Sleep (30);
+  INPUT in[4] = {0};
+  int k = 0;
+  if (ctrl)
+    {
+      in[k].type = INPUT_KEYBOARD;
+      in[k++].ki.wVk = VK_CONTROL;
+    }
+  in[k].type = INPUT_MOUSE;
+  in[k++].mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+  in[k].type = INPUT_MOUSE;
+  in[k++].mi.dwFlags = MOUSEEVENTF_LEFTUP;
+  if (ctrl)
+    {
+      in[k].type = INPUT_KEYBOARD;
+      in[k].ki.wVk = VK_CONTROL;
+      in[k++].ki.dwFlags = KEYEVENTF_KEYUP;
+    }
+  SendInput (k, in, sizeof (INPUT));
+  Sleep (80);
+  SetCursorPos (saved.x, saved.y);
+  char cls[64] = "?";
+  GetClassNameA (hit, cls, sizeof cls);
+  return env->make_string (env, cls, strlen (cls));
+}
+
+/* (hwnd-probe-wheel-at PARENT X Y NOTCHES) その点で本物のホイールを回す (正 = 下へ) */
+static emacs_value
+F_wheel_at (emacs_env *env, ptrdiff_t n, emacs_value *a, void *d)
+{
+  (void) n; (void) d;
+  HWND parent = arg_hwnd (env, a[0]);
+  POINT p, saved;
+  HWND hit;
+  if (!safe_point (parent, env->extract_integer (env, a[1]),
+                   env->extract_integer (env, a[2]), &p, &hit))
+    return nil (env);
+  int notches = env->extract_integer (env, a[3]);
+  GetCursorPos (&saved);
+  SetCursorPos (p.x, p.y);
+  Sleep (30);
+  for (int i = 0; i < (notches < 0 ? -notches : notches); i++)
+    {
+      INPUT in = {0};
+      in.type = INPUT_MOUSE;
+      in.mi.dwFlags = MOUSEEVENTF_WHEEL;
+      in.mi.mouseData = (DWORD) (notches < 0 ? WHEEL_DELTA : -WHEEL_DELTA);
+      SendInput (1, &in, sizeof in);
+      Sleep (20);
+    }
+  Sleep (80);
+  SetCursorPos (saved.x, saved.y);
+  char cls[64] = "?";
+  GetClassNameA (hit, cls, sizeof cls);
+  return env->make_string (env, cls, strlen (cls));
+}
+
 /* (hwnd-probe-monitors) => ((LX LY LW LH PX PY PW PH DPI PRIMARY-P) ...)
    L* は Emacs (system-aware) から見た座標、P* は物理ピクセル */
 struct mon { HMONITOR h; RECT l, p; UINT dpi; int primary; };
@@ -731,6 +816,8 @@ emacs_module_init (struct emacs_runtime *rt)
   defun (env, "hwnd-probe-wheel", 2, F_wheel);
   defun (env, "hwnd-probe-drag", 3, F_drag);
   defun (env, "hwnd-probe-monitors", 0, F_monitors);
+  defun (env, "hwnd-probe-click-at", 4, F_click_at);
+  defun (env, "hwnd-probe-wheel-at", 4, F_wheel_at);
   emacs_value p = env->intern (env, "hwnd-probe");
   env->funcall (env, env->intern (env, "provide"), 1, &p);
   return 0;
