@@ -109,11 +109,10 @@ GenPreview が無い環境) は素の `dired-view-file'。
   (autoload 'genpreview-open "genpreview" "ファイルを開いてプレビューする。" t)
   (autoload 'genpreview-side-preview "genpreview" "今のバッファのファイルを横にプレビューする。" t)
   (autoload 'genpreview-dired-preview "genpreview" "dired のポイントのファイルをプレビューする。" t)
-  ;; 画像の短冊を貼る代わりに、単体ウィンドウ版のビューアを Emacs のウィンドウに重ねる
-  ;; (GenPreview の docs/emacs-embedded-view.md。2026-11-10 に段階 A を試用開始)。
-  ;; スクロールと検索の強調が単体ウィンドウ版と同じになる。不調なら nil で従来の表示に戻る。
+  ;; 表示は、単体ウィンドウ版のビューアを Emacs のウィンドウに重ねる方式が既定
+  ;; (`genpreview-view'。GenPreview の ADR 0008、2026-11-10 から)。不調なら
+  ;; (setq genpreview-view nil) で画像の短冊を貼る従来の表示に戻る。
   ;; genpreview.el はまだ読まれていないが、defcustom は既に値があれば上書きしない
-  (setq genpreview-view t)
   ;; dired の v (view) を乗せ替える。
   ;;
   ;; dired-x は v を触らないので (奪うのは V / F / M-! / M-( / C-x M-o)、
