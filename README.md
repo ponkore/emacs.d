@@ -62,6 +62,7 @@ git clone git@github.com:ponkore/emacs.d.git ~/.emacs.d
 | **`~/Projects` の実体** | bookmark をマシン間で共有 | Windows はジャンクション（`C:\Projects` へ）、他は symlink か実ディレクトリ |
 | **`~/.htnblog`** | はてなブログ投稿 | `userid` / `endpointurl` / `apikey` を書く |
 | **WSL の psql** | iDeCo の日次サマリ（`M-x check-ideco`） | `wsl -- sudo apt install postgresql-client`。パスワードは `~/.authinfo.gpg` に（下記） |
+| **Docker + `~/.authinfo.gpg`** | Claude Code から ideco DB を引く MCP（`.mcp.json` の `ideco-postgres`。読み取り専用） | Docker Desktop を起動しておくだけ。パスワードは `check-ideco` と同じ行を使う |
 | **llama.cpp + PLaMo 3 Translate** | ローカル翻訳（`C-c T`） | 下の[外部依存](#外部依存)の表。**無ければコマンドがそう言うだけ** |
 | **cmigemo** | ローマ字で日本語 isearch | バイナリと辞書（`~/.emacs.d/migemo/utf-8/migemo-dict`）。無ければ黙って無効 |
 | **exceldiff / MarkText** | dired からの起動 | PATH に置くだけ |

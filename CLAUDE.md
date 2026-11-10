@@ -1387,6 +1387,27 @@ psql を 1 回起こして、`ideco_daily_summary` の直近の推移と、最�
   （実測。Emacs は固まらないが emacsclient がタイムアウトする）。
   パスフレーズは Windows の pinentry に出させる
 
+### PostgreSQL MCP（`.mcp.json` の `ideco-postgres`、2026-11-10）
+
+Claude Code から同じ DB を引くための MCP サーバ。`.claude/mcp/ideco-postgres.ps1`
+が `~/.authinfo.gpg` を復号して Docker の `crystaldba/postgres-mcp` を
+`--access-mode=restricted`（読み取り専用）で起こす。
+
+- **Windows では PyPI 版を `uvx` で使えない。** 0.3 系は依存の `pglast` に
+  Windows 向けの配布物が無く解決できず、入るのは今の `mcp` と合わない 0.1.0
+  だけ（起動時に `'Server' object has no attribute 'list_resources'`）
+- **【重要】postgres-mcp は stdin が EOF になっても終了しない**（実測）。claude が
+  ラッパを殺しても docker.exe とコンテナは道連れにならないので、**セッションの
+  たびにコンテナと DB 接続が 1 つずつ残る**。ラベルに持ち主（ラッパの PID と
+  起動時刻）を書き、次の起動時に持ち主が死んだものを消している。
+  **`claude mcp list` のヘルスチェックも 1 つ残す**（次の起動で消える）
+- **ラッパは stdout に何も書かない**（MCP の通信路）。診断は stderr へ
+- **gpg は Git 付属のもの（`usr\bin`）を避ける。** 鍵束が別なので復号できない。
+  Emacs（`epg-gpg-program`）と同じ scoop 版を使う
+- `.mcp.json` の承認は `.claude/settings.local.json` の
+  `enabledMcpjsonServers` で済ませてある（マシン固有なので git 管理外）。
+  **pwsh と Docker が無いマシン（mac / Linux）では起動に失敗するだけ**
+
 ## `my-translate` — ローカル LLM で翻訳する
 
 → [docs/translate/plamo-3-translate-study.md](docs/translate/plamo-3-translate-study.md)

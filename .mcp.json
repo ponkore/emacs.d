@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "ideco-postgres": {
+      "type": "stdio",
+      "command": "pwsh",
+      "args": [
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-File",
+        ".claude/mcp/ideco-postgres.ps1"
+      ]
+    }
+  }
+}
