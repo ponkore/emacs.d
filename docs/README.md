@@ -8,7 +8,7 @@
 CLAUDE.md の各節から、詳細はここへリンクしてある。逆にここを読むときは、
 結論だけなら CLAUDE.md の該当節で足りる。
 
-最終更新: 2026-11-05
+最終更新: 2026-11-10
 
 ## 機能ごとの詳細
 
@@ -50,6 +50,7 @@ CLAUDE.md の各節から、詳細はここへリンクしてある。逆にこ�
 | [magit/magit-autorefresh-stage1-design.md](magit/magit-autorefresh-stage1-design.md) | 段階 1: 自動リフレッシュ |
 | [magit/magit-gitd-2a-design.md](magit/magit-gitd-2a-design.md) | 段階 2a: 素通しプロキシ |
 | [magit/magit-gitd-2b-design.md](magit/magit-gitd-2b-design.md) | 段階 2b: キャッシュと並列先読み |
+| [embed/hwnd-child-window.md](embed/hwnd-child-window.md) | Emacs のフレームに module から子 HWND を埋め込む（Windows）。プローブ 2 回の実測と設計上の約束。GenPreview の改修の前提 |
 
 ## リファクタリングの記録
 
