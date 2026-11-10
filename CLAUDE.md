@@ -1337,9 +1337,20 @@ libghostty-vt を dynamic module で動かす端末（Ghostel）。**`my-pty` �
 
 ## `my-ideco` — iDeCo の日次サマリ（`M-x check-ideco`）
 
-psql を 1 回起こして `ideco_daily_summary` の直近を罫線の表にするだけ
-（210 行）。`docs/` は無い。見る列・見出し・寄せ・整形は
+psql を 1 回起こして、`ideco_daily_summary` の直近の推移と、最新の日の
+銘柄別（`ideco_item_data` + `ideco_item_master`）を罫線の表にする
+（600 行）。`docs/` は無い。推移の表の列・見出し・寄せ・整形は
 `my:ideco--columns` の 1 か所に書いてあり、クエリも表もそこから作る。
+
+- **【重要】`created_at` は UTC で入っている**（`timestamp without time zone`
+  なので値からは分からない。2026-11-10 分が `2026-11-09 23:29`）。
+  見出しの時刻は SQL の `at time zone` を 2 回当てて JST にしている
+- **銘柄の損益と日次サマリの損益は基準が違う**（銘柄は「残高 − 購入金額」、
+  サマリは「残高 − 拠出金累計」）。足しても合わないので、**銘柄別の
+  合計行には資産残高しか出さない**
+- 問い合わせは `-c` を並べて 1 回の psql で流し、**各行の先頭のタグ**
+  （`H` / `S` / `I`）で見分ける。銘柄名は自由な文字列なので最後の列に置き、
+  CSV の引用符を `my:ideco--split-csv` で解く
 
 - **【重要】psql に `-w` を必ず付ける。** 無いと psql は**パスワードを
   stdin から読もうとして待ち続ける**。`call-process` は stdin を与えないので、

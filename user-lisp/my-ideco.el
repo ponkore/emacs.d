@@ -1,7 +1,12 @@
 ;;; my-ideco.el --- iDeCo の日次サマリを psql で見る  -*- lexical-binding: t -*-
 ;;; Commentary:
-;; 毎朝スクレイピングして PostgreSQL に溜めている ideco_daily_summary を、
-;; 直近から数行だけ罫線の表にして見る。`M-x check-ideco'。
+;; 毎朝スクレイピングして PostgreSQL に溜めている iDeCo の資産状況を
+;; 罫線の表にして見る。`M-x check-ideco'。表は 2 つ。
+;;
+;; - 直近 10 日分の推移 (ideco_daily_summary)
+;; - 最新の日の銘柄別状況 (ideco_item_data + ideco_item_master)
+;;
+;; 見出しの時刻は最新の行の created_at を JST にしたもの (DB は UTC)。
 ;;
 ;;   ┌────────────┬────────────┬────────────┬────────────┬────────────┐
 ;;   │ 日付       │   資産残高 │ 拠出金累計 │       損益 │     前日比 │
@@ -105,6 +110,21 @@ Windows には PostgreSQL のクライアントを入れていないので WSL �
 (defface my:ideco-flat '((t :inherit shadow))
   "前日と同じ行の前日比 (土日など)。")
 
+(defface my:ideco-title
+  '((t :inherit (bold font-lock-function-name-face) :height 1.4))
+  "バッファ先頭の見出し (「iDeCo 資産状況」)。")
+
+(defface my:ideco-heading
+  '((t :inherit (bold font-lock-type-face) :height 1.15))
+  "表ごとの見出し (「直近 10 日分の推移」「銘柄別状況」)。")
+
+(defcustom my:ideco-normalize-item-names t
+  "非 nil なら銘柄名の全角英数と全角空白を半角にする (NFKC)。
+DB には `ｅＭＡＸＩＳ　Ｓｌｉｍ　国内株式（ＴＯＰＩＸ）' と全角で入っていて、
+そのままだと銘柄名の列だけで 46 桁ある。NFKC で
+`eMAXIS Slim 国内株式(TOPIX)' (28 桁) になる。カタカナは変わらない。"
+  :type 'boolean)
+
 ;;; [2] 値の整形
 
 (defun my:ideco--format-date (s)
@@ -157,19 +177,23 @@ Windows には PostgreSQL のクライアントを入れていないので WSL �
   "DATA (新しい順に並んだ生のセル) の各行について前日比のセルを返す。
 
 比べる相手は**次の行** (= 1 つ前の日)。だから呼ぶ側は表に出す行数より
-1 行多く取ること。最後の行は相手が無いので `my:ideco--null'。
+1 行多く取ること。最後の行は相手が無いので `my:ideco--null'。"
+  (let* ((i (my:ideco--diff-index))
+         (vals (mapcar (lambda (r) (my:ideco--int (nth i r))) data)))
+    (my:ideco--delta-cells
+     (seq-map-indexed (lambda (v k)
+                        (let ((p (nth (1+ k) vals)))
+                          (and v p (- v p))))
+                      vals))))
+
+(defun my:ideco--delta-cells (deltas)
+  "DELTAS (整数か nil) を前日比のセルにする。nil は `my:ideco--null'。
 
 矢印はセルの左端に揃え、数字はその右で右詰めにする。セル全体を右詰めに
 すると、数字の桁数しだいで矢印の位置が行ごとにずれて縦に追えない。
-符号は付けない (矢印と色で足りる)。"
-  (let* ((i (my:ideco--diff-index))
-         (vals (mapcar (lambda (r) (my:ideco--int (nth i r))) data))
-         (deltas (seq-map-indexed
-                  (lambda (v k)
-                    (let ((p (nth (1+ k) vals)))
-                      (and v p (- v p))))
-                  vals))
-         (texts (mapcar (lambda (d)
+数字の幅は DELTAS 全体で揃える。符号は付けない (矢印と色で足りる)。
+推移の表と銘柄別の表で同じ表記にするため、両方ともここを通す。"
+  (let* ((texts (mapcar (lambda (d)
                           (and d (my:ideco--format-number
                                   (number-to-string (abs d)))))
                         deltas))
@@ -197,8 +221,9 @@ Windows には PostgreSQL のクライアントを入れていないので WSL �
         (concat (make-string gap ?\s) s)
       (concat s (make-string gap ?\s)))))
 
-(defun my:ideco--table (header rows aligns)
+(defun my:ideco--table (header rows aligns &optional footer)
   "HEADER と ROWS を罫線の表にした文字列にする。ALIGNS は列ごとの寄せ方。
+FOOTER (合計行など) を渡すと、横罫で区切って最後に太字で置く。
 
 【重要】罫線素片は 1 文字で 2 桁ある。`─' `│' は East Asian Ambiguous で
 `site-lisp/eaw.el' が幅 2 を与え、HackGen も全角 (16px) で描く。つまり
@@ -218,7 +243,7 @@ ambiguous を幅 1 に倒す端末では `rw' が 1 になるので何も広げ�
                     (let ((w (apply #'max (string-width (nth i header))
                                     (mapcar (lambda (r)
                                               (string-width (or (nth i r) "")))
-                                            rows))))
+                                            (if footer (cons footer rows) rows)))))
                       (+ w (mod (- rw (mod (+ w 2) rw)) rw))))
                   idx))
          (rule (lambda (l m r)
@@ -241,6 +266,9 @@ ambiguous を幅 1 に倒す端末では `rw' が 1 になるので何も広げ�
             (funcall line header 'font-lock-keyword-face)
             (funcall rule "├" "┼" "┤")
             (mapconcat (lambda (r) (funcall line r nil)) rows "")
+            (when footer
+              (concat (funcall rule "├" "┼" "┤")
+                      (funcall line footer 'bold)))
             (funcall rule "└" "┴" "┘"))))
 
 ;;; [4] psql
@@ -294,14 +322,44 @@ ambiguous を幅 1 に倒す端末では `rw' が 1 になるので何も広げ�
                 env))
       env)))
 
-(defun my:ideco--query (rows)
-  "直近 ROWS 行を取る SELECT 文。"
-  (format "select %s from %s order by summary_date desc limit %d"
-          (mapconcat #'car my:ideco--columns ", ")
-          my:ideco-table rows))
+(defun my:ideco--queries (rows)
+  "バッファ 1 枚ぶんの SELECT 文のリスト。直近 ROWS 行の推移を取る。
 
-(defun my:ideco--psql (sql)
-  "SQL を psql に流し、セルのリストのリストを返す。
+**psql は 1 回しか起こさない**ので、全部を `-c' で並べて流す。結果は
+続けて出てくるだけで切れ目が分からないので、**各行の先頭にタグを
+付けて**どの問い合わせの行かを見分ける (`my:ideco--tag-columns')。
+1 回にまとめるのは、WSL 経由だと psql を起こすだけで 0.16 秒かかるため。
+
+- `H' 見出しの時刻。最新の行の `created_at' を JST にしたもの。
+  【重要】`created_at' は **UTC** で入っている (`timestamp without
+  time zone' なので値だけ見ても分からない。2026-11-10 分の行が
+  `2026-11-09 23:29' だった)。`at time zone' を 2 回当てて
+  「UTC として読み、JST で書く」
+- `S' 推移の表。前日比のために 1 行多く取るのは呼ぶ側の仕事
+- `I' 銘柄別。最新の日の銘柄と、その 1 つ前の日の同じ銘柄の損益
+  (前日比用。前の日に無い銘柄は NULL = 空欄) を並べる。名前は
+  `,' を含みうるので最後の列に置く (`my:ideco--split-csv' が解く)
+
+【重要】SQL に改行を入れない。引数は `wsl.exe' を通って Linux 側へ渡る。"
+  (list
+   (format "select 'H', to_char((created_at at time zone 'UTC') at time zone 'Asia/Tokyo', 'YYYY/MM/DD HH24:MI:SS') from %s order by summary_date desc limit 1"
+           my:ideco-table)
+   (format "select 'S', %s from %s order by summary_date desc limit %d"
+           (mapconcat #'car my:ideco--columns ", ")
+           my:ideco-table rows)
+   (format "with s as (select ideco_summary_id, row_number() over (order by summary_date desc) as rn from %s order by summary_date desc limit 2) select 'I', d.ideco_item_id, d.shisan_zandaka, d.soneki, p.soneki, m.unyo_shohin_name from s join ideco_item_data d on d.ideco_summary_id = s.ideco_summary_id join ideco_item_master m on m.ideco_item_id = d.ideco_item_id left join s s2 on s2.rn = 2 left join ideco_item_data p on p.ideco_summary_id = s2.ideco_summary_id and p.ideco_item_id = d.ideco_item_id where s.rn = 1 order by d.ideco_item_id"
+           my:ideco-table)))
+
+(defun my:ideco--tag-columns (tag)
+  "TAG の行がタグを除いて何列あるか。知らないタグなら nil。"
+  (pcase tag
+    ("H" 1)
+    ("S" (length my:ideco--columns))
+    ("I" 5)))
+
+(defun my:ideco--psql (sqls)
+  "SQLS (SELECT 文のリスト) を 1 回の psql で流し、タグごとに分けた結果を返す。
+戻り値は ((タグ . 行のリスト) ...)。行はタグを除いたセルのリスト。
 
 オプションには理由がある。**どれも外してはいけない。**
 
@@ -324,8 +382,8 @@ ambiguous を幅 1 に倒す端末では `rw' が 1 になるので何も広げ�
                              "-h" my:ideco-host
                              "-p" (number-to-string my:ideco-port)
                              "-U" my:ideco-user
-                             "-d" my:ideco-database
-                             "-c" sql)))
+                             "-d" my:ideco-database)
+                       (mapcan (lambda (sql) (list "-c" sql)) sqls)))
          (process-environment (my:ideco--environment password))
          ;; 出力は UTF-8。引数は ASCII だけなので書き込み側は問わない
          ;; (CLAUDE.md「文字コード」。日本語を渡すようになったら要検証)。
@@ -353,20 +411,92 @@ ambiguous を幅 1 に倒す端末では `rw' が 1 になるので何も広げ�
     (or (car (split-string (string-trim (buffer-string)) "\n" t))
         "(stderr は空)")))
 
-(defun my:ideco--parse (text)
-  "psql の `-t --csv' の出力をセルのリストのリストにする。
+(defun my:ideco--split-csv (line)
+  "LINE (psql の `--csv' の 1 行) をセルのリストにする。
 
-クォートは解かない。**この表に出る値 (数値と YYYYMMDD) には `,' も `\"' も
-現れない**ので要らない。文字列の列を足すなら、ここを直すこと。"
-  (let ((ncol (length my:ideco--columns)))
-    (mapcar (lambda (line)
-              (let ((cells (split-string line ",")))
-                (unless (= (length cells) ncol)
-                  (user-error "psql の出力が %d 列ではない: %s" ncol line))
-                cells))
-            (split-string (string-trim text) "\n" t "[ \t\r]+"))))
+psql は `,' や `\"' を含む値だけを `\"' で囲み、中の `\"' を `\"\"' にする。
+銘柄名は自由な文字列なのでこれを解く。値の中の改行は扱わない
+ (行で切ってから呼ぶため。銘柄名に改行は現れない)。"
+  (let ((i 0) (n (length line)) cells)
+    (while (<= i n)
+      (if (and (< i n) (eq (aref line i) ?\"))
+          (let ((j (1+ i)) chars)
+            (catch 'closed
+              (while (< j n)
+                (let ((c (aref line j)))
+                  (cond ((not (eq c ?\")) (push c chars) (setq j (1+ j)))
+                        ((and (< (1+ j) n) (eq (aref line (1+ j)) ?\"))
+                         (push ?\" chars) (setq j (+ j 2)))
+                        (t (setq j (1+ j)) (throw 'closed nil))))))
+            (push (concat (nreverse chars)) cells)
+            (setq i (1+ j)))            ; 閉じ引用符の次の `,' を飛ばす
+        (let ((j (or (string-search "," line i) n)))
+          (push (substring line i j) cells)
+          (setq i (1+ j)))))
+    (nreverse cells)))
+
+(defun my:ideco--parse (text)
+  "psql の `-t --csv' の出力を ((タグ . 行のリスト) ...) にする。
+行の順は出てきた順のまま。列数がタグの想定と違えば止める。"
+  (let (acc)
+    (dolist (line (split-string text "\n" t "\r+"))
+      (let* ((cells (my:ideco--split-csv line))
+             (want (my:ideco--tag-columns (car cells))))
+        (unless (and want (= (length (cdr cells)) want))
+          (user-error "psql の出力を読めない: %s" line))
+        (push (cdr cells) (alist-get (car cells) acc nil nil #'equal))))
+    (mapcar (lambda (e) (cons (car e) (nreverse (cdr e)))) acc)))
+
+;;; [4.5] 銘柄別
+
+(defun my:ideco--item-name (s)
+  "銘柄名 S を表に出す形にする (`my:ideco-normalize-item-names')。"
+  (let ((s (string-trim s)))
+    (if my:ideco-normalize-item-names
+        (progn (require 'ucs-normalize)
+               (ucs-normalize-NFKC-string s))
+      s)))
+
+(defun my:ideco--items-table (items)
+  "ITEMS (`I' の行。id 資産残高 損益 前日の損益 銘柄名) を表の文字列にする。
+
+前日比は推移の表と同じく**損益**の差で、表記も同じ
+ (`my:ideco--delta-cells')。
+
+【重要】合計行には資産残高しか出さない。銘柄の損益は「資産残高 − 購入
+金額」で、日次サマリの損益 (「資産残高 − 拠出金累計」) とは基準が違う。
+足しても推移の表の損益と合わず (2026-11-10 で 2,704,054 対 2,649,776)、
+同じ画面に 2 つの「損益の合計」が並ぶことになる。資産残高は一致する。
+運営管理機関の画面も合計は資産残高だけ。"
+  (let* ((num (lambda (r i) (my:ideco--int (nth i r))))
+         (fmt (lambda (n) (if n
+                              (my:ideco--format-number (number-to-string n))
+                            my:ideco--null)))
+         (zan (mapcar (lambda (r) (funcall num r 1)) items))
+         (diffs (my:ideco--delta-cells
+                 (mapcar (lambda (r)
+                           (let ((now (funcall num r 2))
+                                 (prev (funcall num r 3)))
+                             (and now prev (- now prev))))
+                         items))))
+    (my:ideco--table
+     '("運用商品名" "資産残高" "損益" "前日比")
+     (seq-mapn (lambda (r z d)
+                 (list (my:ideco--item-name (nth 4 r))
+                       (funcall fmt z)
+                       (funcall fmt (funcall num r 2))
+                       d))
+               items zan diffs)
+     '(left right right right)
+     (list "合計"
+           (funcall fmt (and (not (memq nil zan)) (apply #'+ zan)))
+           "" ""))))
 
 ;;; [5] バッファ
+
+(defun my:ideco--insert-heading (text face)
+  "TEXT を見出しとして FACE で挿入する (前後の空行は呼ぶ側)。"
+  (insert (propertize text 'face face) "\n"))
 
 (defvar-local my:ideco--rows nil
   "そのバッファを作ったときの行数。`g' で取り直すときに使う。")
@@ -395,7 +525,7 @@ ambiguous を幅 1 に倒す端末では `rw' が 1 になるので何も広げ�
 
 ;;;###autoload
 (defun my:ideco-check (&optional rows)
-  "iDeCo の日次サマリを直近 ROWS 行ぶん、罫線の表にして出す。
+  "iDeCo の資産状況を出す。直近 ROWS 日の推移と、最新の日の銘柄別。
 
 ROWS の既定は `my:ideco-rows'。前置引数で行数を指定できる
  (`C-u 30 M-x check-ideco')。`M-x check-ideco' はこれの別名。"
@@ -404,7 +534,11 @@ ROWS の既定は `my:ideco-rows'。前置引数で行数を指定できる
                        my:ideco-rows)))
   (let* ((rows (max 1 (or rows my:ideco-rows)))
          ;; 1 行多く取る。いちばん古い行の前日比を出す相手 (表には出さない)。
-         (data (my:ideco--psql (my:ideco--query (1+ rows))))
+         (result (my:ideco--psql (my:ideco--queries (1+ rows))))
+         (get (lambda (tag) (alist-get tag result nil nil #'equal)))
+         (stamp (car (car (funcall get "H"))))
+         (items (funcall get "I"))
+         (data (funcall get "S"))
          (diffs (seq-take (my:ideco--diff-cells data) rows))
          (cells (seq-mapn (lambda (row diff)
                             (my:ideco--with-diff
@@ -419,6 +553,13 @@ ROWS の既定は `my:ideco-rows'。前置引数で行数を指定できる
         (unless (derived-mode-p 'my:ideco-mode)
           (my:ideco-mode))
         (erase-buffer)
+        (my:ideco--insert-heading
+         (concat "iDeCo 資産状況"
+                 (if stamp (format " (%s 時点)" stamp) ""))
+         'my:ideco-title)
+        (insert "\n")
+        (my:ideco--insert-heading (format "直近 %d 日分の推移" rows)
+                                  'my:ideco-heading)
         (if (null cells)
             (insert "該当する行が無い。\n")
           (insert (my:ideco--table
@@ -427,6 +568,18 @@ ROWS の既定は `my:ideco-rows'。前置引数で行数を指定できる
                    cells
                    (my:ideco--with-diff (mapcar #'caddr my:ideco--columns)
                                         'right))))
+        (insert "\n")
+        (my:ideco--insert-heading
+         (concat "銘柄別状況"
+                 (if data
+                     (format " (%s)" (my:ideco--cell (car (car data))
+                                                     (car my:ideco--columns)))
+                   ""))
+         'my:ideco-heading)
+        (insert (if items
+                    (my:ideco--items-table items)
+                  "該当する行が無い。\n"))
+        (insert "\n")
         (insert (propertize
                  (format "%s / %s@%s / %d 行 (%s 取得)\n"
                          my:ideco-table my:ideco-database my:ideco-host
