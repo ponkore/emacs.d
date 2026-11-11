@@ -96,6 +96,14 @@
   :straight t
   :bind
   (("C-s" . my:consult-line)
+   ;; consult は自分ではキーを割り当てない (README が勧める割り当て例があるだけ)。
+   ;; isearch の中の M-s l は、isearch の検索文字列を初期入力にして
+   ;; consult-line に移る (consult-line が `isearch-mode' を見て拾う)。
+   ;; `isearch-mode-map' に置かないと、isearch が先に終わってから呼ばれるので拾えない
+   ("M-s l" . consult-line)
+   :map isearch-mode-map
+   ("M-s l" . consult-line)
+   :map global-map
    ("C-x C-r" . my:consult-recent-file-or-bookmark)
    ("C-x l" . consult-goto-line)
    ("C-x b" . consult-buffer))
@@ -124,6 +132,10 @@
   ;; そのまま出すので、こちらの影響を受けない (下のコメント参照)。
   ;; ファイルを開く入口はタブで絞らない、という切り分けにしてある。
   (consult-buffer-list-function #'consult--frame-buffer-list)
+  :config
+  ;; 設定は `this-command' で引かれるので、C-s (my:consult-line) と
+  ;; M-s l (consult-line) の両方に付ける
+  (consult-customize consult-line my:consult-line :keymap my:consult-line-map)
   :init
   ;; C-uを付けるとカーソル位置の文字列を使うmy-consult-lineコマンドを定義する
   (defun my:consult-line (&optional at-point)
@@ -132,6 +144,73 @@
     (if at-point
         (consult-line (thing-at-point 'symbol))
       (consult-line)))
+
+  ;; ---- consult-line の中の C-w (isearch の C-w と同じ動き) ----
+  ;;
+  ;; C-w で、呼び出したバッファのカーソル位置から次の単語の終わりまでを入力に足す。
+  ;; 続けて押すと 1 単語ずつ伸びる。その直後の DEL は、最後に足した単語をまるごと
+  ;; 消して 1 つ前に戻る (それ以外の DEL はふつうの 1 文字削除)。
+  ;;
+  ;; 何か打ってから C-w したときは、今の一致の終わりから続ける。プレビューが
+  ;; カーソルを一致の先頭に置く (`consult-point-placement' の既定 match-beginning)
+  ;; ので、そこに入力の文字数を足したところ。**一致が入力そのものである
+  ;; (部分一致) ことが前提**で、orderless のように空白で区切ると位置がずれる。
+
+  (defvar my:consult-line--origin nil
+    "consult-line を呼んだときのカーソル位置 (入力が空のときの C-w の起点)。
+プレビューがカーソルを動かすので、呼ぶ前に覚えておく。")
+
+  (defvar my:consult-line--next nil
+    "続けて C-w したときに、次の単語を取り始める位置。")
+
+  (defvar my:consult-line--yanks nil
+    "C-w で足した分の取り消し用。(足す前の入力の長さ . 足す前の `my:consult-line--next') の列。")
+
+  (defun my:consult-line--remember-origin (&rest _)
+    (setq my:consult-line--origin (point)))
+  (advice-add 'consult-line :before #'my:consult-line--remember-origin)
+
+  (defun my:consult-line-yank-word ()
+    "呼び出したバッファから次の単語を入力に足す (isearch の C-w)。"
+    (interactive)
+    (let* ((input (minibuffer-contents-no-properties))
+           (win (minibuffer-selected-window))
+           (buf (window-buffer win))
+           ;; C-w か、C-w を取り消した DEL の直後なら続きから
+           (chain (and (memq last-command '(my:consult-line-yank-word my:consult-line-delete))
+                       my:consult-line--yanks
+                       my:consult-line--next)))
+      (unless chain
+        (setq my:consult-line--yanks nil))
+      (let* ((base (cond (chain my:consult-line--next)
+                         ((string-empty-p input) (or my:consult-line--origin (window-point win)))
+                         (t (+ (window-point win) (length input)))))
+             (end (with-current-buffer buf
+                    (save-excursion
+                      (goto-char (min base (point-max)))
+                      (forward-word 1)
+                      (point)))))
+        (when (> end base)
+          (push (cons (length input) my:consult-line--next) my:consult-line--yanks)
+          (goto-char (point-max))
+          (insert (with-current-buffer buf (buffer-substring-no-properties base end)))
+          (setq my:consult-line--next end)))))
+
+  (defun my:consult-line-delete ()
+    "C-w の直後なら、最後に足した単語を消す。それ以外は 1 文字削除。"
+    (interactive)
+    (if (and (memq last-command '(my:consult-line-yank-word my:consult-line-delete))
+             my:consult-line--yanks)
+        ;; 全部取り消したら (列が空になったら)、次の C-w は今の一致から数え直す
+        (pcase-let ((`(,len . ,next) (pop my:consult-line--yanks)))
+          (delete-region (+ (minibuffer-prompt-end) len) (point-max))
+          (setq my:consult-line--next next))
+      (call-interactively #'delete-backward-char)))
+
+  (defvar-keymap my:consult-line-map
+    :doc "consult-line のミニバッファだけで効くキー。"
+    "C-w" #'my:consult-line-yank-word
+    "DEL" #'my:consult-line-delete)
 
   (defvar my:consult--recent-file-or-bookmark-history nil
     "`my:consult-recent-file-or-bookmark' のミニバッファ履歴。")
@@ -190,21 +269,20 @@
   :straight t
   :defer t)
 
-;;; [3] orderless
+;;; [3] 補完スタイル
 
-(use-package orderless
-  :straight t
-  :defer t
+;; orderless はやめた (2026-11-11)。空白を AND 区切りにする絞り込みが手に
+;; なじまなかったのと、consult-line の C-w (上) が「一致 = 入力そのもの」を
+;; 前提にしているため。
+;;
+;; substring を先頭に置く。consult-line の候補は行なので、入力が行の
+;; **どこかに**含まれれば残ってほしい。basic (先頭一致) を先に置くと、
+;; 先頭が一致する行が 1 つでもあればそこで決まり、ほかの行が落ちる。
+;; partial-completion は `f-b' で foo-bar を引くためのもの。
+(use-package emacs
   :custom
-  ;; 補完スタイルにorderlessを利用する
-  ;; orderless 単体だとファイル名補完や capf の一部が期待どおりに動かない
-  ;; ため、フォールバックとして basic を残す (orderless 公式の推奨)。
-  (completion-styles '(orderless basic))
-  (completion-category-overrides '((file (styles basic partial-completion))))
-  (orderless-matching-styles '(orderless-prefixes
-                               orderless-regexp
-                               orderless-initialism
-                               orderless-literal)))
+  (completion-styles '(substring partial-completion basic))
+  (completion-category-overrides '((file (styles basic partial-completion)))))
 
 ;;; [3] corfu
 

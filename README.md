@@ -112,7 +112,7 @@ git clone git@github.com:ponkore/emacs.d.git ~/.emacs.d
 | `my-core` | 汎用ヘルパ（`my:pandoc-data-file`、`my:open-file-externally`、`my:treesit-remap`）、`s` |
 | `my-japanese` | 文字コード、cp932/UTF-8 変換テーブル、Windows IME（tr-ime）、migemo |
 | `my-appearance` | フォント、フレーム、modus-vivendi テーマ、doom-modeline、nerd-icons |
-| `my-completion` | vertico、consult、marginalia、orderless、corfu、cape、embark |
+| `my-completion` | vertico、consult、marginalia、corfu、cape、embark |
 | `my-keybind` | グローバルキーバインド |
 | `my-keyhelp` | 有効なキーバインドを 1 枚の表で見る（`<f1> b`。`describe-bindings` の置き換え） |
 | `my-editor` | hydra、symbol-overlay、smartparens、whitespace、yasnippet、recentf、editorconfig、tab-bar ほか |
@@ -167,8 +167,13 @@ Windows のプロセス起動と文字コードは踏みやすい。→ [docs/ja
 
 ### 補完
 
-vertico + consult + marginalia + orderless（ミニバッファ）、corfu + cape（バッファ内）、
+vertico + consult + marginalia（ミニバッファ）、corfu + cape（バッファ内）、
 embark。`C-x C-r` は recentf とブックマークの両方から選ぶ。
+
+絞り込みは**部分一致**（`completion-styles` は `substring` が先頭。orderless は 2026-11 にやめた）。
+`C-s`（`my:consult-line`）の中では isearch と同じく **`C-w` でカーソル位置の単語を 1 つずつ足せ**、
+その直後の `DEL` で 1 単語ずつ戻る。isearch の中の `M-s l` は、検索文字列を持ったまま
+`consult-line` に移る。
 
 ### 見た目
 
@@ -387,6 +392,8 @@ machine 192.168.1.5 port 5432 login postgres password ********
 | `C-x C-n` | `next-error` |
 | `C-x l` | `consult-goto-line` |
 | `C-x b` | `consult-buffer` |
+| `C-s` | `consult-line`（`C-w` で単語を足す。`C-u` でカーソル位置のシンボルから） |
+| `M-s l` | `consult-line`（isearch の中なら検索文字列を引き継ぐ） |
 | `C-x C-r` | recentf + ブックマークから開く |
 | `C-x g` | `grep` |
 | `C-x T` | `toggle-truncate-lines` |
