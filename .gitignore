@@ -37,7 +37,6 @@
 
 # --- magit-gitd (2026-09) ---
 /gitd/target/
-/ptyd/ptyd.exe
 
 # --- ghostel (2026-11) ---
 # ghostel-module-directory。straight の build ツリーの外に置かないと

@@ -28,8 +28,8 @@
 ;;   `jsonrpc-error' を投げ、**その登録ぶんの watch を全部捨てる**ので、
 ;;   数千本張ってから全部外すだけの時間になる。
 ;;
-;; `go.mod` / `Cargo.toml` をルートの目印に足すと、`oracled/` `ptyd/`
-;; `gitd/` がそれぞれ別プロジェクトになり、gopls の root が
+;; `go.mod` / `Cargo.toml` をルートの目印に足すと、`oracled/` `gitd/`
+;; がそれぞれ別プロジェクトになり、gopls の root が
 ;; `oracled/`（数十ディレクトリ）に収まる。
 ;;
 ;; 【重要】マーカーを足すだけでは効かない。`project-find-functions' の

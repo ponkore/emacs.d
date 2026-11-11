@@ -58,7 +58,6 @@ git clone git@github.com:ponkore/emacs.d.git ~/.emacs.d
 | **LSP サーバ** | eglot | 下の[外部依存](#外部依存)の表 |
 | **mupdf** | PDF をバッファで見る | `scoop install mupdf`（poppler では代用できない） |
 | **Rust ツールチェイン** | magit の高速化 | `M-x my:gitd-build`（Windows のみ）→ [gitd/README.md](gitd/README.md) |
-| **Go ツールチェイン** | 対話 TUI を動かす | `M-x my:pty-build`（Windows のみ） |
 | **`~/Projects` の実体** | bookmark をマシン間で共有 | Windows はジャンクション（`C:\Projects` へ）、他は symlink か実ディレクトリ |
 | **`~/.htnblog`** | はてなブログ投稿 | `userid` / `endpointurl` / `apikey` を書く |
 | **WSL の psql** | iDeCo の日次サマリ（`M-x check-ideco`） | `wsl -- sudo apt install postgresql-client`。パスワードは `~/.authinfo.gpg` に（下記） |
@@ -67,7 +66,7 @@ git clone git@github.com:ponkore/emacs.d.git ~/.emacs.d
 | **cmigemo** | ローマ字で日本語 isearch | バイナリと辞書（`~/.emacs.d/migemo/utf-8/migemo-dict`）。無ければ黙って無効 |
 | **exceldiff / MarkText** | dired からの起動 | PATH に置くだけ |
 
-`gitd` / `ptyd` / tree-sitter 文法 / `straight/` は**すべて git 管理外**で、
+`gitd` / tree-sitter 文法 / `straight/` は**すべて git 管理外**で、
 マシンごとにビルドする。**バイナリが無ければその機能が無効になるだけ**で、
 他の設定には影響しない。
 
@@ -86,7 +85,6 @@ git clone git@github.com:ponkore/emacs.d.git ~/.emacs.d
 | `fonts/` | `NFM.ttf` のみ。OS 側へのインストールが別途要る |
 | `snippets/` | yasnippet |
 | `gitd/` | magit の git 実行を肩代わりする常駐プロセス（Rust）。`target/` は git 管理外 |
-| `ptyd/` | ConPTY を持って対話 TUI を動かすプロセス（Go）。`ptyd.exe` は git 管理外 |
 | `docs/` | 設計メモ・実測の記録（[索引](docs/README.md)） |
 | `tmp/` | 作業用の捨て場。`.gitkeep` 以外は git 管理外 |
 
@@ -135,8 +133,7 @@ git clone git@github.com:ponkore/emacs.d.git ~/.emacs.d
 | `my-utils` | calendar（日本の祝日）、open-junk-file、grep/ripgrep、server |
 | `my-claude` | Claude Code を stream-json で使う（`C-c a`） |
 | `my-htnblog` | はてなブログ AtomPub API へ投稿する（`M-x htnblog`） |
-| `my-pty` | ConPTY 経由で対話 TUI を動かす。Windows のみ |
-| `my-ghostel` | libghostty の端末を dynamic module で動かす（`C-c S`）。`my-pty` と比較評価中 |
+| `my-ghostel` | libghostty の端末を dynamic module で動かす（`C-c S`）。EmbTerm に移る間だけ残している |
 | `my-embterm` | EmbTerm の端末を Emacs のウィンドウに重ねて動かす（`C-c s`）。Ghostel の置き換え候補。Windows のみ |
 | `my-ideco` | iDeCo の日次サマリを psql で見る（`M-x check-ideco`） |
 | `my-genpreview` | GenPreview でファイルをプレビューする（`M-x genpreview-open`、dired の `v`）。Windows のみ |
@@ -153,7 +150,7 @@ git clone git@github.com:ponkore/emacs.d.git ~/.emacs.d
 | **`custom.el` は 4 変数だけ** | 設定は `user-lisp/` に置く。`custom.el` に書いても負ける |
 | **メジャーモードは tree-sitter 版** | ただし文法が実際に使えるときだけ `my:treesit-remap` で差し替える |
 | **lexical-binding は全ファイル `t`** | |
-| **Windows で困ることは自前で迂回する** | プロセス生成が遅い → `gitd/`、PTY が無い → `ptyd/`、文字幅 → `site-lisp/eaw.el` |
+| **Windows で困ることは自前で迂回する** | プロセス生成が遅い → `gitd/`、PTY が無い → EmbTerm（`my-embterm`）、文字幅 → `site-lisp/eaw.el` |
 
 ## 機能
 
@@ -217,12 +214,6 @@ markdown 装飾、ヘッダ行のステータス表示。
 コミットバッファで差分を渡し、本文の位置に入れる）。
 → [docs/claude/my-claude.md](docs/claude/my-claude.md)
 
-### 対話 TUI（`M-x my:pty-run` / `M-x my:claude-term`）
-
-Go の `ptyd` が ConPTY を持って子プロセスを動かし、VT を stdio で Emacs に流す。
-表示は `eat`。Windows のみ。
-→ [docs/pty/my-pty.md](docs/pty/my-pty.md)
-
 ### libghostty の端末（`C-c S s`）
 
 **Ghostel** は Ghostty のコア（libghostty-vt 1.0）を Emacs の dynamic module に
@@ -233,7 +224,8 @@ Go の `ptyd` が ConPTY を持って子プロセスを動かし、VT を stdio 
 `M-x shell` では使えなかった **nyagos** も、本物のコンソールが渡るので
 動く見込み（未測）。Kitty graphics を持つので yazi の画像も出る。
 
-**`my-pty`（`ptyd` + `eat`）との比較評価のために並べて入れてある。**
+**普段は EmbTerm（`C-c s`）を使う。** Ghostel の機能に EmbTerm へ移せるものが
+無いかを見るため、しばらく `C-c S` に残している。
 `compile` / `shell-command` / comint を端末に置き換える統合は、既存の操作を
 黙って変えるので**有効にしていない**。
 **module が無ければ初回の `M-x ghostel` が入手方法を尋ねるだけ。**
@@ -538,7 +530,7 @@ jsdoc / json / python / rust / toml / tsx / typescript / yaml の 17 個。
 |---|---|
 | mupdf | `scoop install mupdf`。PDF プレビュー（`mutool`） |
 | Rust toolchain | `gitd/` のビルド |
-| Go toolchain | `ptyd/` のビルド、gopls |
+| Go toolchain | gopls |
 | pandoc | markdown / org のエクスポート |
 | ripgrep | `G` / `C-c p s` |
 | Git 付属の `bash.exe` | Windows の `shell-file-name`（あるときだけ設定） |

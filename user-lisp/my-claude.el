@@ -286,8 +286,8 @@ TAB (`my:claude-toggle-fold') で別バッファに開く。
 幅 2) で決める。claude 側の桁組みには合わせない。セルの中身だけを
 取り出して `string-width' で組み直すので、元の桁は信用しない。
 
-`my-pty' が端末の中で ambiguous を幅 1 に切り替えているのとは
-**逆の話**。あちらは桁を数えているのが conhost なので合わせにいくが、
+端末 (EmbTerm など) が ambiguous を幅 1 で数えるのとは **逆の話**。
+あちらは桁を数えているのが conhost なので合わせにいくが、
 こちらは Emacs 自身が数えるので合わせる必要が無い。"
   :type 'boolean)
 

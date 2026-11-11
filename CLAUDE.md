@@ -513,7 +513,6 @@ tr-ime / Windows 側が IME のトグルとして処理するので、Emacs 側�
 | **golangci-lint を flymake に載せない** | | 1 回が重く `flymake-no-changes-timeout`（1.0 秒）で回す用途に向かない。`C-c C-l` で `compile` |
 | **`elisp-flymake-byte-compile-load-path` に `user-lisp/` を足さない** | 2026-09-09 | 偽診断が別の偽診断に入れ替わるだけで、所要 0.51 → 1.10 秒、`recentf` / `history` を毎回書き戻す副作用が増える → [docs](docs/lsp/eglot-and-flymake.md) |
 | **`libxml-parse-xml-region` に切り替えない**（my-htnblog） | | 名前空間の prefix を落とすので `app:control` が取れなくなる。速度差は 0.001 秒 |
-| **`my:pty-console-font` の既定は nil（フォントを切り替えない）** | | 切り替えると `char-width-table` と同じく **Emacs 全体**のフォントが変わり、編集中のバッファまで巻き込む |
 | **SQLcl は `oracle` を書き換えず `sqlcl` という別製品として足す** | 2026-10-27 | `oracle` は SQL*Plus 前提で、直すと SQL*Plus が使えなくなる。合わないのは `SHOW` を通る 3 つだけなので、`sql-add-product` で足して font-lock と文の開始語は流用するのが安い → [docs](docs/languages/sqlcl.md) |
 | **SQLcl 用の専用パッケージ（`uhellstr/sqlcl-shell`）は入れない** | 2026-10-07 | **PTY 前提**（JLine が自前でエコーする）の Linux 向け。Windows の Emacs はパイプなので条件が逆で、素の comint でそのまま動く |
 | **翻訳に PFN 公式の `plamo-translate-cli` を使わない**（my-translate） | 2026-11-05 | インストール手順が **macOS 前提**で既定バックエンドは MLX（Apple Silicon 専用）。常駐モードは **MCP サーバ**で Emacs から話すには遠回り。**用語集・文脈・敬体/常体を渡すオプションが無く**モデルの機能を塞いでいる。要るのはその下の `llama-server` だけ → [docs](docs/translate/plamo-3-translate-study.md) |
@@ -1245,27 +1244,13 @@ gopls は大文字のドライブレターで返す（§1「Windows 固有」）
   フィールドを nil に戻すこと**（EOF 後 sentinel までの間に届いた行で
   `with-current-buffer` が落ちる） → [docs](docs/claude/my-claude.md)
 
-## `my-pty`
-
-→ [docs/pty/my-pty.md](docs/pty/my-pty.md)
-
-- **`setf (eat-term-parameter …)` は使えない。** バイトコンパイルしない方針なので
-  `setf` の展開は my-pty.el の読み込み時に起きるが、そのとき eat は未ロードで
-  gv のセッタが無い。素の関数 `eat-term-set-parameter` を使う
-- **プリミティブへの advice は native-compile されたコードに効かない。**
-  `term.eln` はプリミティブを直接呼ぶので、symbol の function cell に張った advice を
-  素通りする。包むなら **Lisp の関数**にする
-- **起動時のサイズはメジャーモードを立ててから測る**（`eat-mode` は
-  `kill-all-local-variables` を通る）。ヘッダ行を立てるのもサイズを測る前
-- **eaw.el の幅表のままだと eat が無限ループする。** 端末の中では conhost に合わせて
-  ambiguous を幅 1 にする
-
 ## `my-ghostel`
 
 → [docs/pty/ghostel.md](docs/pty/ghostel.md)
 
-libghostty-vt を dynamic module で動かす端末（Ghostel）。**`my-pty` と
-比較評価中なので、どちらも消さない**（2026-11-09 に導入）。
+libghostty-vt を dynamic module で動かす端末（Ghostel）。2026-11-09 に導入。
+**普段は EmbTerm（`my-embterm`）を使う**が、Ghostel の機能に EmbTerm へ移せるものが
+無いかを見るため**まだ消さない**（2026-11-11。`my-pty` は同じ日に撤去した）。
 
 - **【重要】`ghostel-module-directory` を straight の build ツリーの中に
   戻してはいけない。** 既定（nil）ではパッケージディレクトリ、つまり
@@ -1728,14 +1713,15 @@ fringe のマーカーを最新にしたいときは手で `g` を押す。
 （`vc` / `grep` / `projectile`）にも効いているはずなので、原因が分かれば影響範囲は
 広い。ただし Emacs 本体の問題である可能性が高く、手元で解消できる見込みは薄い。
 
-### `★` と `※` は端末で桁が揃わない（2026-09、`my-pty` のみ）
+### `★` と `※` は Ghostel では潰れる（2026-11-11 更新）
 
-U+2605 と U+203B は手元のどのフォントでも全角。`my-pty` でこれらを含む行だけは
-揃わない。→ [docs/pty/my-pty.md](docs/pty/my-pty.md)
+U+2605 と U+203B は手元のどのフォントでも全角。撤去した `my-pty` では
+これらを含む行の桁が揃わなかった（→ [docs/pty/my-pty.md](docs/pty/my-pty.md)）。
 
-**`my-ghostel` では起きない**（2026-11-09 に実測）。Ghostel はセルに収まらない
-グリフを `min-width` と `height` で押し込むので、**桁は揃う**。残るのは
-`★` / `※` が 47% の高さに潰れる見た目だけ。
+**`my-ghostel` では桁は揃う**（2026-11-09 に実測）。Ghostel はセルに収まらない
+グリフを `min-width` と `height` で押し込むので、`★` / `※` が 47% の高さに
+潰れる見た目だけが残る。**`my-embterm` では潰れない**（縮めずに右隣へ
+はみ出させる。EmbTerm の `embterm-narrow-wide`）。
 → [docs/pty/ghostel.md](docs/pty/ghostel.md)
 
 ### 翻訳は `coopmat` を切っている間、プロンプト処理が 2.3 倍遅い（2026-11-05）

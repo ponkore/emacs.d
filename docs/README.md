@@ -16,7 +16,7 @@ CLAUDE.md の各節から、詳細はここへリンクしてある。逆にこ�
 |---|---|
 | [claude/my-claude.md](claude/my-claude.md) | Claude Code を stream-json で駆動する。会話バッファ・ヘッダ行・許可プロンプト・画像添付・逐次表示 |
 | [magit/gitd-and-autorefresh.md](magit/gitd-and-autorefresh.md) | magit の高速化（`gitd/`）と自動更新（`my-magit-watch`）。1.7 秒 → 50～70 ms |
-| [pty/my-pty.md](pty/my-pty.md) | ConPTY（`ptyd/`）で対話 TUI を動かす。文字幅とフォントの桁揃え |
+| [pty/my-pty.md](pty/my-pty.md) | **撤去済み（2026-11-11）。** ConPTY（`ptyd/`）で対話 TUI を動かしていた記録。文字幅とフォントの桁揃え |
 | [pty/ghostel.md](pty/ghostel.md) | libghostty の端末を dynamic module で動かす（Ghostel）。Windows での導入可否の実測と `my-pty` との比較 |
 | [dired/dired-extensions.md](dired/dired-extensions.md) | 外部アプリ起動・exceldiff / MarkText・リネーム・自動更新・中身の変化への追従 |
 | [text/org-extensions.md](text/org-extensions.md) | `#YM` アーカイブ・`#+FOLD_REGION:`・クリップボード画像と `_assets/` |

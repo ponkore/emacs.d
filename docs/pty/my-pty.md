@@ -6,6 +6,10 @@ ConPTY を持つ Go の常駐プロセスが VT を stdio で流し、表示は 
 
 最終更新: 2026-09-15 ｜ [README.md](../../README.md) ｜ [CLAUDE.md](../../CLAUDE.md)
 
+> **撤去済み（2026-11-11）。** `my-pty.el` と `ptyd/` は消した。端末は EmbTerm
+> （`my-embterm`。`C:/Projects/EmbTerm`）に移った。`M-x my:claude-term` も一緒に無くなった
+> （EmbTerm の `embterm-run` で作り直せる）。以下は経緯の記録として残している。
+
 Windows の Emacs には PTY が無く `make-process` は常にパイプになるので、
 対話 TUI が動かない。`ptyd`（Go）が疑似コンソールを持って子プロセスを
 動かし、VT バイト列を stdio で Emacs に流す。表示は term.el に任せる。

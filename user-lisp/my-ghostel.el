@@ -7,13 +7,9 @@
 ;;     Emacs ──module 呼び出し──> ghostel-module.dll ──ConPTY──> シェル
 ;;                                (libghostty-vt + 専用 Renderer)
 ;;
-;; `my-pty' との住み分け。**どちらを採るかは評価中なので両方残してある。**
-;;
-;;   my-pty  … ptyd.exe (Go) が ConPTY を持ち、VT は eat (Emacs Lisp)。
-;;             プロセス 2 つ。Windows 専用
-;;   ghostel … module 1 つで完結。VT は C/Zig。Kitty graphics と
-;;             Kitty keyboard protocol を持つので yazi の画像まで出る。
-;;             Windows / macOS / Linux / FreeBSD で動く
+;; **普段は EmbTerm (`my-embterm.el'、`C-c s') を使う。** Ghostel の機能に
+;; EmbTerm へ移せるものが無いかを見るため、`C-c S' に残している
+;; (2026-11-11。比べていた `my-pty' (ptyd + eat) は撤去した)。
 ;;
 ;; **module が無ければ何もしない。** 初回の `M-x ghostel' が入手方法を
 ;; 尋ねるだけで、他の設定には影響しない。
@@ -67,7 +63,6 @@ cp932 なので、**実コンソールでも UTF-8 への固定は要る**。"
 ;; ここで直すのは face で間に合う範囲 (罫線や記号)。`ghostel-default' は
 ;; docstring が「Customize this to give ghostel buffers a different … font」
 ;; と言っているとおり、そのための face。**Emacs 全体のフォントは変えない**
-;; (`my:pty-console-font' を既定 nil にしてあるのと同じ理由)。
 ;;
 ;; 実測 (pixel size 15 / セル 8x17):
 ;;
