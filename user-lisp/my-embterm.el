@@ -12,6 +12,10 @@
 ;;   C-c s p   プロジェクトのルートで開く            `embterm-project'
 ;;   C-c s b   端末のバッファの一覧                  `embterm-list-buffers'
 ;;
+;;   M-x nyagos / pwsh / yazi   カレントディレクトリで開く (`*nyagos(dir)*' など)
+;;   M-x claude                 プロジェクトで claude を開く (`*claude-term(proj)*')
+;;                              C-c a a (stream-json) と並べて評価している
+;;
 ;; **Ghostel の置き換え候補として並べて入れてある** (EmbTerm の TODO T-057)。
 ;; 評価の間、Ghostel は `C-c S' に退かせてある (`my-ghostel.el')。
 ;;
@@ -44,7 +48,15 @@
 (declare-function embterm-new "embterm" ())
 (declare-function embterm-project "embterm" (&optional arg))
 (declare-function embterm-list-buffers "embterm" ())
+(declare-function embterm-run "embterm" (command &rest keys))
 (defvar embterm-shell)
+;; M-x claude は my-claude.el のアカウントの選択と環境の組み立てを使い回す
+(declare-function my:claude--project-directory "my-claude" ())
+(declare-function my:claude--read-environment "my-claude" ())
+(declare-function my:claude--config-dir "my-claude" (env))
+(declare-function my:claude--process-environment "my-claude" (config-dir))
+(defvar my:claude-executable)
+(defvar my:claude-model)
 
 (defcustom my:embterm-directory "C:/Apps/embterm/"
   "EmbTerm の配布物を入れたディレクトリ。
@@ -80,6 +92,105 @@ pwsh が無ければ nil (embterm.el の既定 = PATH の pwsh、無ければ cm
         (list pwsh "-NoLogo")))))
 
 ;;; --------------------------------------------------
+;;; アプリを端末で開くコマンド (M-x nyagos / pwsh / yazi / claude)
+;;; --------------------------------------------------
+
+;; どれも `embterm-run' で開き、バッファ名は `*アプリ(ディレクトリ名)*'。
+;; 同じ名前の端末が同じディレクトリで動いていればそこへ切り替え、
+;; C-u を付けると必ず新しく開く (名前に `<2>' などが付く)。
+;; プロセスが終わるとバッファは消える (`embterm-kill-buffer-on-exit')。
+
+(defvar-local my:embterm--start-directory nil
+  "`my:embterm--run' で開いた端末の、起動したディレクトリ。
+`default-directory' は OSC 7 で cd に追従して変わるので、同じ端末かどうかの
+判定には使えない。")
+
+(defun my:embterm--directory-label (dir)
+  "DIR のバッファ名用の名前 (最後の要素。ドライブのルートならそのまま)。"
+  (let* ((path (directory-file-name (expand-file-name dir)))
+         (name (file-name-nondirectory path)))
+    (if (string-empty-p name) path name)))
+
+(defun my:embterm--run (app command dir new &rest keys)
+  "APP の端末で COMMAND を DIR で動かす。バッファを返す。
+バッファ名は `*APP(DIR の名前)*'。NEW が nil で、同じ名前の端末が DIR で
+動いていればそこへ切り替える。KEYS は `embterm-run' に渡す。"
+  (unless (fboundp 'embterm-run)
+    (user-error "EmbTerm がありません (%s)" my:embterm-directory))
+  (let* ((dir (file-name-as-directory (expand-file-name dir)))
+         (name (format "*%s(%s)*" app (my:embterm--directory-label dir)))
+         (existing (get-buffer name)))
+    (if (and existing (not new)
+             (equal (buffer-local-value 'my:embterm--start-directory existing) dir))
+        (progn (pop-to-buffer-same-window existing) existing)
+      (let ((buf (apply #'embterm-run command :directory dir :name name keys)))
+        (with-current-buffer buf
+          (setq my:embterm--start-directory dir))
+        buf))))
+
+(defun my:embterm--executable (program)
+  "PROGRAM の実行ファイルのパス。見つからなければ `user-error'。"
+  (or (executable-find program)
+      (user-error "%s が見つかりません (PATH を確かめてください)" program)))
+
+(defun nyagos (&optional new)
+  "`default-directory' で nyagos を EmbTerm の端末に開く。
+バッファ名は `*nyagos(ディレクトリ名)*'。NEW (前置引数) なら必ず新しく開く。"
+  (interactive "P")
+  (my:embterm--run "nyagos" (list (my:embterm--executable "nyagos")) default-directory new))
+
+(defun pwsh (&optional new)
+  "`default-directory' で pwsh を EmbTerm の端末に開く。
+`M-x shell' と同じ初期化スクリプトを読ませる (`my:embterm--default-shell')。
+バッファ名は `*pwsh(ディレクトリ名)*'。NEW (前置引数) なら必ず新しく開く。"
+  (interactive "P")
+  (my:embterm--run "pwsh"
+                   (or (my:embterm--default-shell)
+                       (list (my:embterm--executable "pwsh") "-NoLogo"))
+                   default-directory new))
+
+(defun yazi (&optional new)
+  "`default-directory' で yazi を EmbTerm の端末に開く。
+バッファ名は `*yazi(ディレクトリ名)*'。NEW (前置引数) なら必ず新しく開く。"
+  (interactive "P")
+  (my:embterm--run "yazi" (list (my:embterm--executable "yazi")) default-directory new))
+
+(defun claude (&optional new)
+  "プロジェクトのディレクトリで claude の対話 TUI を EmbTerm の端末に開く。
+
+ディレクトリは `C-c a a' (`my:claude') と同じ決め方 (projectile のルート。
+決まらなければ確認する)。アカウント (`my:claude-environments') も
+`C-c a a' と同じく選ばせ、CLAUDE_CONFIG_DIR を差し替えた環境で起動する。
+ヘッダ行に環境とディレクトリを出す。
+
+バッファ名は `*claude-term(プロジェクト名)*'。`*claude(…)*' にしないのは、
+`C-c a a' の会話バッファと同じ名前になり、`my:claude--buffer-for' が
+こちらのバッファを会話の書き込み先に使ってしまうため。
+NEW (前置引数) なら必ず新しく開く。"
+  (interactive "P")
+  (require 'my-claude)
+  (let* ((dir (file-name-as-directory (my:claude--project-directory)))
+         (name (format "*claude-term(%s)*" (my:embterm--directory-label dir)))
+         (existing (get-buffer name)))
+    (if (and existing (not new)
+             (equal (buffer-local-value 'my:embterm--start-directory existing)
+                    (file-name-as-directory (expand-file-name dir))))
+        (progn (pop-to-buffer-same-window existing) existing)
+      (let* ((env (my:claude--read-environment))
+             (buf (my:embterm--run
+                   "claude-term"
+                   (append (list my:claude-executable)
+                           (when my:claude-model (list "--model" my:claude-model)))
+                   dir t
+                   ;; CLAUDE_CONFIG_DIR は「設定しない」ではなく「消す」必要がある
+                   ;; (Emacs が継承していると別のアカウントに繋がる。my-claude.el と同じ)
+                   :environment (my:claude--process-environment (my:claude--config-dir env)))))
+        (with-current-buffer buf
+          (setq header-line-format
+                (format " claude: %s | %s" env (abbreviate-file-name (directory-file-name dir)))))
+        buf))))
+
+;;; --------------------------------------------------
 ;;; 有効化 (Windows で配布物があるときだけ)
 ;;; --------------------------------------------------
 
@@ -89,6 +200,7 @@ pwsh が無ければ nil (embterm.el の既定 = PATH の pwsh、無ければ cm
   (autoload 'embterm-new "embterm" "新しい端末を開く。" t)
   (autoload 'embterm-project "embterm" "プロジェクトのルートで端末を開く。" t)
   (autoload 'embterm-list-buffers "embterm" "端末のバッファの一覧。" t)
+  (autoload 'embterm-run "embterm" "コマンドを端末で起動する。")
   ;; embterm.el はまだ読まれていないが、defcustom は既に値があれば上書きしない。
   ;; フォント (HackGen Console NF → Cascadia Mono → Consolas) と大きさ (12pt) は
   ;; module の既定のまま。EmbTerm は Emacs の fontset を通らずに DirectWrite で

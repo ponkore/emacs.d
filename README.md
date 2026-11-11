@@ -242,6 +242,13 @@ markdown 装飾、ヘッダ行のステータス表示。
 配布物は EmbTerm のリポジトリで `cargo xtask install` を実行すると `C:/Apps/embterm/` に置かれる。
 **無ければ何もしない。** シェルは `M-x shell` と同じ pwsh（`my-shell.el`）。
 
+アプリを直接開くコマンドもある（同じディレクトリの端末が動いていれば切り替え、`C-u` で新しく開く）。
+
+| | |
+|---|---|
+| `M-x nyagos` / `M-x pwsh` / `M-x yazi` | カレントディレクトリで開く（`*nyagos(ディレクトリ名)*` など） |
+| `M-x claude` | プロジェクトで claude の TUI を開く（`*claude-term(プロジェクト名)*`）。アカウントは `C-c a a` と同じく選ぶ。**`C-c a a`（stream-json）と並べて評価中** |
+
 ### dired の拡張
 
 Excel ブックは OS の関連付けに渡す、`C-c x` で exceldiff、`C-c m` で MarkText、

@@ -1313,6 +1313,13 @@ EmbTerm（`C:/Projects/EmbTerm`。設計と決定事項はあちらの `docs/`�
   変えるなら `embterm-font-family` / `embterm-font-size`
 - **バッファはプレースホルダ。** 画面の文字は `embterm-screen-text`、
   遡って読む・`C-s` するのは copy モード（`C-c C-k`）
+- **【重要】`M-x claude` のバッファ名を `*claude(…)*` にしてはいけない。**
+  `C-c a a` の会話バッファと同じ名前になり、`my:claude--buffer-for` は
+  「自分のセッションが持っていない同名のバッファ」をそのまま使うので、
+  **会話が端末のバッファに書き込まれる**。`*claude-term(…)*` にしてある
+- **アプリのコマンド（`nyagos` / `pwsh` / `yazi` / `claude`）が「同じ端末」かは
+  起動したディレクトリ（`my:embterm--start-directory`）で見る。** `default-directory`
+  は OSC 7 で `cd` に追従して変わるので使えない
 
 ## `my-htnblog`
 
