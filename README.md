@@ -136,7 +136,8 @@ git clone git@github.com:ponkore/emacs.d.git ~/.emacs.d
 | `my-claude` | Claude Code を stream-json で使う（`C-c a`） |
 | `my-htnblog` | はてなブログ AtomPub API へ投稿する（`M-x htnblog`） |
 | `my-pty` | ConPTY 経由で対話 TUI を動かす。Windows のみ |
-| `my-ghostel` | libghostty の端末を dynamic module で動かす（`C-c s`）。`my-pty` と比較評価中 |
+| `my-ghostel` | libghostty の端末を dynamic module で動かす（`C-c S`）。`my-pty` と比較評価中 |
+| `my-embterm` | EmbTerm の端末を Emacs のウィンドウに重ねて動かす（`C-c s`）。Ghostel の置き換え候補。Windows のみ |
 | `my-ideco` | iDeCo の日次サマリを psql で見る（`M-x check-ideco`） |
 | `my-genpreview` | GenPreview でファイルをプレビューする（`M-x genpreview-open`、dired の `v`）。Windows のみ |
 | `my-translate` | ローカル LLM（PLaMo 3 Translate）で翻訳する（`C-c T`）。モデルが無ければ無効 |
@@ -222,7 +223,7 @@ Go の `ptyd` が ConPTY を持って子プロセスを動かし、VT を stdio 
 表示は `eat`。Windows のみ。
 → [docs/pty/my-pty.md](docs/pty/my-pty.md)
 
-### libghostty の端末（`C-c s s`）
+### libghostty の端末（`C-c S s`）
 
 **Ghostel** は Ghostty のコア（libghostty-vt 1.0）を Emacs の dynamic module に
 載せた端末エミュレータ。VT の解釈と描画をネイティブ側が持ち、**PTY も module が
@@ -237,6 +238,17 @@ Go の `ptyd` が ConPTY を持って子プロセスを動かし、VT を stdio 
 黙って変えるので**有効にしていない**。
 **module が無ければ初回の `M-x ghostel` が入手方法を尋ねるだけ。**
 → [docs/pty/ghostel.md](docs/pty/ghostel.md)
+
+### EmbTerm の端末（`C-c s s`）
+
+**EmbTerm**（`C:/Projects/EmbTerm`）は libghostty-vt で VT を解釈し、Direct2D で描いた
+子ウィンドウを Emacs のウィンドウに重ねる端末。描画とキー入力のエンコードを module が持つので、
+桁ずれ・罫線やアイコンの潰れが起きず、IME の変換ウィンドウもカーソルの位置に出る。
+`C-x 2` で同じ端末を 2 つのペインに出し、別々の位置までスクロールできる。
+
+**Ghostel の置き換え候補として並べて入れてある**（Ghostel は比べる間 `C-c S`）。
+配布物は EmbTerm のリポジトリで `cargo xtask install` を実行すると `C:/Apps/embterm/` に置かれる。
+**無ければ何もしない。** シェルは `M-x shell` と同じ pwsh（`my-shell.el`）。
 
 ### dired の拡張
 
@@ -419,7 +431,8 @@ machine 192.168.1.5 port 5432 login postgres password ********
 | `C-c l` | eglot（`r` rename / `a` code-actions / `f` format / `d` doc / `h` inlay hints / `R` reconnect / `q` shutdown） |
 | `C-c !` | flymake（`n` / `p` 移動、`l` / `P` 一覧、`h` hydra） |
 | `C-c p` | projectile（`s` は検索 dwim） |
-| `C-c s` | Ghostel の端末（`s` 開く / `n` 新規 / `p` プロジェクト / `b` 一覧） |
+| `C-c s` | EmbTerm の端末（`s` 開く / `n` 新規 / `p` プロジェクト / `b` 一覧） |
+| `C-c S` | Ghostel の端末（同じ割り当て。EmbTerm と比べる間だけ） |
 | `C-c T` | 翻訳（`t` リージョン／段落 / `c` コメントを overlay で / `m` markdown を構造ごと / `h` `*Help*` の散文 / `x` コメントの訳を消す / `s` サーバの状態 / `k` サーバ停止。`C-u` で丁寧なモデル） |
 | `C-x i` | yasnippet（`TAB` expand / `i` insert / `n` new / `v` visit / `l` tables / `g` reload） |
 | `C-x t` | タブ（`0` 閉じる / `1` 他を閉じる / `2` 新規 / `RET` 選択 / `u` 戻す / `r` 改名。組み込み） |

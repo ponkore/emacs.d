@@ -1310,6 +1310,25 @@ libghostty-vt を dynamic module で動かす端末（Ghostel）。**`my-pty` �
   端末も空のグリッドを描くので、**改行だけで 76 文字になる**
   （実測で「プロセスは生きているのに無言」と誤診した）
 
+## `my-embterm`
+
+EmbTerm（`C:/Projects/EmbTerm`。設計と決定事項はあちらの `docs/`）の端末。
+**Ghostel の置き換え候補として並べて入れてある**（2026-11-11。Ghostel は `C-c S` に退かせた）。
+
+- **【重要】`my:embterm-directory` を EmbTerm の `target/dist` に向けない。**
+  embterm.el は module 本体を一時ディレクトリに写してから読むが、`conpty.dll` と
+  `OpenConsole.exe` は配布物の場所のものを使い続けるのでロックされ、
+  **EmbTerm の `cargo xtask dist` と試験が上書きに失敗する**。配布物は
+  `cargo xtask install`（使用中のものは `.old-<時刻>` に退避して入れ替える）で
+  `C:/Apps/embterm/` に置く
+- **新しい module に入れ替わるのは Emacs を再起動したとき**（module は unload できない）。
+  `ec.sh` で起動中の Emacs に `embterm.el` を読み直させても、module は古いまま
+- **フォントは Emacs の fontset を通らない**（DirectWrite で自分で描く）。
+  `my-appearance.el` の Nerd Font の調整も `ghostel-default` のような face も効かない。
+  変えるなら `embterm-font-family` / `embterm-font-size`
+- **バッファはプレースホルダ。** 画面の文字は `embterm-screen-text`、
+  遡って読む・`C-s` するのは copy モード（`C-c C-k`）
+
 ## `my-htnblog`
 
 → [docs/htnblog/my-htnblog.md](docs/htnblog/my-htnblog.md)

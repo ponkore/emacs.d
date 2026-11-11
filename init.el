@@ -183,6 +183,7 @@
 (require 'my-htnblog)   ; はてなブログへ投稿する
 (require 'my-pty)   ; ConPTY 経由で対話 TUI を動かす (ptyd)
 (require 'my-ghostel)   ; libghostty の端末を dynamic module で動かす
+(require 'my-embterm)   ; EmbTerm の端末を Emacs のウィンドウに重ねて動かす
 (require 'my-oracle)   ; Oracle を常駐プロセス経由で使う (oracled)
 (require 'my-ideco)   ; iDeCo の日次サマリを psql で見る (M-x check-ideco)
 (require 'my-genpreview)   ; GenPreview でファイルをプレビューする

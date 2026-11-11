@@ -92,10 +92,12 @@ cp932 なので、**実コンソールでも UTF-8 への固定は要る**。"
   ;; (init.el が :straight を :if より後に処理させてある)。
   :if module-file-suffix
   :straight t
-  :bind (("C-c s s" . ghostel)
-         ("C-c s n" . ghostel-new)
-         ("C-c s p" . ghostel-project)
-         ("C-c s b" . ghostel-list-buffers))
+;; `C-c s' は EmbTerm (`my-embterm.el') に譲った。比べる間はこちらを `C-c S' に置く
+  ;; (EmbTerm の TODO T-057。Ghostel を外すかは T-058 で決める)。
+  :bind (("C-c S s" . ghostel)
+         ("C-c S n" . ghostel-new)
+         ("C-c S p" . ghostel-project)
+         ("C-c S b" . ghostel-list-buffers))
   :custom
   ;; 【重要】module の置き場を straight の build ツリーの外に出す。
   ;; 既定 (nil) ではパッケージディレクトリ = straight/build/ghostel/ に
