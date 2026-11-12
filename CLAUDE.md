@@ -1414,8 +1414,10 @@ Claude Code から同じ DB を引くための MCP サーバ。`.claude/mcp/idec
   起動時刻）を書き、次の起動時に持ち主が死んだものを消している。
   **`claude mcp list` のヘルスチェックも 1 つ残す**（次の起動で消える）
 - **ラッパは stdout に何も書かない**（MCP の通信路）。診断は stderr へ
-- **gpg は Git 付属のもの（`usr\bin`）を避ける。** 鍵束が別なので復号できない。
-  Emacs（`epg-gpg-program`）と同じ scoop 版を使う
+- **gpg は Git for Windows 付属のもの（`C:\Program Files\Git\usr\bin`）。**
+  Emacs（`epg-gpg-program`）も同じものに解決される。鍵束は `~/.gnupg`
+  （2026-11-12 に Scoop の git を撤去して寄せた。以前ここにあった
+  「Git 付属の gpg は鍵束が別」は実測で誤りだった）
 - `.mcp.json` の承認は `.claude/settings.local.json` の
   `enabledMcpjsonServers` で済ませてある（マシン固有なので git 管理外）。
   **pwsh と Docker が無いマシン（mac / Linux）では起動に失敗するだけ**

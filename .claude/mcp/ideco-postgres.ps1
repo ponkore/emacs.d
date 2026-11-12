@@ -25,12 +25,11 @@ function Fail([string]$msg) {
     exit 1
 }
 
-# Emacs (epg) と同じ gpg を使う。Git 付属の gpg (usr\bin) は鍵束が別
-# (MSYS の ~/.gnupg) なので、PATH で先に当たっても復号できない。
+# Emacs (epg) と同じ gpg を使う。Git for Windows 付属のもの
+# (C:\Program Files\Git\usr\bin) で、鍵束は ~/.gnupg。
 $Gpg = $env:IDECO_GPG
 if (-not $Gpg) {
-    $Gpg = Get-Command gpg -All -CommandType Application -ErrorAction SilentlyContinue |
-        Where-Object { $_.Source -notmatch '\\Git\\usr\\bin\\' } |
+    $Gpg = Get-Command gpg -CommandType Application -ErrorAction SilentlyContinue |
         Select-Object -First 1 -ExpandProperty Source
 }
 if (-not $Gpg) { Fail 'gpg が見つからない (IDECO_GPG で指定できる)' }
