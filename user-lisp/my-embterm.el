@@ -19,21 +19,29 @@
 ;; **Ghostel の置き換え候補として並べて入れてある** (EmbTerm の TODO T-057)。
 ;; 評価の間、Ghostel は `C-c S' に退かせてある (`my-ghostel.el')。
 ;;
-;; 配布物は EmbTerm のリポジトリで `cargo xtask install' を実行すると
-;; `my:embterm-directory' に置かれる。embterm.el は同じディレクトリの
-;; embterm_module.dll と conpty.dll を読む。初めて端末を開くときに読み込まれる
-;; ので、ここでは autoload を張るだけにしてある (`my-genpreview.el' と同じ形)。
+;; 配布物は `M-x my:embterm-update' で入れる (README の「EmbTerm の端末」)。
+;; EmbTerm のリポジトリ (`my:embterm-source-directory') で `cargo xtask dist'
+;; が作った target/dist/ を `my:embterm-directory' (~/.emacs.d/embterm/。
+;; git の管理外) に写す。C-u を付けると先に `cargo xtask dist' を走らせる。
+;; embterm.el は同じディレクトリの embterm_module.dll と conpty.dll を読む。
+;; 初めて端末を開くときに読み込まれるので、ここでは autoload を張るだけに
+;; してある (`my-genpreview.el' と同じ形)。
+;;
+;; 【重要】target/dist を直接読ませない。conpty.dll と OpenConsole.exe は
+;; 配布物の場所のものを使い続けるのでロックされ、EmbTerm の
+;; `cargo xtask dist' と試験が上書きに失敗する。だから写して使う。
 ;;
 ;; 【重要】Emacs は module を unload できない。embterm.el は DLL を
 ;; 版付きの名前で一時ディレクトリにコピーしてから読むので、Emacs を
-;; 動かしたまま install し直せるが、**新しい module に入れ替わるのは
-;; Emacs を再起動したとき**。conpty.dll と OpenConsole.exe は配布物の場所の
-;; ものを使い続けるので、install は使用中のものを `.old-<時刻>' に退避して
-;; 置き換える (次の install で、使われなくなったものから消える)。
+;; 動かしたまま写し直せるが、**新しい module に入れ替わるのは
+;; Emacs を再起動したとき**。conpty.dll と OpenConsole.exe は使用中だと
+;; 上書きできないので、`my:embterm-update' は `.old-<時刻>' に名前を変えて
+;; から写す (使用中のファイルも名前は変えられる。次に写すとき、使われなく
+;; なったものから消す)。
 ;;
 ;; use-package を使っていないのは `my-genpreview.el' と同じ理由
 ;; (`:load-path' が `:if' より前に処理され、Windows 以外でも
-;; "C:/Apps/embterm/" が load-path に入ってしまう)。
+;; 配布物の場所が load-path に入ってしまう)。
 
 ;;; Code:
 
@@ -58,10 +66,15 @@
 (defvar my:claude-executable)
 (defvar my:claude-model)
 
-(defcustom my:embterm-directory "C:/Apps/embterm/"
-  "EmbTerm の配布物を入れたディレクトリ。
-embterm.el、embterm_module.dll、conpty.dll、x64/OpenConsole.exe を置く
-\(EmbTerm のリポジトリの `cargo xtask install' の既定の置き場)。"
+(defcustom my:embterm-directory (expand-file-name "embterm/" user-emacs-directory)
+  "EmbTerm の配布物を入れたディレクトリ (git の管理外)。
+embterm.el、embterm_module.dll、conpty.dll、x64/OpenConsole.exe、
+etc/embterm.{ps1,bash,lua} (シェル統合) を置く。`my:embterm-update' が
+`my:embterm-source-directory' の target/dist/ から写す。"
+  :type 'directory)
+
+(defcustom my:embterm-source-directory "C:/Projects/EmbTerm/"
+  "EmbTerm のリポジトリ。`my:embterm-update' はここの target/dist/ を写す。"
   :type 'directory)
 
 (defun my:embterm-available-p ()
@@ -191,10 +204,97 @@ NEW (前置引数) なら必ず新しく開く。"
         buf))))
 
 ;;; --------------------------------------------------
+;;; 配布物を入れる (M-x my:embterm-update)
+;;; --------------------------------------------------
+
+(defun my:embterm--dist-directory ()
+  "EmbTerm のリポジトリの配布物 (target/dist/)。"
+  (expand-file-name "target/dist/" my:embterm-source-directory))
+
+(defun my:embterm--same-file-p (a b)
+  "ファイル A と B の中身が同じか。"
+  (and (file-exists-p b)
+       (= (file-attribute-size (file-attributes a))
+          (file-attribute-size (file-attributes b)))
+       (equal (with-temp-buffer (set-buffer-multibyte nil)
+                                (insert-file-contents-literally a) (secure-hash 'sha1 (current-buffer)))
+              (with-temp-buffer (set-buffer-multibyte nil)
+                                (insert-file-contents-literally b) (secure-hash 'sha1 (current-buffer))))))
+
+(defun my:embterm--copy-dist ()
+  "target/dist/ を `my:embterm-directory' に写す。写したファイルの数などを返す。
+
+中身が同じファイルは写さない。使用中 (Emacs が読み込んだ conpty.dll、
+動いている OpenConsole.exe) で上書きできないものは `<名前>.old-<時刻>' に
+名前を変えてから写す。前に退避したものは、使われなくなっていれば消す。"
+  (let* ((src (my:embterm--dist-directory))
+         (dst my:embterm-directory)
+         (stamp (format-time-string "%Y%m%d%H%M%S"))
+         (copied 0) (same 0) (moved nil))
+    (unless (file-exists-p (expand-file-name "embterm.el" src))
+      (user-error "EmbTerm の配布物がありません: %s (`cargo xtask dist' か C-u M-x my:embterm-update)" src))
+    (make-directory dst t)
+    ;; 前に退避したもの (使用中なら消せないので残す)
+    (dolist (old (directory-files-recursively dst "\\.old-[0-9]+\\'"))
+      (ignore-errors (delete-file old)))
+    (dolist (file (directory-files-recursively src ""))
+      (let ((to (expand-file-name (file-relative-name file src) dst)))
+        (make-directory (file-name-directory to) t)
+        (if (my:embterm--same-file-p file to)
+            (setq same (1+ same))
+          (condition-case nil
+              (copy-file file to t t)
+            (file-error
+             ;; 使用中は書けないが、名前は変えられる
+             (let ((aside (format "%s.old-%s" to stamp)))
+               (rename-file to aside t)
+               (copy-file file to t t)
+               (push (file-name-nondirectory to) moved))))
+          (setq copied (1+ copied)))))
+    (list copied same moved)))
+
+(defun my:embterm-update (&optional build)
+  "EmbTerm の配布物 (リポジトリの target/dist/) を `my:embterm-directory' に写す。
+BUILD (前置引数) なら、先に `cargo xtask dist' を走らせてから写す
+\(裏で動かし、終わったら写す。出力は *embterm-dist* バッファ)。
+
+新しい module に入れ替わるのは Emacs を再起動したとき。初めて入れたときは
+その場で使えるようにする。"
+  (interactive "P")
+  (if (not build)
+      (my:embterm--update-1)
+    (let ((default-directory my:embterm-source-directory)
+          (buf (get-buffer-create "*embterm-dist*")))
+      (with-current-buffer buf (let ((inhibit-read-only t)) (erase-buffer)))
+      (message "EmbTerm: cargo xtask dist を走らせています (*embterm-dist*)...")
+      (make-process
+       :name "embterm-dist" :buffer buf :noquery t
+       :command '("cargo" "xtask" "dist")
+       :sentinel (lambda (proc _event)
+                   (when (memq (process-status proc) '(exit signal))
+                     (if (zerop (process-exit-status proc))
+                         (my:embterm--update-1)
+                       (display-buffer buf)
+                       (message "EmbTerm: cargo xtask dist が失敗しました (*embterm-dist*)"))))))))
+
+(defun my:embterm--update-1 ()
+  "写して、結果を知らせる。"
+  (let ((first (not (my:embterm-available-p))))
+    (pcase-let ((`(,copied ,same ,moved) (my:embterm--copy-dist)))
+      (when first (my:embterm--activate))
+      (message "EmbTerm: %d 個写した (%d 個は同じ)%s%s"
+               copied same
+               (if moved (format "。使用中のものは退避して入れ替えた: %s" (string-join moved " ")) "")
+               (cond (first "。使えるようになった")
+                     ((and (> copied 0) (featurep 'embterm)) "。新しい module は Emacs の再起動後に使われる")
+                     (t ""))))))
+
+;;; --------------------------------------------------
 ;;; 有効化 (Windows で配布物があるときだけ)
 ;;; --------------------------------------------------
 
-(when (my:embterm-available-p)
+(defun my:embterm--activate ()
+  "EmbTerm の autoload とキーを張る (配布物があるときだけ)。"
   (add-to-list 'load-path (directory-file-name my:embterm-directory))
   (autoload 'embterm "embterm" "端末に切り替える。無ければ開く。" t)
   (autoload 'embterm-new "embterm" "新しい端末を開く。" t)
@@ -211,6 +311,9 @@ NEW (前置引数) なら必ず新しく開く。"
   (keymap-global-set "C-c s n" #'embterm-new)
   (keymap-global-set "C-c s p" #'embterm-project)
   (keymap-global-set "C-c s b" #'embterm-list-buffers))
+
+(when (my:embterm-available-p)
+  (my:embterm--activate))
 
 (provide 'my-embterm)
 ;;; my-embterm.el ends here

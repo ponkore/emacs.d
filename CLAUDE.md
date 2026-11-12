@@ -1304,8 +1304,10 @@ EmbTerm（`C:/Projects/EmbTerm`。設計と決定事項はあちらの `docs/`�
   embterm.el は module 本体を一時ディレクトリに写してから読むが、`conpty.dll` と
   `OpenConsole.exe` は配布物の場所のものを使い続けるのでロックされ、
   **EmbTerm の `cargo xtask dist` と試験が上書きに失敗する**。配布物は
-  `cargo xtask install`（使用中のものは `.old-<時刻>` に退避して入れ替える）で
-  `C:/Apps/embterm/` に置く
+  **`M-x my:embterm-update`** が `target/dist` から `~/.emacs.d/embterm/`（git の管理外）に写す
+  （`C-u` で先に `cargo xtask dist`。使用中のものは `.old-<時刻>` に名前を変えて入れ替える。
+  Windows では使用中の DLL・exe も名前は変えられる）。手順は README の「EmbTerm の端末」。
+  EmbTerm 側の `cargo xtask install` は廃止した（2026-11-12）
 - **新しい module に入れ替わるのは Emacs を再起動したとき**（module は unload できない）。
   `ec.sh` で起動中の Emacs に `embterm.el` を読み直させても、module は古いまま
 - **フォントは Emacs の fontset を通らない**（DirectWrite で自分で描く）。

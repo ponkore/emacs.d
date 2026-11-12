@@ -46,3 +46,7 @@
 # --- Claude Code (2026-09) ---
 # skills/ は共有する。settings.local.json はマシン固有の許可リストなので除く。
 /.claude/settings.local.json
+
+# --- embterm (2026-11) ---
+# EmbTerm の配布物（M-x my:embterm-update が EmbTerm のリポジトリの target/dist から写す）
+/embterm/

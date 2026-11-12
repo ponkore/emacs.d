@@ -239,8 +239,29 @@ markdown 装飾、ヘッダ行のステータス表示。
 `C-x 2` で同じ端末を 2 つのペインに出し、別々の位置までスクロールできる。
 
 **Ghostel の置き換え候補として並べて入れてある**（Ghostel は比べる間 `C-c S`）。
-配布物は EmbTerm のリポジトリで `cargo xtask install` を実行すると `C:/Apps/embterm/` に置かれる。
+配布物（module・embterm.el・ConPTY・シェル統合）は `~/.emacs.d/embterm/`（git の管理外）に置く。
 **無ければ何もしない。** シェルは `M-x shell` と同じ pwsh（`my-shell.el`）。
+
+**セットアップ・更新の手順**（配布物は EmbTerm のリポジトリ `C:/Projects/EmbTerm` で作る）:
+
+1. 初めてなら、EmbTerm のリポジトリで部品を取る: `cargo xtask fetch-ghostty-vt` と `cargo xtask fetch-conpty`
+   （zig 0.17 が要る。詳しくは EmbTerm の `xtask/src/main.rs` の冒頭）
+2. Emacs で **`C-u M-x my:embterm-update`**。リポジトリで `cargo xtask dist` を裏で走らせ（出力は `*embterm-dist*`）、
+   できた `target/dist/` を `~/.emacs.d/embterm/` に写す。dist を自分で作ったときは `C-u` なしで写すだけ
+3. 初めて入れたときはその場で `C-c s s` が使えるようになる。**更新したときは Emacs を再起動する**
+   （module は unload できない）。使用中の `conpty.dll` / `OpenConsole.exe` は `.old-<時刻>` に名前を変えて入れ替え、
+   次に写すときに消える
+
+場所は `my:embterm-source-directory`（リポジトリ）と `my:embterm-directory`（写す先）で変えられる。
+**`my:embterm-directory` を `target/dist` に向けない**（使用中のファイルがロックされ、EmbTerm の dist と試験が失敗する）。
+
+**シェル統合**: pwsh は `etc/pwsh-emacs-shell.ps1` が `~/.emacs.d/embterm/etc/embterm.ps1` を読み込むので、
+`embterm_find_file パス` / `embterm_dired [パス]` で Emacs の別のウィンドウに開け、プロンプトの境界（OSC 133）で
+`C-c C-p` / `C-c C-n`（前後のプロンプトへ）・`C-c C-o`（直前のコマンドの出力をコピー）が効き、0 でない終了コードが
+モードラインに出る。nyagos は `~/.config/nyagos/nyagos.lua` のプロンプトの設定の後に
+`if nyagos.env.TERM_PROGRAM == "EmbTerm" then dofile(nyagos.env.USERPROFILE .. "/.emacs.d/embterm/etc/embterm.lua") end`、
+bash は `~/.bashrc` に `[ "$TERM_PROGRAM" = EmbTerm ] && . ~/.emacs.d/embterm/etc/embterm.bash` を足す
+（どちらもこのリポジトリの外なので手で足す）。
 
 アプリを直接開くコマンドもある（同じディレクトリの端末が動いていれば切り替え、`C-u` で新しく開く）。
 

@@ -19,3 +19,10 @@ function global:prompt {
     $dir = $PWD.ProviderPath.Replace([char]92, '/').Replace(' ', '%20')
     "$([char]27)]7;file:///$dir$([char]7)" + (& $global:EmacsStarshipPrompt)
 }
+
+# EmbTerm のシェル統合（embterm_find_file などで Emacs を呼ぶ・プロンプトの境界 OSC 133）。
+# EmbTerm の端末の中だけ。prompt を包むので starship と OSC 7 の後に読み込む。
+# 配布物は M-x my:embterm-update が ~/.emacs.d/embterm/ に写す（my-embterm.el）。
+$embtermShell = Join-Path $PSScriptRoot '..\embterm\etc\embterm.ps1'
+if ($env:TERM_PROGRAM -eq 'EmbTerm' -and (Test-Path $embtermShell)) { . $embtermShell }
+Remove-Variable embtermShell
