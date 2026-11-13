@@ -1297,9 +1297,29 @@ libghostty-vt を dynamic module で動かす端末（Ghostel）。2026-11-09 �
 
 ## `my-embterm`
 
-EmbTerm（`C:/Projects/EmbTerm`。設計と決定事項はあちらの `docs/`）の端末。
+EmbTerm（`my:embterm-source-directory`。設計と決定事項はあちらの `docs/`）の端末。
 **Ghostel の置き換え候補として並べて入れてある**（2026-11-11。Ghostel は `C-c S` に退かせた）。
+**Windows と macOS で動く**（2026-11-13 に macOS 対応。EmbTerm の T-121〜T-130）。
 
+- **OS の違いは embterm.el が吸収する。こちらは「写して autoload を張る」だけ。**
+  違うのは 3 点（重ねるもの = 子 HWND / `CAMetalLayer`、module = `.dll` / `.dylib`、
+  PTY = 同梱の ConPTY / OS の PTY）。**こちら側で OS を見ているのは
+  `my:embterm-available-p`・既定のシェル・フォントの大きさ・実行ビットの 4 か所だけ**
+- **【重要】`copy-file` に実行ビットを任せない**（2026-11-13）。`my:embterm--copy-dist`
+  は PRESERVE-PERMISSIONS を渡していなかったので、**macOS では写した `embterm`
+  （単体の実行ファイル）の実行ビットが落ちる**。Windows では関係ないため気づけない。
+  `set-file-modes` でモードだけ合わせている（`copy-file` の第 6 引数は ACL まで
+  写そうとするので使わない）
+- **既定のシェルは OS で変える**（`my:embterm--default-shell`）。Windows は
+  `M-x shell` と同じ pwsh + `my:pwsh-emacs-init-file`、macOS は `$SHELL` の
+  ログインシェル（`-l`）。**macOS のシェル統合は `~/.zshrc` に 1 行足す**
+  （`etc/embterm.zsh` を source する。EmbTerm の T-131 で足した。Windows は
+  `etc/pwsh-emacs-shell.ps1` が自動で読むので手当て不要）。
+  **OSC 7（`cd` の追従）を出すのは zsh 版だけの役目**（pwsh / bash では
+  利用者のプロンプト側が出しているが、starship は出さない）
+- **シェルを開くコマンドの名前は OS で変わる**（`my:embterm-shell` の別名が
+  Windows では `pwsh`、他では `zsh`）。中身は 1 つ。`nyagos` は Windows の
+  シェルなので、macOS では `my:embterm--executable` が「見つかりません」と言う
 - **【重要】`my:embterm-directory` を EmbTerm の `target/dist` に向けない。**
   embterm.el は module 本体を一時ディレクトリに写してから読むが、`conpty.dll` と
   `OpenConsole.exe` は配布物の場所のものを使い続けるのでロックされ、
@@ -1310,16 +1330,18 @@ EmbTerm（`C:/Projects/EmbTerm`。設計と決定事項はあちらの `docs/`�
   EmbTerm 側の `cargo xtask install` は廃止した（2026-11-12）
 - **新しい module に入れ替わるのは Emacs を再起動したとき**（module は unload できない）。
   `ec.sh` で起動中の Emacs に `embterm.el` を読み直させても、module は古いまま
-- **フォントは Emacs の fontset を通らない**（DirectWrite で自分で描く）。
-  `my-appearance.el` の Nerd Font の調整も `ghostel-default` のような face も効かない。
-  変えるなら `embterm-font-family` / `embterm-font-size`
+- **フォントは Emacs の fontset を通らない**（Windows は DirectWrite、macOS は
+  CoreText で自分で描く）。`my-appearance.el` の Nerd Font の調整も
+  `ghostel-default` のような face も効かない。変えるなら `embterm-font-family` /
+  `embterm-font-size`。**大きさだけは本文に合わせて macOS で 16pt にしている**
+  （module の既定は 12pt。Windows の本文は 11.6pt なので既定のまま）
 - **バッファはプレースホルダ。** 画面の文字は `embterm-screen-text`、
   遡って読む・`C-s` するのは copy モード（`C-c C-k`）
 - **【重要】`M-x claude` のバッファ名を `*claude(…)*` にしてはいけない。**
   `C-c a a` の会話バッファと同じ名前になり、`my:claude--buffer-for` は
   「自分のセッションが持っていない同名のバッファ」をそのまま使うので、
   **会話が端末のバッファに書き込まれる**。`*claude-term(…)*` にしてある
-- **アプリのコマンド（`nyagos` / `pwsh` / `yazi` / `claude`）が「同じ端末」かは
+- **アプリのコマンド（`nyagos` / `pwsh`（`zsh`） / `yazi` / `claude`）が「同じ端末」かは
   起動したディレクトリ（`my:embterm--start-directory`）で見る。** `default-directory`
   は OSC 7 で `cd` に追従して変わるので使えない
 

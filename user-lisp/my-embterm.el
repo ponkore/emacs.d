@@ -1,18 +1,26 @@
 ;;; my-embterm.el --- EmbTerm の端末を Emacs のウィンドウに重ねて動かす  -*- lexical-binding: t -*-
 ;;; Commentary:
-;; EmbTerm (C:/Projects/EmbTerm) の Emacs 連携。Windows のみ。
+;; EmbTerm (`my:embterm-source-directory') の Emacs 連携。Windows と macOS。
 ;;
-;; libghostty-vt で VT を解釈し、Direct2D で描いた子 HWND を Emacs の
-;; ウィンドウに重ねる端末。バッファはプレースホルダで、描画もキー入力の
-;; エンコードも module (embterm_module.dll) が持つ。PTY は同梱の再配布版
-;; ConPTY (conpty.dll + x64/OpenConsole.exe)。
+;; libghostty-vt で VT を解釈し、ネイティブに描いた面を Emacs のウィンドウに
+;; 重ねる端末。バッファはプレースホルダで、描画もキー入力のエンコードも
+;; module が持つ。OS で違うのは次の 3 点だけで、どちらも embterm.el 自身が
+;; 吸収している (こちらは配布物を写して autoload を張るだけ)。
+;;
+;;   | | Windows | macOS |
+;;   |---|---|---|
+;;   | 重ねるもの | 子 HWND (Direct2D) | CAMetalLayer を EmacsView に足す |
+;;   | module     | embterm_module.dll | embterm_module.dylib |
+;;   | PTY        | 同梱の再配布版 ConPTY (conpty.dll + x64/OpenConsole.exe) | OS の PTY (同梱物なし) |
 ;;
 ;;   C-c s s   端末に切り替える (無ければ開く)        `embterm'
 ;;   C-c s n   新しい端末を開く                      `embterm-new'
 ;;   C-c s p   プロジェクトのルートで開く            `embterm-project'
 ;;   C-c s b   端末のバッファの一覧                  `embterm-list-buffers'
 ;;
-;;   M-x nyagos / pwsh / yazi   カレントディレクトリで開く (`*nyagos(dir)*' など)
+;;   M-x pwsh / zsh             カレントディレクトリでシェルを開く (OS で名前が
+;;                              変わるだけで中身は `my:embterm-shell')
+;;   M-x nyagos / yazi          同上 (`*nyagos(dir)*' など。nyagos は Windows のみ)
 ;;   M-x claude                 プロジェクトで claude を開く (`*claude-term(proj)*')
 ;;                              C-c a a (stream-json) と並べて評価している
 ;;
@@ -23,15 +31,16 @@
 ;; EmbTerm のリポジトリ (`my:embterm-source-directory') で `cargo xtask dist'
 ;; が作った target/dist/ を `my:embterm-directory' (~/.emacs.d/embterm/。
 ;; git の管理外) に写す。C-u を付けると先に `cargo xtask dist' を走らせる。
-;; embterm.el は同じディレクトリの embterm_module.dll と conpty.dll を読む。
+;; embterm.el は同じディレクトリの module (と Windows なら conpty.dll) を読む。
 ;; 初めて端末を開くときに読み込まれるので、ここでは autoload を張るだけに
 ;; してある (`my-genpreview.el' と同じ形)。
 ;;
 ;; 【重要】target/dist を直接読ませない。conpty.dll と OpenConsole.exe は
 ;; 配布物の場所のものを使い続けるのでロックされ、EmbTerm の
 ;; `cargo xtask dist' と試験が上書きに失敗する。だから写して使う。
+;; (macOS にロックは無いが、写す形は同じにしてある。)
 ;;
-;; 【重要】Emacs は module を unload できない。embterm.el は DLL を
+;; 【重要】Emacs は module を unload できない。embterm.el は module を
 ;; 版付きの名前で一時ディレクトリにコピーしてから読むので、Emacs を
 ;; 動かしたまま写し直せるが、**新しい module に入れ替わるのは
 ;; Emacs を再起動したとき**。conpty.dll と OpenConsole.exe は使用中だと
@@ -58,6 +67,7 @@
 (declare-function embterm-list-buffers "embterm" ())
 (declare-function embterm-run "embterm" (command &rest keys))
 (defvar embterm-shell)
+(defvar embterm-font-size)
 ;; M-x claude は my-claude.el のアカウントの選択と環境の組み立てを使い回す
 (declare-function my:claude--project-directory "my-claude" ())
 (declare-function my:claude--read-environment "my-claude" ())
@@ -68,41 +78,58 @@
 
 (defcustom my:embterm-directory (expand-file-name "embterm/" user-emacs-directory)
   "EmbTerm の配布物を入れたディレクトリ (git の管理外)。
-embterm.el、embterm_module.dll、conpty.dll、x64/OpenConsole.exe、
+embterm.el と module (Windows は embterm_module.dll + conpty.dll +
+x64/OpenConsole.exe、macOS は embterm_module.dylib)、それに
 etc/embterm.{ps1,bash,lua} (シェル統合) を置く。`my:embterm-update' が
 `my:embterm-source-directory' の target/dist/ から写す。"
   :type 'directory)
 
-(defcustom my:embterm-source-directory "C:/Projects/EmbTerm/"
+(defcustom my:embterm-source-directory
+  ;; Windows の C:/Projects は `~/Projects' のジャンクションでもあるが
+  ;; (`my-platform.el')、無いマシンでも動くよう実体のほうを既定にする。
+  (if (eq system-type 'windows-nt) "C:/Projects/EmbTerm/" "~/Projects/EmbTerm/")
   "EmbTerm のリポジトリ。`my:embterm-update' はここの target/dist/ を写す。"
   :type 'directory)
 
 (defun my:embterm-available-p ()
-  "EmbTerm が使えるか。"
-  (and (eq system-type 'windows-nt)
+  "EmbTerm が使えるか。
+module があるのは Windows と macOS だけ (embterm.el も同じ 2 つで分岐する)。"
+  (and (memq system-type '(windows-nt darwin))
        module-file-suffix
        (file-exists-p (expand-file-name "embterm.el" my:embterm-directory))))
 
 (defun my:embterm--default-shell ()
   "EmbTerm に起動させるシェル (コマンドと引数のリスト) を返す。
 
-`M-x shell' と同じ pwsh に揃え、`my:pwsh-emacs-init-file' (UTF-8 固定・
-starship・OSC 7) を読ませる。ConPTY のコンソールのコードページは cp932
-なので、**本物のコンソールでも UTF-8 への固定は要る**。OSC 7 は
-EmbTerm も受け取って `default-directory' を追う。
-
+Windows では `M-x shell' と同じ pwsh に揃え、`my:pwsh-emacs-init-file'
+\(UTF-8 固定・starship・OSC 7) を読ませる。ConPTY のコンソールのコード
+ページは cp932 なので、**本物のコンソールでも UTF-8 への固定は要る**。
+OSC 7 は EmbTerm も受け取って `default-directory' を追う。
 pwsh が無ければ nil (embterm.el の既定 = PATH の pwsh、無ければ cmd)。
+
+macOS では Terminal.app と同じく $SHELL を**ログインシェル**で起こす。
+UTF-8 への固定は要らない (ロケールが UTF-8)。こちらから読ませる初期化
+スクリプトは無い。シェル統合 (OSC 7 による cd の追従、プロンプトの境界)
+は `~/.zshrc' の末尾に次の 1 行を足すと効く (EmbTerm の etc/embterm.zsh。
+このリポジトリの外なので手で足す)。
+
+  [[ $TERM_PROGRAM == EmbTerm ]] && source ~/.emacs.d/embterm/etc/embterm.zsh
+
+$SHELL が無ければ nil (embterm.el の既定 = $SHELL、無ければ /bin/sh)。
 
 `my-ghostel.el' の `my:ghostel--default-shell' と同じ中身。Ghostel を
 外すとき (EmbTerm の TODO T-058) にあちらを消す。"
-  (when-let* ((pwsh (and (fboundp 'my:windows-pwsh) (my:windows-pwsh))))
-    ;; CreateProcess に渡すので区切りを \ にしておく
-    (let ((pwsh (subst-char-in-string ?/ ?\\ pwsh))
-          (init (bound-and-true-p my:pwsh-emacs-init-file)))
-      (if (and init (file-exists-p init))
-          (list pwsh "-NoLogo" "-NoExit" "-Command"
-                (format ". '%s'" (subst-char-in-string ?/ ?\\ init)))
-        (list pwsh "-NoLogo")))))
+  (if (not (eq system-type 'windows-nt))
+      (when-let* ((shell (or (getenv "SHELL") (executable-find "zsh"))))
+        (list shell "-l"))
+    (when-let* ((pwsh (and (fboundp 'my:windows-pwsh) (my:windows-pwsh))))
+      ;; CreateProcess に渡すので区切りを \ にしておく
+      (let ((pwsh (subst-char-in-string ?/ ?\\ pwsh))
+            (init (bound-and-true-p my:pwsh-emacs-init-file)))
+        (if (and init (file-exists-p init))
+            (list pwsh "-NoLogo" "-NoExit" "-Command"
+                  (format ". '%s'" (subst-char-in-string ?/ ?\\ init)))
+          (list pwsh "-NoLogo"))))))
 
 ;;; --------------------------------------------------
 ;;; アプリを端末で開くコマンド (M-x nyagos / pwsh / yazi / claude)
@@ -147,20 +174,29 @@ pwsh が無ければ nil (embterm.el の既定 = PATH の pwsh、無ければ cm
       (user-error "%s が見つかりません (PATH を確かめてください)" program)))
 
 (defun nyagos (&optional new)
-  "`default-directory' で nyagos を EmbTerm の端末に開く。
+  "`default-directory' で nyagos を EmbTerm の端末に開く (Windows のシェル)。
 バッファ名は `*nyagos(ディレクトリ名)*'。NEW (前置引数) なら必ず新しく開く。"
   (interactive "P")
   (my:embterm--run "nyagos" (list (my:embterm--executable "nyagos")) default-directory new))
 
-(defun pwsh (&optional new)
-  "`default-directory' で pwsh を EmbTerm の端末に開く。
-`M-x shell' と同じ初期化スクリプトを読ませる (`my:embterm--default-shell')。
-バッファ名は `*pwsh(ディレクトリ名)*'。NEW (前置引数) なら必ず新しく開く。"
+(defun my:embterm-shell (&optional new)
+  "`default-directory' でシェルを EmbTerm の端末に開く。
+シェルは `my:embterm--default-shell' (Windows は `M-x shell' と同じ
+初期化スクリプトを読ませた pwsh、macOS は $SHELL のログインシェル)。
+バッファ名は `*シェル名(ディレクトリ名)*'。NEW (前置引数) なら必ず新しく開く。
+
+下で OS に合わせて `pwsh' か `zsh' という名前も付けてある。"
   (interactive "P")
-  (my:embterm--run "pwsh"
-                   (or (my:embterm--default-shell)
-                       (list (my:embterm--executable "pwsh") "-NoLogo"))
-                   default-directory new))
+  (let ((command (or (my:embterm--default-shell)
+                     (if (eq system-type 'windows-nt)
+                         (list (my:embterm--executable "pwsh") "-NoLogo")
+                       (list (my:embterm--executable "zsh") "-l")))))
+    ;; 名前は実際に起こすものから取る (pwsh / zsh / bash)
+    (my:embterm--run (file-name-base (car command)) command default-directory new)))
+
+;; どちらの名前も実体は `my:embterm-shell'。M-x で打つ名前が OS で変わる
+;; だけで、中身は同じ (grep できるよう名前は両方ここに書いてある)。
+(defalias (if (eq system-type 'windows-nt) 'pwsh 'zsh) #'my:embterm-shell)
 
 (defun yazi (&optional new)
   "`default-directory' で yazi を EmbTerm の端末に開く。
@@ -245,11 +281,18 @@ NEW (前置引数) なら必ず新しく開く。"
           (condition-case nil
               (copy-file file to t t)
             (file-error
-             ;; 使用中は書けないが、名前は変えられる
+             ;; 使用中は書けないが、名前は変えられる (Windows)
              (let ((aside (format "%s.old-%s" to stamp)))
                (rename-file to aside t)
                (copy-file file to t t)
                (push (file-name-nondirectory to) moved))))
+          ;; 【重要】`copy-file' は PRESERVE-PERMISSIONS を渡さないと
+          ;; 実行ビットを落とす。Windows では関係ないが、macOS では
+          ;; 配布物の embterm (単体の実行ファイル) が起動できなくなる。
+          ;; copy-file の第 6 引数は ACL まで写そうとして環境によっては
+          ;; 失敗しうるので、モードだけ後から合わせる。
+          (unless (eq system-type 'windows-nt)
+            (set-file-modes to (file-modes file)))
           (setq copied (1+ copied)))))
     (list copied same moved)))
 
@@ -263,7 +306,9 @@ BUILD (前置引数) なら、先に `cargo xtask dist' を走らせてから写
   (interactive "P")
   (if (not build)
       (my:embterm--update-1)
-    (let ((default-directory my:embterm-source-directory)
+    ;; `~' のままだと子プロセスの作業ディレクトリに使えない
+    (let ((default-directory (file-name-as-directory
+                              (expand-file-name my:embterm-source-directory)))
           (buf (get-buffer-create "*embterm-dist*")))
       (with-current-buffer buf (let ((inhibit-read-only t)) (erase-buffer)))
       (message "EmbTerm: cargo xtask dist を走らせています (*embterm-dist*)...")
@@ -302,11 +347,19 @@ BUILD (前置引数) なら、先に `cargo xtask dist' を走らせてから写
   (autoload 'embterm-list-buffers "embterm" "端末のバッファの一覧。" t)
   (autoload 'embterm-run "embterm" "コマンドを端末で起動する。")
   ;; embterm.el はまだ読まれていないが、defcustom は既に値があれば上書きしない。
-  ;; フォント (HackGen Console NF → Cascadia Mono → Consolas) と大きさ (12pt) は
-  ;; module の既定のまま。EmbTerm は Emacs の fontset を通らずに DirectWrite で
-  ;; 描くので、`my-appearance.el' の Nerd Font の調整はこちらには効かない (要らない)。
+  ;; フォントの選び方 (Windows は HackGen Console NF → Cascadia Mono → Consolas、
+  ;; macOS は HackGen Console NF → Menlo → Monaco) は module の既定のまま。
+  ;; EmbTerm は Emacs の fontset を通らずに自分で描く (Windows は DirectWrite、
+  ;; macOS は CoreText) ので、`my-appearance.el' の Nerd Font の調整は
+  ;; こちらには効かない (要らない)。
   (when-let* ((shell (my:embterm--default-shell)))
     (setq embterm-shell shell))
+  ;; 大きさだけは本文に合わせる。macOS の本文は 16pt で、module の既定の
+  ;; 12pt のままだと端末だけ小さい (`my-appearance.el' の `setup-font')。
+  ;; Windows の本文は 11.6pt なので既定のままでよい。
+  ;; `custom.el' で指定していれば、そちらを残す。
+  (when (and (eq system-type 'darwin) (not (boundp 'embterm-font-size)))
+    (setq embterm-font-size 16))
   (keymap-global-set "C-c s s" #'embterm)
   (keymap-global-set "C-c s n" #'embterm-new)
   (keymap-global-set "C-c s p" #'embterm-project)

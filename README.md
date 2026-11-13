@@ -63,6 +63,7 @@ git clone git@github.com:ponkore/emacs.d.git ~/.emacs.d
 | **WSL の psql** | iDeCo の日次サマリ（`M-x check-ideco`） | `wsl -- sudo apt install postgresql-client`。パスワードは `~/.authinfo.gpg` に（下記） |
 | **Docker + `~/.authinfo.gpg`** | Claude Code から ideco DB を引く MCP（`.mcp.json` の `ideco-postgres`。読み取り専用） | Docker Desktop を起動しておくだけ。パスワードは `check-ideco` と同じ行を使う |
 | **llama.cpp + PLaMo 3 Translate** | ローカル翻訳（`C-c T`） | 下の[外部依存](#外部依存)の表。**無ければコマンドがそう言うだけ** |
+| **EmbTerm の配布物** | Emacs の中の端末（`C-c s s`）。Windows / macOS | EmbTerm のリポジトリで `cargo xtask dist` → `C-u M-x my:embterm-update`（[手順](#embterm-の端末c-c-s-s)）。Rust と zig 0.17 が要る |
 | **cmigemo** | ローマ字で日本語 isearch | バイナリと辞書（`~/.emacs.d/migemo/utf-8/migemo-dict`）。無ければ黙って無効 |
 | **exceldiff / MarkText** | dired からの起動 | PATH に置くだけ |
 
@@ -134,7 +135,7 @@ git clone git@github.com:ponkore/emacs.d.git ~/.emacs.d
 | `my-claude` | Claude Code を stream-json で使う（`C-c a`） |
 | `my-htnblog` | はてなブログ AtomPub API へ投稿する（`M-x htnblog`） |
 | `my-ghostel` | libghostty の端末を dynamic module で動かす（`C-c S`）。EmbTerm に移る間だけ残している |
-| `my-embterm` | EmbTerm の端末を Emacs のウィンドウに重ねて動かす（`C-c s`）。Ghostel の置き換え候補。Windows のみ |
+| `my-embterm` | EmbTerm の端末を Emacs のウィンドウに重ねて動かす（`C-c s`）。Ghostel の置き換え候補。Windows / macOS |
 | `my-ideco` | iDeCo の日次サマリを psql で見る（`M-x check-ideco`） |
 | `my-genpreview` | GenPreview でファイルをプレビューする（`M-x genpreview-open`、dired の `v`）。Windows のみ |
 | `my-translate` | ローカル LLM（PLaMo 3 Translate）で翻訳する（`C-c T`）。モデルが無ければ無効 |
@@ -233,24 +234,35 @@ markdown 装飾、ヘッダ行のステータス表示。
 
 ### EmbTerm の端末（`C-c s s`）
 
-**EmbTerm**（`C:/Projects/EmbTerm`）は libghostty-vt で VT を解釈し、Direct2D で描いた
-子ウィンドウを Emacs のウィンドウに重ねる端末。描画とキー入力のエンコードを module が持つので、
+**EmbTerm**（`~/Projects/EmbTerm`）は libghostty-vt で VT を解釈し、ネイティブに描いた面を
+Emacs のウィンドウに重ねる端末。描画とキー入力のエンコードを module が持つので、
 桁ずれ・罫線やアイコンの潰れが起きず、IME の変換ウィンドウもカーソルの位置に出る。
 `C-x 2` で同じ端末を 2 つのペインに出し、別々の位置までスクロールできる。
+**Windows と macOS で動く**（違いは下の表の 3 点だけで、どちらも embterm.el が吸収する）。
+
+| | Windows | macOS |
+|---|---|---|
+| 重ねるもの | 子ウィンドウ（Direct2D） | `CAMetalLayer` を `EmacsView` に足す |
+| module | `embterm_module.dll` | `embterm_module.dylib` |
+| PTY | 同梱の再配布版 ConPTY（`conpty.dll` + `x64/OpenConsole.exe`） | OS の PTY（同梱物なし） |
 
 **Ghostel の置き換え候補として並べて入れてある**（Ghostel は比べる間 `C-c S`）。
 配布物（module・embterm.el・ConPTY・シェル統合）は `~/.emacs.d/embterm/`（git の管理外）に置く。
-**無ければ何もしない。** シェルは `M-x shell` と同じ pwsh（`my-shell.el`）。
+**無ければ何もしない。** シェルは Windows が `M-x shell` と同じ pwsh（`my-shell.el`）、
+macOS が `$SHELL` のログインシェル。フォントの大きさは本文に合わせてある
+（macOS は 16pt。module の既定の 12pt では端末だけ小さい）。
 
-**セットアップ・更新の手順**（配布物は EmbTerm のリポジトリ `C:/Projects/EmbTerm` で作る）:
+**セットアップ・更新の手順**（配布物は EmbTerm のリポジトリで作る。`my:embterm-source-directory`。
+既定は Windows が `C:/Projects/EmbTerm`、他は `~/Projects/EmbTerm`）:
 
-1. 初めてなら、EmbTerm のリポジトリで部品を取る: `cargo xtask fetch-ghostty-vt` と `cargo xtask fetch-conpty`
-   （zig 0.17 が要る。詳しくは EmbTerm の `xtask/src/main.rs` の冒頭）
+1. 初めてなら、EmbTerm のリポジトリで部品を取る: `cargo xtask fetch-ghostty-vt`
+   （Windows はさらに `cargo xtask fetch-conpty`）。zig 0.17 が要る。
+   詳しくは EmbTerm の `xtask/src/main.rs` の冒頭
 2. Emacs で **`C-u M-x my:embterm-update`**。リポジトリで `cargo xtask dist` を裏で走らせ（出力は `*embterm-dist*`）、
    できた `target/dist/` を `~/.emacs.d/embterm/` に写す。dist を自分で作ったときは `C-u` なしで写すだけ
 3. 初めて入れたときはその場で `C-c s s` が使えるようになる。**更新したときは Emacs を再起動する**
-   （module は unload できない）。使用中の `conpty.dll` / `OpenConsole.exe` は `.old-<時刻>` に名前を変えて入れ替え、
-   次に写すときに消える
+   （module は unload できない）。Windows では使用中の `conpty.dll` / `OpenConsole.exe` を
+   `.old-<時刻>` に名前を変えて入れ替え、次に写すときに消える
 
 場所は `my:embterm-source-directory`（リポジトリ）と `my:embterm-directory`（写す先）で変えられる。
 **`my:embterm-directory` を `target/dist` に向けない**（使用中のファイルがロックされ、EmbTerm の dist と試験が失敗する）。
@@ -260,14 +272,20 @@ markdown 装飾、ヘッダ行のステータス表示。
 `C-c C-p` / `C-c C-n`（前後のプロンプトへ）・`C-c C-o`（直前のコマンドの出力をコピー）が効き、0 でない終了コードが
 モードラインに出る。nyagos は `~/.config/nyagos/nyagos.lua` のプロンプトの設定の後に
 `if nyagos.env.TERM_PROGRAM == "EmbTerm" then dofile(nyagos.env.USERPROFILE .. "/.emacs.d/embterm/etc/embterm.lua") end`、
-bash は `~/.bashrc` に `[ "$TERM_PROGRAM" = EmbTerm ] && . ~/.emacs.d/embterm/etc/embterm.bash` を足す
-（どちらもこのリポジトリの外なので手で足す）。
+bash は `~/.bashrc` に `[ "$TERM_PROGRAM" = EmbTerm ] && . ~/.emacs.d/embterm/etc/embterm.bash`、
+**zsh（macOS の既定）は `~/.zshrc` の末尾**（プロンプトを決めた後）に
+`[[ $TERM_PROGRAM == EmbTerm ]] && source ~/.emacs.d/embterm/etc/embterm.zsh` を足す
+（どれもこのリポジトリの外なので手で足す）。
+zsh 版だけは**カレントディレクトリ（OSC 7）もこのスクリプトが出す**
+（pwsh は `etc/pwsh-emacs-shell.ps1`、bash は利用者の PS1 が出しているが、
+starship は出さないため）。
 
 アプリを直接開くコマンドもある（同じディレクトリの端末が動いていれば切り替え、`C-u` で新しく開く）。
 
 | | |
 |---|---|
-| `M-x nyagos` / `M-x pwsh` / `M-x yazi` | カレントディレクトリで開く（`*nyagos(ディレクトリ名)*` など） |
+| `M-x pwsh`（macOS では `M-x zsh`） / `M-x yazi` | カレントディレクトリで開く（`*pwsh(ディレクトリ名)*` など）。実体はどちらも `my:embterm-shell` |
+| `M-x nyagos` | 同上（Windows のシェル） |
 | `M-x claude` | プロジェクトで claude の TUI を開く（`*claude-term(プロジェクト名)*`）。アカウントは `C-c a a` と同じく選ぶ。**`C-c a a`（stream-json）と並べて評価中** |
 
 ### dired の拡張
