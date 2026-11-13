@@ -63,6 +63,17 @@ UTF-8 固定・starship・OSC 7 の設定が入っている。")
   ;; 環境変数を引き継がないため必要になる。
   ;; berkeley-unix (FreeBSD) は対象外にした (計画書の L-4)
   :if (memq system-type '(darwin gnu/linux))
+  ;; SSH_AUTH_SOCK を足してあるのは Bitwarden の SSH agent のため。
+  ;; GUI から起動した Emacs は launchd が渡す macOS 標準 agent
+  ;; (/var/run/com.apple.launchd.*/Listeners) を指したままで、そこには
+  ;; 鍵が 1 本も入っていない。ローカルに秘密鍵ファイルを置かない運用だと
+  ;; magit や TRAMP の公開鍵認証が黙って全滅する。
+  ;;
+  ;; 注意: ソケットの export は .zshrc 側に書いてある = 対話シェル専用なので、
+  ;; `exec-path-from-shell-arguments' から "-i" を外すと引けなくなる
+  ;; (zsh の非対話ログインシェルは .zshrc を読まない。実測済み)。
+  ;; 既定値が '("-l" "-i") であることに依存している。
+  :custom (exec-path-from-shell-variables '("PATH" "MANPATH" "SSH_AUTH_SOCK"))
   :config
   (exec-path-from-shell-initialize))
 
