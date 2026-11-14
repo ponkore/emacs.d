@@ -1344,6 +1344,16 @@ EmbTerm（`my:embterm-source-directory`。設計と決定事項はあちらの `
 - **アプリのコマンド（`nyagos` / `pwsh`（`zsh`） / `yazi` / `claude`）が「同じ端末」かは
   起動したディレクトリ（`my:embterm--start-directory`）で見る。** `default-directory`
   は OSC 7 で `cd` に追従して変わるので使えない
+- **【重要】印字可能な文字を remap 任せにしない**（2026-11-14）。embterm は文字を
+  `[remap self-insert-command]` で受けるが、remap は**そのキーの束縛が最終的に
+  `self-insert-command` のときだけ**効く。よそで別のコマンドに張られている文字は
+  **端末に届かない**。この設定では `%` が `my:match-paren`（`my-keybind.el`）なので、
+  端末で `%` を打つと `Buffer is read-only` になっていた（実測では印字可能な
+  ASCII 95 文字のうち `%` だけ）。`my:embterm-bind-printable-keys` が 95 文字を
+  `embterm-semi-char-map` に明示的に張ってある。**`embterm-mode-map` に置いては
+  いけない**（あちらは copy モードでも生きているので、写したテキストの上で `%` が
+  対応する括弧へ飛ばなくなる）。`embterm-rebuild-keymap` は `setcdr` で中身を
+  作り直すので `:after` の advice で張り直す。**Ghostel も同じ作りなので同じ症状**
 - **【重要】`claude-resume`（`claude -r`）で「動いている端末に切り替える」分岐を
   通らせてはいけない。** 切り替え先の claude はもう会話を始めているので
   **`-r` はどこにも効かず、何も起きていないように見える**（新しく起こさない

@@ -68,8 +68,11 @@
 (declare-function embterm-project "embterm" (&optional arg))
 (declare-function embterm-list-buffers "embterm" ())
 (declare-function embterm-run "embterm" (command &rest keys))
+(declare-function embterm--self-insert "embterm" ())
 (defvar embterm-shell)
 (defvar embterm-font-size)
+(defvar embterm-semi-char-map)
+(defvar embterm-keymap-exceptions)
 ;; M-x claude は my-claude.el のアカウントの選択と環境の組み立てを使い回す
 (declare-function my:claude--project-directory "my-claude" ())
 (declare-function my:claude--read-environment "my-claude" ())
@@ -372,6 +375,36 @@ BUILD (前置引数) なら、先に `cargo xtask dist' を走らせてから写
                      (t ""))))))
 
 ;;; --------------------------------------------------
+;;; よそに奪われた印字可能文字を端末へ送る
+;;; --------------------------------------------------
+
+;; 【重要】embterm は印字可能な文字を `[remap self-insert-command]' で受ける。
+;; remap は**そのキーの束縛が最終的に `self-insert-command' のときだけ**効くので、
+;; よそで別のコマンドに張られている文字は**端末に届かない**。この設定では
+;; `%' が `my:match-paren' (`my-keybind.el') なので、端末のバッファで `%' を
+;; 打つと「Buffer is read-only」で落ちていた (バッファは置き物なので当然)。
+;;
+;; 実測では印字可能な ASCII 95 文字のうち `%' だけだが、**1 文字だけ直すと
+;; 同じことがまた起きる** (グローバルに 1 文字キーを足したとき、あるいは
+;; マイナーモードが張ったときに、その文字だけ黙って端末に入らなくなる)。
+;; だから 95 文字すべてを明示的に張り、remap に頼らない。
+;; `embterm-keymap-exceptions' に書いたキーは Emacs に残す (embterm 本体と同じ)。
+;;
+;; 張り先は `embterm-semi-char-map' (端末に送る層)。**`embterm-mode-map' に
+;; 置いてはいけない**。あちらは copy モード (`C-c C-k') でも生きているので、
+;; 写したテキストの上で `%' が対応する括弧へ飛ばなくなる。
+;; `embterm-rebuild-keymap' は `setcdr' で中身を作り直すため、:after の advice で
+;; 張り直す (`embterm-keymap-exceptions' を customize すると呼ばれる)。
+
+(defun my:embterm-bind-printable-keys (&rest _)
+  "印字可能な ASCII を `embterm-semi-char-map' から端末へ送るよう張る。
+`embterm-rebuild-keymap' の :after から呼ぶ。"
+  (dolist (c (number-sequence ?\s ?~))
+    (let ((key (vector c)))
+      (unless (member (key-description key) embterm-keymap-exceptions)
+        (define-key embterm-semi-char-map key #'embterm--self-insert)))))
+
+;;; --------------------------------------------------
 ;;; 有効化 (Windows で配布物があるときだけ)
 ;;; --------------------------------------------------
 
@@ -397,6 +430,11 @@ BUILD (前置引数) なら、先に `cargo xtask dist' を走らせてから写
   ;; `custom.el' で指定していれば、そちらを残す。
   (when (and (eq system-type 'darwin) (not (boundp 'embterm-font-size)))
     (setq embterm-font-size 16))
+  ;; 印字可能な文字が端末に届くようにする (上の節)。embterm.el がキーマップを
+  ;; 作ったあとでないと張れないので、ロード後に回す。
+  (with-eval-after-load 'embterm
+    (my:embterm-bind-printable-keys)
+    (advice-add 'embterm-rebuild-keymap :after #'my:embterm-bind-printable-keys))
   (keymap-global-set "C-c s s" #'embterm)
   (keymap-global-set "C-c s n" #'embterm-new)
   (keymap-global-set "C-c s p" #'embterm-project)
