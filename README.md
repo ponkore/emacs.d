@@ -287,6 +287,7 @@ starship は出さないため）。
 | `M-x pwsh`（macOS では `M-x zsh`） / `M-x yazi` | カレントディレクトリで開く（`*pwsh(ディレクトリ名)*` など）。実体はどちらも `my:embterm-shell` |
 | `M-x nyagos` | 同上（Windows のシェル） |
 | `M-x claude` | プロジェクトで claude の TUI を開く（`*claude-term(プロジェクト名)*`）。アカウントは `C-c a a` と同じく選ぶ。**`C-c a a`（stream-json）と並べて評価中** |
+| `M-x claude-resume` | `claude -r` で開き、**claude 自身に過去のセッションを一覧させて選ぶ**（`C-u` で `-c` = 直近の会話をそのまま継ぐ）。端末が動いていても必ず新しく開く。ヘッダ行に `-r` が出る |
 
 ### dired の拡張
 

@@ -1344,6 +1344,11 @@ EmbTerm（`my:embterm-source-directory`。設計と決定事項はあちらの `
 - **アプリのコマンド（`nyagos` / `pwsh`（`zsh`） / `yazi` / `claude`）が「同じ端末」かは
   起動したディレクトリ（`my:embterm--start-directory`）で見る。** `default-directory`
   は OSC 7 で `cd` に追従して変わるので使えない
+- **【重要】`claude-resume`（`claude -r`）で「動いている端末に切り替える」分岐を
+  通らせてはいけない。** 切り替え先の claude はもう会話を始めているので
+  **`-r` はどこにも効かず、何も起きていないように見える**（新しく起こさない
+  ぶんエラーも出ない）。`my:embterm--claude` の再利用の条件に `(not extra)` が
+  入っているのはこのため。引数を足して開くコマンドは常に新しく起こす
 
 ## `my-htnblog`
 

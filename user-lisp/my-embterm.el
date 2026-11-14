@@ -23,6 +23,8 @@
 ;;   M-x nyagos / yazi          同上 (`*nyagos(dir)*' など。nyagos は Windows のみ)
 ;;   M-x claude                 プロジェクトで claude を開く (`*claude-term(proj)*')
 ;;                              C-c a a (stream-json) と並べて評価している
+;;   M-x claude-resume          claude -r で開く (過去の会話を claude 自身に
+;;                              一覧させて選ぶ。C-u で -c = 直近を継ぐ)
 ;;
 ;; **Ghostel の置き換え候補として並べて入れてある** (EmbTerm の TODO T-057)。
 ;; 評価の間、Ghostel は `C-c S' に退かせてある (`my-ghostel.el')。
@@ -204,6 +206,39 @@ $SHELL が無ければ nil (embterm.el の既定 = $SHELL、無ければ /bin/sh
   (interactive "P")
   (my:embterm--run "yazi" (list (my:embterm--executable "yazi")) default-directory new))
 
+(defun my:embterm--claude (new &optional extra)
+  "プロジェクトのディレクトリで claude の対話 TUI を EmbTerm の端末に開く。
+
+EXTRA は claude に足す引数のリスト (`(\"-r\")' など)。NEW が非 nil なら
+必ず新しく開く。EXTRA があるときも常に新しく開く (動いている端末に
+切り替えても、その端末はもう会話を始めているので `-r' が効かない)。
+
+`claude' と `claude-resume' の実体。"
+  (require 'my-claude)
+  (let* ((dir (file-name-as-directory (my:claude--project-directory)))
+         (name (format "*claude-term(%s)*" (my:embterm--directory-label dir)))
+         (existing (get-buffer name)))
+    (if (and existing (not new) (not extra)
+             (equal (buffer-local-value 'my:embterm--start-directory existing)
+                    (file-name-as-directory (expand-file-name dir))))
+        (progn (pop-to-buffer-same-window existing) existing)
+      (let* ((env (my:claude--read-environment))
+             (buf (my:embterm--run
+                   "claude-term"
+                   (append (list my:claude-executable)
+                           (when my:claude-model (list "--model" my:claude-model))
+                           extra)
+                   dir t
+                   ;; CLAUDE_CONFIG_DIR は「設定しない」ではなく「消す」必要がある
+                   ;; (Emacs が継承していると別のアカウントに繋がる。my-claude.el と同じ)
+                   :environment (my:claude--process-environment (my:claude--config-dir env)))))
+        (with-current-buffer buf
+          (setq header-line-format
+                (format " claude: %s%s | %s" env
+                        (if extra (concat " " (mapconcat #'identity extra " ")) "")
+                        (abbreviate-file-name (directory-file-name dir)))))
+        buf))))
+
 (defun claude (&optional new)
   "プロジェクトのディレクトリで claude の対話 TUI を EmbTerm の端末に開く。
 
@@ -215,29 +250,31 @@ $SHELL が無ければ nil (embterm.el の既定 = $SHELL、無ければ /bin/sh
 バッファ名は `*claude-term(プロジェクト名)*'。`*claude(…)*' にしないのは、
 `C-c a a' の会話バッファと同じ名前になり、`my:claude--buffer-for' が
 こちらのバッファを会話の書き込み先に使ってしまうため。
-NEW (前置引数) なら必ず新しく開く。"
+NEW (前置引数) なら必ず新しく開く。
+
+過去の会話を継ぐなら `claude-resume' (`claude -r')。"
   (interactive "P")
-  (require 'my-claude)
-  (let* ((dir (file-name-as-directory (my:claude--project-directory)))
-         (name (format "*claude-term(%s)*" (my:embterm--directory-label dir)))
-         (existing (get-buffer name)))
-    (if (and existing (not new)
-             (equal (buffer-local-value 'my:embterm--start-directory existing)
-                    (file-name-as-directory (expand-file-name dir))))
-        (progn (pop-to-buffer-same-window existing) existing)
-      (let* ((env (my:claude--read-environment))
-             (buf (my:embterm--run
-                   "claude-term"
-                   (append (list my:claude-executable)
-                           (when my:claude-model (list "--model" my:claude-model)))
-                   dir t
-                   ;; CLAUDE_CONFIG_DIR は「設定しない」ではなく「消す」必要がある
-                   ;; (Emacs が継承していると別のアカウントに繋がる。my-claude.el と同じ)
-                   :environment (my:claude--process-environment (my:claude--config-dir env)))))
-        (with-current-buffer buf
-          (setq header-line-format
-                (format " claude: %s | %s" env (abbreviate-file-name (directory-file-name dir)))))
-        buf))))
+  (my:embterm--claude new))
+
+(defun claude-resume (&optional continue)
+  "`claude -r' で開き、**claude 自身に**過去のセッションを一覧させて選ぶ。
+
+CONTINUE (前置引数) なら `-c' (`--continue')。一覧を出さずに、その
+ディレクトリの直近の会話をそのまま継ぐ。
+
+選ぶのは claude の TUI なので、一覧の中身 (要約・日時・分岐) は
+`C-c a r' (`my:claude-resume') の `completing-read' とは別物。あちらは
+記録ファイル (`*.jsonl') を Emacs 側で並べている。どちらも
+`<CLAUDE_CONFIG_DIR>/projects/…' を見るので、**アカウントが違うと
+出てくる会話も違う** (環境はここでも選ばせる)。
+
+端末の中で `/resume' と打っても同じ一覧が出るが、それは会話を 1 つ
+始めてからになる。こちらは最初から一覧で始まる。
+
+ディレクトリ・アカウント・バッファ名は `claude' と同じ。既に端末が
+動いていても**必ず新しく開く** (`*claude-term(proj)*<2>')。"
+  (interactive "P")
+  (my:embterm--claude t (if continue (list "-c") (list "-r"))))
 
 ;;; --------------------------------------------------
 ;;; 配布物を入れる (M-x my:embterm-update)
