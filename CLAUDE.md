@@ -1353,7 +1353,15 @@ EmbTerm（`my:embterm-source-directory`。設計と決定事項はあちらの `
   `embterm-semi-char-map` に明示的に張ってある。**`embterm-mode-map` に置いては
   いけない**（あちらは copy モードでも生きているので、写したテキストの上で `%` が
   対応する括弧へ飛ばなくなる）。`embterm-rebuild-keymap` は `setcdr` で中身を
-  作り直すので `:after` の advice で張り直す。**Ghostel も同じ作りなので同じ症状**
+  作り直すので `:after` の advice で張り直す。
+  **Ghostel は同じ remap を使っているのに `%` が通る**（2026-11-14 に実測）。
+  あちらは端末が生きている間**バッファが読み取り専用ではなく**、
+  `ghostel--forward-inserts-after-change`（`after-change-functions` の深さ 90・
+  バッファローカル）が**よそからの挿入を PTY に転送してバッファから消す**ため。
+  `my:match-paren` の `(self-insert-command 1)` もこれに拾われる（実測: `%` と
+  RET を送ると zsh が `fg: no current job` と答える。そのフックを外すと答えない
+  = シェルに届いていない）。**EmbTerm のバッファは置き物なので同じ手は使えない**
+  （描画はネイティブ側で、バッファにはテキストが無い）
 - **【重要】`claude-resume`（`claude -r`）で「動いている端末に切り替える」分岐を
   通らせてはいけない。** 切り替え先の claude はもう会話を始めているので
   **`-r` はどこにも効かず、何も起きていないように見える**（新しく起こさない
