@@ -69,9 +69,20 @@
   :custom
   ;; macOS の Dropbox パス直書きだったため Windows / Linux で壊れていた。
   ;; 存在する Dropbox ディレクトリを探し、無ければ ~/junk/ にする。
+  ;;
+  ;; 【重要】候補は glob ではなく明示列挙にする。macOS で個人とビジネスの
+  ;; 両方にログインしていると `~/Library/CloudStorage/' の下に
+  ;; `Dropbox-<チーム名>' も並ぶので、`Dropbox-*' を glob で拾うと
+  ;; 会社のフォルダを掴みうる。個人用フォルダの名前は Dropbox 側の表示名で
+  ;; 決まり、`Dropbox-個人' / `Dropbox-個人用' / `Dropbox-Personal' の
+  ;; どれにもなる（このマシンは `Dropbox-個人'）。ビジネスに入っていない
+  ;; マシンではサフィックスが付かず `Dropbox' だけになる。
   (open-junk-file-format
    (concat (or (seq-find #'file-directory-p
-                         (list (expand-file-name "~/Library/CloudStorage/Dropbox-個人用")
+                         (list (expand-file-name "~/Library/CloudStorage/Dropbox-個人")
+                               (expand-file-name "~/Library/CloudStorage/Dropbox-個人用")
+                               (expand-file-name "~/Library/CloudStorage/Dropbox-Personal")
+                               (expand-file-name "~/Library/CloudStorage/Dropbox")
                                (expand-file-name "~/Dropbox")))
                (expand-file-name "~"))
            "/junk/%Y-%m-%d-%H%M%S.")))
