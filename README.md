@@ -116,7 +116,7 @@ git clone git@github.com:ponkore/emacs.d.git ~/.emacs.d
 | `my-keyhelp` | 有効なキーバインドを 1 枚の表で見る（`<f1> b`。`describe-bindings` の置き換え） |
 | `my-editor` | hydra、symbol-overlay、smartparens、whitespace、yasnippet、recentf、editorconfig、tab-bar ほか |
 | `my-dired` | dired、hydra-dired、dired-sidebar（`F8`）、dired-x の上書き対策、exceldiff / MarkText の起動 |
-| `my-dired-watch` | ファイルのサイズ・日時・属性の変化で dired の行を貼り替える。Windows のみ |
+| `my-dired-watch` | ファイルのサイズ・日時・属性の変化で dired の行を貼り替える（Windows は通知、他は stat の走査） |
 | `my-dired-k` | dired の更新日時とサイズを色分けする（旧 `dired-k` の色を引き継ぎ） |
 | `my-text` | text-mode、org-mode、ox-pandoc、markdown、rst、adoc |
 | `my-lang-lisp` | Emacs Lisp、Clojure（cider）、Common Lisp（slime） |
@@ -129,7 +129,7 @@ git clone git@github.com:ponkore/emacs.d.git ~/.emacs.d
 | `my-project` | projectile（`C-c p`） |
 | `my-vc` | magit、diff-hl（`C-c g`）、Windows の SVN 対応 |
 | `my-gitd` | magit の git 実行を常駐プロセスに肩代わりさせる。Windows のみ |
-| `my-magit-watch` | ワークツリーを監視して magit バッファと dired の VC マークを自動更新。Windows のみ |
+| `my-magit-watch` | リポジトリを監視して magit バッファと dired の VC マークを自動更新（Windows はワークツリー全体、mac は `.git/` のみ） |
 | `my-shell` | exec-path-from-shell、Windows 用 shell 設定 |
 | `my-utils` | calendar（日本の祝日）、open-junk-file、grep/ripgrep、server |
 | `my-claude` | Claude Code を stream-json で使う（`C-c a`） |
@@ -192,7 +192,12 @@ Windows では `magit-refresh-buffer` 1 回に **1.7 秒**かかっていた。�
 に対し `call-process` 59〜76 ms）。Rust の常駐プロセス（`gitd/`）に肩代わりさせ、
 トークン方式のキャッシュと並列先読みを足して **50〜70 ms** になった。
 
-あわせて `w32notify` でワークツリーを監視し、表示中の magit バッファを自動更新する。
+**mac には `gitd` を移植しない**（実測で `call-process` 1.15 ms /
+`magit-refresh-buffer` 164 ms。素のままで Windows が gitd で到達した桁にいる）。
+
+あわせてリポジトリを監視し、表示中の magit バッファと dired の VC マークを
+自動更新する。Windows は `w32notify` でワークツリー全体を、**mac は kqueue で
+`.git/` だけ**を見る（再帰監視が無いため。commit / stage / checkout は拾える）。
 → [docs/magit/gitd-and-autorefresh.md](docs/magit/gitd-and-autorefresh.md)
 
 ### Claude Code を Emacs から使う
@@ -298,8 +303,11 @@ starship は出さないため）。
 Excel ブックは OS の関連付けに渡す、`C-c x` で exceldiff、`C-c m` で MarkText、
 サイドバー（`F8`）、外部の増減に追随する自動更新。**サイズ・日時・属性の変化**にも
 追従する（`my-dired-watch`。行が増減しないので、その行だけを貼り替える）。
+**時刻順・サイズ順で並べているときは並べ直しが要るので全体を読み直す。**
 **VC マーク（diff-hl）も commit / stage に追従する**（ターミナルや Claude Code から
-コミットした場合も含む）。
+コミットした場合も含む）。**Windows と mac の両方で効く**が、変化の見つけ方が違う
+（Windows は通知、mac はアイドル中の stat の走査。kqueue はファイルの中身の変化を
+報告しないため）。
 **更新日時とサイズは色分けされる**（`my-dired-k`。新しいものほど明るく、
 大きいものほど赤い。色は旧 `dired-k` の表をそのまま使っている）。
 → [docs/dired/dired-extensions.md](docs/dired/dired-extensions.md)

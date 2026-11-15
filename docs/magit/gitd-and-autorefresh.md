@@ -58,6 +58,33 @@ Emacs の約半分。stdio の往復は **0.13 ms**、28 回でも 4 ms なの�
 残る 50 ms はほぼ magit 自身の Elisp（セクションの構築と描画）。
 **ここから先はデーモンでは縮まない。**
 
+### 【重要】mac には移植しない（2026-11-15 に実測）
+
+gitd の存在理由は「Emacs のプロセス生成が Windows で異常に遅い」という 1 点
+だけなので、**その前提が成り立つかを mac で測った**。成り立たなかった。
+
+| | Windows | mac (Apple Silicon) | 比 |
+|---|---|---|---|
+| `call-process` 1 回（何もしない子プロセス） | 59〜76 ms | **1.15 ms** | 50〜65 倍 |
+| `git rev-parse --show-toplevel` | — | 4.95 ms | |
+| `git --no-optional-locks status --porcelain` | — | 7.49 ms | |
+| `magit-refresh-buffer` 1 回（`~/.emacs.d`） | **1669 ms** | **164 ms** | 10 倍 |
+
+**mac の素の magit は、Windows が gitd とキャッシュと並列先読みで到達した
+50〜70 ms と同じ桁にいる。** 残りはほぼ magit 自身の Elisp なので、
+デーモンを置いても縮む余地が無い（上の表の最後の行）。
+
+得るものがそれだけで、持ち込むものは Rust のツールチェイン・常駐プロセスの
+寿命管理・トークンの整合・`my:gitd--disabled` のサーキットブレーカ。
+**CLAUDE.md §2 に「mac へは移植しない」として決定事項に入れた。**
+
+`my:gitd-mode` は `(eq system-type 'windows-nt)` のときだけ有効になり、
+mac では `my:gitd-prewarm` / `my:gitd-forget` が no-op になる
+（`my:gitd--notify` が `my:gitd-mode` を見る）。そのため
+`my-magit-watch` から呼んでも害は無いが、**先読みタイマーは張らない**
+（`my:magit-watch--arm-prewarm` が `my:gitd-mode` を見る。頼む相手が
+いないのにタイマーを張っても無駄なだけ）。
+
 ### ビルド
 
 `tree-sitter/` の文法と同じ扱い。**ソースは git 管理下、`gitd/target/` は
@@ -257,8 +284,9 @@ Emacs は file バッファの `default-directory` を `~/...` に略記する�
 ## magit の自動更新 (`my-magit-watch.el`)
 
 ワークツリー / インデックス / HEAD の変化を検知して、表示中の magit バッファを
-`magit-refresh-buffer` する。Windows のみ、**既定で有効**。
-切るときは `M-x my:magit-watch-mode`、様子を見るときは `M-x my:magit-watch-stats`。
+`magit-refresh-buffer` する。**Windows と mac で既定で有効**（見る範囲が違う。
+下の「mac では `.git/` だけを見る」）。切るときは `M-x my:magit-watch-mode`、
+様子を見るときは `M-x my:magit-watch-stats`。
 
 段階 2a でリフレッシュが 0.6 秒になったので実用に耐えるようになった。
 **2a 無しではこれは入れられなかった**（1.7 秒の固まりが頻発する）。
@@ -275,6 +303,72 @@ gitd のキャッシュにトークンを供給する役目も負っている（
 **`filenotify.el` の `file-notify-add-watch` は `subtree` を渡さない**
 （`file-notify--add-watch-w32notify` が `file-name` / `directory-name` /
 `size` / `last-write-time` しか組み立てない）ので、汎用 API 経由では非再帰。
+
+### mac では `.git/` だけを見る（2026-11-15）
+
+kqueue にも inotify にも再帰監視が無いので、**張る場所と拾えるものが変わる**。
+バックエンドの判定は `my:magit-watch--backend`。
+
+| | Windows (`w32notify`) | mac (`file-notify`) |
+|---|---|---|
+| 張る場所 | ワークツリーの root に `subtree` で 1 本 | **`.git/` に非再帰で 1 本** |
+| 拾えるもの | ワークツリーの編集も `.git` の変化も | **`.git` 側だけ**（commit / stage / checkout / branch） |
+| ワークツリーの編集 | 自動で追いつく | magit バッファは `g` が要る |
+
+ワークツリーまで見るには全ディレクトリに watch を張るしかなく、kqueue は
+1 watch = 1 fd なので取らない（eglot が 6751 本張って Emacs を固めたのと
+同じ轍。CLAUDE.md）。**dired の VC マークのほうは `my-dired-watch` の stat の
+走査が取り直す**ので、見ている範囲のワークツリーは追従する
+（→ [docs/dired/dired-extensions.md](../dired/dired-extensions.md)）。
+
+#### 【重要】`.lock` が唯一の合図（実測）
+
+`.git/` の非再帰 watch に何が届くかを測った（mac + kqueue）。
+
+| 操作 | 届いたイベント |
+|---|---|
+| `git add` | `(created "index.lock")` `(renamed "index.lock")` と `objects` の `changed` |
+| `git commit` | 上に加えて `COMMIT_EDITMSG` / `HEAD.lock` / `packed-refs.lock` / `AUTO_MERGE.lock` |
+| ワークツリーのファイルを書き換える | **0 件**（上の表のとおり） |
+
+**`.git/index` 自身のイベントは 1 件も来ない。** git は一時ファイルを rename
+して置き換えるので、kqueue から見ると「既存のエントリの中身が変わった」だけに
+なり、ディレクトリの watch には届かない（dired 側とまったく同じ理由）。
+
+つまり **`.lock` を落としてはいけない**。`git add` ではあれが唯一の合図になる。
+分類上は `suspect` なので、フィンガープリント（`.git/index` と `.git/HEAD` の
+mtime + size）で確かめる既存の経路がそのまま効く。
+**分類器も自励振動対策も書き換えずに済んだのはこのおかげ。**
+
+パスの正規化だけが新しい（`my:magit-watch--relpath`）。w32notify は監視
+ルートからの相対パスで届くが、`file-notify` は**絶対パス**で届く。しかも
+worktree / submodule では gitdir がワークツリーの外にあるので、root を剥がす
+だけでは `.git/index` の形にならない。**gitdir の配下は `.git/` を被せて
+組み直す。** 実測の突き合わせ:
+
+| イベントの FILE | 正規化後 | 分類 |
+|---|---|---|
+| `…/.git/index.lock` | `.git/index.lock` | `suspect` |
+| `…/.git/COMMIT_EDITMSG` | `.git/COMMIT_EDITMSG` | `meta` |
+| `…/.git/index` | `.git/index` | `index` |
+| `…/.git` | `.git` | `suspect` |
+| `…/.git/objects/ab` | `.git/objects/ab` | nil（無視） |
+| `…/a.txt` | `a.txt` | `worktree` |
+
+#### 検証（mac、使い捨てリポジトリ）
+
+外部のシェルから `git add` → `git commit` して、dired しか開いていない状態で:
+
+| | イベント | 分類 | `refreshed` | `my:diff-hl-dired--stale` |
+|---|---|---|---|---|
+| commit 前 | 2 | 2 | 0 | nil |
+| commit 後 | 20 | 14 | **1** | **t** |
+
+`stale` が立つのは `my:magit-watch--refresh-dired` が
+`my:diff-hl-dired-update-repo` を呼び、**その dired が表示されていなかった**
+ため（表示していれば `updated 1` になり、overlay の
+`diff-hl-dired-type` が実際に付くことも確認した）。
+そのあと 8 秒待っても `refreshed` は 1 のままで、**自励振動していない**。
 
 ### 【重要】batch では検証できない
 

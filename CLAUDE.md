@@ -521,6 +521,9 @@ tr-ime / Windows 側が IME のトグルとして処理するので、Emacs 側�
 | **端末の描画を Emacs の外でやらない（GenPreview 方式の自前レンダラ）** | 2026-11-09 | 動機だった **eaw の桁ずれは Ghostel が既に解いている**（`★` `※` `○` `あ` を 10 個ずつ並べた 5 行すべて 96 px で一致）。残るのは `★` / `※` が潰れる見た目だけで、フォントを 1 つ patch すれば済む見込み。対して失うものは大きく、**バッファが画像になるので `C-s` も `M-w` も他モジュールからの参照も全部消える**。`libghostty-vt` 1.0 に描画は入っていないのでレンダラは自作。**再開条件は描画の自作に投資する理由ができること。** 埋め込みの道はある（2026-11-10 訂正: `window-id` の HWND に module が子 HWND を重ねられる。以前の「HWND を埋める API が無く画像として貼るしかない」は誤り。xwidget は WebKit 専用なので待つ意味も無い → [docs](docs/embed/hwnd-child-window.md)）。ただし子 HWND でもバッファはプレースホルダなので `C-s` / `M-w` が効かない点は同じ → [docs](docs/pty/ghostel.md) |
 | **端末の残りのアイコンのために `my:console-nerd-font-ranges` を広げない** | 2026-11-09 | `powerline` のまま。`all` にすれば Ghostel のプロンプトの Windows / git / 時計（U+F0372 / U+F418 / U+F43A）も原寸になるが、**dired が不揃いになる**。`HackGen Console NF` が U+E6AD を持たずフォールバックするため、**ディレクトリだけ 15px でファイルは 8px**（実測）。アイコン 3 つのために dired の見た目を崩さない、という判断 → [docs](docs/pty/ghostel.md) |
 | **31b は使わない**（my-translate） | 2026-11-05 | Q4_K_M が 19.5 GB で、iGPU から使える **17.6 GB に収まらない**。速度も 3〜4 tok/s で対話に使えない |
+| **`gitd` を mac へ移植しない** | 2026-11-15 | gitd の存在理由は「Emacs のプロセス生成が Windows で遅い」の 1 点だけで、**その前提が mac では成り立たない**（実測: `call-process` が 59〜76 ms 対 **1.15 ms**、`magit-refresh-buffer` が 1669 ms 対 **164 ms**）。素の mac が、Windows が gitd + キャッシュ + 並列先読みで到達した 50〜70 ms と同じ桁にいる。残りはほぼ magit の Elisp なのでデーモンでは縮まない → [docs](docs/magit/gitd-and-autorefresh.md) |
+| **mac の `my-magit-watch` はワークツリーを監視しない（`.git/` だけ）** | 2026-11-15 | kqueue に再帰監視が無く、1 watch = 1 fd なので全ディレクトリに張ると破綻する（eglot の 6751 本と同じ轍）。`.git/` 1 本で commit / stage / checkout は拾え、**dired の VC マークは `my-dired-watch` の走査が取り直す**。残るのは「ワークツリーだけが変わったときの magit バッファ」で、そこは `g` → [docs](docs/magit/gitd-and-autorefresh.md) |
+| **mac の `my-dired-watch` は通知を使わずポーリングにする** | 2026-11-15 | kqueue のディレクトリ watch は**既存ファイルの追記・chmod を 1 件も報告しない**（実測）。個々のファイルに張れば届くが fd が尽きる。stat の走査は実測で足りる（936 件 5.97 ms）ので、アイドル中に可視バッファだけ見る → [docs](docs/dired/dired-extensions.md) |
 
 ---
 
@@ -890,7 +893,38 @@ autorevert が拾うのは**行が増減する変化だけ**（`created` / `rena
   新規ファイルの追加（autorevert の担当）で、しかもアイコンが付かない
 - **サブディレクトリの行は追従しない**（非再帰の `ReadDirectoryChangesW` は
   配下の変化を親に報告しない。実測で 0 件）。`subtree` を足せば拾えるが、
-  ビルド中に毎秒数千件を呼び込むので取らない
+  ビルド中に毎秒数千件を呼び込むので取らない。**mac では追従する**（下記）
+
+#### 【重要】mac は通知ではなく stat の比較（`poll`）
+
+**`kqueue` のディレクトリ watch は、既存ファイルの追記と chmod を 1 件も
+報告しない**（2026-11-15 に実測。行の増減は即座に届く）。中身を書いても
+ディレクトリ自身は書き換わらないためで、個々のファイルに張れば届くが
+1 watch = 1 fd なので数千件で破綻する。そのため
+`my:dired-watch--backend` が `poll` になり、アイドル中に
+`directory-files-and-attributes` を取って前回と比べる。
+
+- **`my:dired-watch--note-change` が合流点。** その先（デバウンス・レート
+  制限・1 行の貼り替え・ソート順での revert）は Windows とまったく同じ
+- **見るのは表示中のバッファだけ。** 隠れている dired に毎秒払わない。
+  可視になれば次の窓で差分がまとめて出るので取りこぼさない
+- **基準は `dired-after-readin-hook`（`--sync`）で取り直す。** でないと、
+  いま反映した行が次の窓でもう一度「変化した」と見える
+- **行の増減は拾わない。** 両方のスナップショットに在って値が違うものだけ。
+  でないと autorevert と二重に revert する
+- **【重要】走査のタイマーは定期タイマー（`run-with-timer`）にする。**
+  アイドルタイマーは 2 通り試して**両方外れた**。REPEAT 付きは
+  「アイドル期間ごとに 1 回」なので**放置している間は 1 回も走らない**
+  （emacsclient の評価はアイドル時間をリセットしないので実測 1956 秒で 0 回）。
+  走り終わるたびに張り直す形は **Emacs が CPU 100% で固まる**
+  （`run-with-idle-timer` は DONT-WAIT を t で登録するため、既にアイドルなら
+  待たずに発火し、`timer-event-handler` の同じループで回り続ける。
+  **emacsclient も届かず、起動のたびに再発する**）。入力中の抑止は
+  `my:dired-watch--poll` の `input-pending-p` でやる
+- **【重要】VC マークの取り直しもここが担う**（`--update-vc-marks`）。
+  mac の `my-magit-watch` は `.git/` しか見ないので、**ワークツリーの変更を
+  diff-hl に届けているのはここだけ**。`diff-hl-dired-update` は mac でも
+  47 ms（貼り替えの 0.71 ms より桁違い）なので、可視バッファだけに絞る
 
 ### `diff-hl-dired` の再入に注意
 
@@ -1051,6 +1085,30 @@ gopls は大文字のドライブレターで返す（§1「Windows 固有」）
 ## `my-vc` / `my-gitd` / `my-magit-watch`
 
 → [docs/magit/gitd-and-autorefresh.md](docs/magit/gitd-and-autorefresh.md)
+
+### 【重要】`my-magit-watch` は mac でも動くが、見る範囲が違う
+
+`my:magit-watch--backend` が `w32notify` か `file-notify` かで**張る場所が
+変わる**。`gitd` は Windows だけ（§2 の決定事項）。
+
+| | Windows | mac |
+|---|---|---|
+| watch | ワークツリーの root に `subtree` で 1 本 | **`.git/` に非再帰で 1 本** |
+| 拾えるもの | ワークツリーも `.git` も | **`.git` 側だけ** |
+| 先読み（prewarm） | gitd に頼む | **タイマーを張らない**（`my:gitd-mode` を見る） |
+
+- **【重要】`.lock` のイベントを落としてはいけない。** mac では
+  `git add` の合図が `index.lock` の created / renamed **だけ**で、
+  **`.git/index` 自身のイベントは来ない**（git が rename で置き換えるため、
+  kqueue のディレクトリ watch には届かない）。分類は `suspect` のままで、
+  フィンガープリントが拾う
+- **`file-notify` のイベントは絶対パスで届く**（w32notify は監視ルートからの
+  相対パス）。`my:magit-watch--relpath` が正規化する。**gitdir が
+  ワークツリーの外にあることがある**（worktree / submodule）ので、
+  gitdir 配下は `.git/` を被せて組み直している
+- ワークツリーの変化は mac では届かない。**dired の VC マークは
+  `my-dired-watch` が取り直す**ので、困るのは「ワークツリーだけが変わった
+  ときの magit バッファ」だけ（`g` を押す）
 
 `gitd` を触るときに最低限知っておくこと。
 

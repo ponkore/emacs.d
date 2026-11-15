@@ -8,12 +8,43 @@
 ;; 段階 2a (my-gitd.el) でリフレッシュが 1.7 秒 → 0.6 秒になったので実用に
 ;; 耐えるようになった。逆に言えば 2a 無しではこれは入れられなかった。
 ;;
-;; Windows のみ。`w32notify-add-watch' に `subtree' を渡すと 1 個の watch で
-;; 配下を再帰的に監視できる (追加コスト 0.2 ms)。**`filenotify.el' の
-;; `file-notify-add-watch' は `subtree' を渡さないので非再帰**であり、
-;; 汎用 API 経由では使えない。
-;;
 ;; 設計と実測は docs/magit/magit-autorefresh-stage1-design.md を参照。
+;;
+;;; 【重要】監視する範囲が OS で違う (拾えるものも違う)
+;;
+;; `w32notify-add-watch' に `subtree' を渡すと 1 個の watch で配下を再帰的に
+;; 監視できる (追加コスト 0.2 ms)。**`filenotify.el' の
+;; `file-notify-add-watch' に `subtree' は無く、kqueue にも inotify にも
+;; 再帰監視は無い。** そのため張る場所と拾えるものが変わる。
+;;
+;;   Windows  ワークツリーの root に subtree watch を 1 本
+;;            -> ワークツリーの編集も `.git' の変化も拾う
+;;   mac      **`.git/' に非再帰の watch を 1 本**
+;;            -> 拾えるのは commit / stage / checkout など `.git' 側だけ
+;;
+;; mac でワークツリーまで見るには全ディレクトリに watch を張るしかなく、
+;; kqueue は 1 watch = 1 fd なので取らない (eglot が 6751 本張って Emacs が
+;; 固まったのと同じ轍。CLAUDE.md)。**その代わり `my-dired-watch' の
+;; stat の走査が、貼り替えた行の VC マークを取り直す**ので、dired で見ている
+;; 範囲のワークツリーは追従する。magit バッファのほうは、ワークツリーだけが
+;; 変わったときは `g' が要る (`.git' が動く操作なら自動で追いつく)。
+;;
+;;; 【重要】mac では `.lock' が唯一の合図 (2026-11-15 に実測)
+;;
+;; `.git/' の非再帰 watch に何が届くかを測った (mac + kqueue)。
+;;
+;;   git add    -> (created "index.lock") (renamed "index.lock")
+;;   git commit -> 上に加えて COMMIT_EDITMSG / HEAD.lock / packed-refs.lock
+;;
+;; **`.git/index' 自身のイベントは 1 件も来ない。** git は一時ファイルを
+;; rename して置き換えるので、kqueue から見ると「既存のエントリの中身が
+;; 変わった」だけになり、ディレクトリの watch には届かない
+;; (`my-dired-watch' の Commentary と同じ理由)。
+;;
+;; つまり **`.lock' を落としてはいけない**。`git add' ではあれが唯一の
+;; 合図になる。分類上は `suspect' なので、フィンガープリント
+;; (`.git/index' と `.git/HEAD' の mtime + size) で確かめる既存の経路が
+;; そのまま効く。**設計を変える必要が無かったのはこれのおかげ。**
 ;;
 ;;; gitd との協調 (段階 2b)
 ;;
@@ -125,6 +156,18 @@
 
 (defvar my:magit-watch-mode)            ; define-minor-mode で定義される
 
+(defconst my:magit-watch--backend
+  (cond ((and (eq system-type 'windows-nt) (fboundp 'w32notify-add-watch))
+         'w32notify)
+        ((or (featurep 'kqueue) (featurep 'inotify) (featurep 'gfilenotify))
+         'file-notify)
+        (t nil))
+  "watch の張り方。`w32notify' / `file-notify' / nil (監視できない)。
+
+**張る場所も拾えるものもこれで変わる** (Commentary)。w32notify は
+ワークツリー全体を subtree で、`file-notify' は再帰できないので `.git/'
+だけを見る。nil のときは `my:magit-watch-mode' を有効にしない。")
+
 (defgroup my:magit-watch nil
   "ワークツリーの変化で magit を自動更新する。"
   :group 'magit)
@@ -206,7 +249,7 @@ Fork や Claude Code は `add' -> `commit' のように git を何回か続け�
 (cl-defstruct (my:magit-watch-repo (:constructor my:magit-watch--make-repo))
   root          ; toplevel (末尾 "/")
   gitdir        ; .git ディレクトリ (絶対、末尾 "/")
-  desc          ; w32notify のディスクリプタ
+  desc          ; watch のディスクリプタ (w32notify / file-notify)
   fp            ; .git/index と .git/HEAD の (mtime . size)。判定の要
   serial        ; 状態の通し番号。gitd のキャッシュのトークンになる
   pending       ; 未処理イベントの分類 (シンボルのリスト)
@@ -637,7 +680,13 @@ ONLY-IF-IDLE が非 nil なら、既に予約があるときは**延長しない
                           (my:magit-watch-repo-root repo)))))
 
 (defun my:magit-watch--arm-prewarm (repo &optional only-if-idle)
+  "REPO の先読みを予約する。**gitd が動いていなければ何もしない。**
+
+先読みはデーモン側のキャッシュを埋めるためのもので、`my-gitd' が無ければ
+頼む相手がいない (`my:gitd-prewarm' は `my:gitd-mode' が nil なら no-op)。
+mac では gitd を使わないので、タイマーを張るだけ無駄になる。"
   (when (and my:magit-watch-prewarm-delay
+             (bound-and-true-p my:gitd-mode)
              (< my:magit-watch-prewarm-delay my:magit-watch-debounce)
              (not (and only-if-idle (my:magit-watch-repo-prewarm-timer repo))))
     (when (my:magit-watch-repo-prewarm-timer repo)
@@ -649,8 +698,39 @@ ONLY-IF-IDLE が非 nil なら、既に予約があるときは**延長しない
 
 ;;; ---------------------------------------------------------------- 監視
 
+(defun my:magit-watch--relpath (repo file)
+  "イベントの FILE を `my:magit-watch--classify' が食える形に直す。
+
+w32notify は**監視ルート (= ワークツリー) からの相対パス**で、区切りは
+バックスラッシュ。`file-notify' は**絶対パス**で届くので剥がす必要がある。
+
+【重要】gitdir はワークツリーの外にあることがある。worktree と submodule
+では `.git' がファイルで、実体は `../.git/worktrees/NAME/' などを指す。
+root を剥がすだけでは `.git/index' の形にならないので、gitdir の配下は
+**`.git/' を被せて組み直す**。`classify' はパスの形だけを見るので、
+これで Windows と同じ分類器がそのまま使える。"
+  (let* ((f (subst-char-in-string ?\\ ?/ (or file "")))
+         (root (my:magit-watch-repo-root repo))
+         (gitdir (directory-file-name (or (my:magit-watch-repo-gitdir repo) "")))
+         (ci (file-name-case-insensitive-p root))
+         (key (if ci (downcase f) f))
+         (gkey (if ci (downcase gitdir) gitdir))
+         (rkey (if ci (downcase root) root))
+         (has-gitdir (not (string-empty-p gitdir))))
+    (cond
+     ;; w32notify のイベント。もう相対なので何もしない
+     ((not (file-name-absolute-p f)) f)
+     ;; gitdir 自身 (ディレクトリの mtime が動いたとき届く)
+     ((and has-gitdir (string= key gkey)) ".git")
+     ;; gitdir の配下
+     ((and has-gitdir (string-prefix-p (concat gkey "/") key))
+      (concat ".git/" (substring f (1+ (length gitdir)))))
+     ;; ワークツリーの配下
+     ((string-prefix-p rkey key) (substring f (length root)))
+     (t f))))
+
 (defun my:magit-watch--callback (root ev)
-  "w32notify のコールバック。**軽く保つこと。**
+  "監視のコールバック。**軽く保つこと。**
 
 ビルド中は 1 秒に数千件来る (実測: 200 ファイル作成で 2001 件)。
 **ここで git を呼ぶような作りにしてはいけない。** `.gitignore' の判定も
@@ -658,7 +738,7 @@ ONLY-IF-IDLE が非 nil なら、既に予約があるときは**延長しない
 実際の判定はデバウンス後に 1 回だけ行う。"
   (cl-incf (plist-get my:magit-watch--stats :events))
   (when-let* ((repo (gethash root my:magit-watch--repos))
-              (rel (subst-char-in-string ?\\ ?/ (or (nth 2 ev) "")))
+              (rel (my:magit-watch--relpath repo (nth 2 ev)))
               (kind (my:magit-watch--classify rel)))
     (cl-incf (plist-get my:magit-watch--stats :classified))
     (cl-pushnew kind (my:magit-watch-repo-pending repo))
@@ -724,6 +804,37 @@ ONLY-IF-IDLE が非 nil なら、既に予約があるときは**延長しない
                       my:magit-watch--repos)
              found))))
 
+(defun my:magit-watch--add-watch (root gitdir)
+  "ROOT のリポジトリに watch を 1 本張って、ディスクリプタを返す。
+
+**張る場所がバックエンドで違う** (Commentary)。w32notify は `subtree' が
+使えるのでワークツリーの root に、`file-notify' は再帰できないので
+`.git/' だけに張る。どちらも 1 リポジトリ 1 本。
+
+`file-notify' に `change' と `attribute-change' の両方を渡すのは、
+`.git/' の下で起きることを取りこぼしたくないため。ここで届くのは
+1 リポジトリあたり commit 1 回で十数件で、ワークツリーのビルド出力のような
+量にはならない。"
+  (pcase my:magit-watch--backend
+    ('w32notify
+     (w32notify-add-watch
+      (directory-file-name root)
+      '(file-name directory-name size last-write-time subtree)
+      (lambda (ev) (my:magit-watch--callback root ev))))
+    ('file-notify
+     (require 'filenotify)
+     (file-notify-add-watch
+      (directory-file-name gitdir)
+      '(change attribute-change)
+      (lambda (ev) (my:magit-watch--callback root ev))))))
+
+(defun my:magit-watch--rm-watch (desc)
+  "DESC の watch を外す。"
+  (when desc
+    (pcase my:magit-watch--backend
+      ('w32notify (ignore-errors (w32notify-rm-watch desc)))
+      ('file-notify (ignore-errors (file-notify-rm-watch desc))))))
+
 (defun my:magit-watch--register (root gitdir)
   "ROOT (末尾 \"/\") を監視表に入れて watch を張る。既にあれば何もしない。"
   (unless (my:magit-watch--lookup root)
@@ -733,10 +844,7 @@ ONLY-IF-IDLE が非 nil なら、既に予約があるときは**延長しない
       (setf (my:magit-watch-repo-fp repo)
             (my:magit-watch--fingerprint repo))
       (setf (my:magit-watch-repo-desc repo)
-            (w32notify-add-watch
-             (directory-file-name root)
-             '(file-name directory-name size last-write-time subtree)
-             (lambda (ev) (my:magit-watch--callback root ev))))
+            (my:magit-watch--add-watch root gitdir))
       (puthash root repo my:magit-watch--repos)
       repo)))
 
@@ -746,7 +854,7 @@ ONLY-IF-IDLE が非 nil なら、既に予約があるときは**延長しない
 **magit を経由するので git が走りうる。** `magit-gitdir' は
 `rev-parse --git-dir' を呼ぶため、登録済みかどうかを**先に**見ること。
 dired からの登録には `my:magit-watch-add-for-dired' を使う。"
-  (when (and my:magit-watch-mode (eq system-type 'windows-nt))
+  (when my:magit-watch-mode
     (let ((default-directory (or directory default-directory)))
       (when-let* ((root (magit-toplevel))
                   (root (file-name-as-directory (expand-file-name root))))
@@ -780,9 +888,7 @@ dired を開いただけのリポジトリを拾うための入口。監視さ�
 と `magit-gitdir' を呼ぶので、**dired を開くたびに git が走り、magit の
 ロードまで強制される**。`.git' を上へ探すだけで足りる (worktree /
 submodule でも `.git' はファイルとして在る)。"
-  (when (and my:magit-watch-mode
-             (eq system-type 'windows-nt)
-             my:magit-watch-update-dired)
+  (when (and my:magit-watch-mode my:magit-watch-update-dired)
     (let ((dir (or directory default-directory)))
       (unless (file-remote-p dir)
         (when-let* ((root (locate-dominating-file dir ".git"))
@@ -796,7 +902,7 @@ submodule でも `.git' はファイルとして在る)。"
     (dolist (tm (list (my:magit-watch-repo-timer repo)
                       (my:magit-watch-repo-prewarm-timer repo)))
       (when tm (cancel-timer tm)))
-    (ignore-errors (w32notify-rm-watch (my:magit-watch-repo-desc repo)))
+    (my:magit-watch--rm-watch (my:magit-watch-repo-desc repo))
     (remhash root my:magit-watch--repos)
     ;; 監視をやめたらキャッシュも捨てさせる。以後トークンを進める者が
     ;; いなくなるので、残しておくと古い答えを返し続けることになる
@@ -926,10 +1032,10 @@ submodule でも `.git' はファイルとして在る)。"
     (remove-hook 'magit-pre-refresh-hook #'my:magit-watch--pre-refresh)
     (my:magit-watch--remove-all)))
 
-;; 対象は Windows のみ。`w32notify-add-watch' の `subtree' に相当するものが
-;; 他のバックエンドには無く (inotify も kqueue も非再帰)、そちらは段階 2b で
-;; 常駐プロセス側に監視を移すときにまとめて考える。
-(when (eq system-type 'windows-nt)
+;; バックエンドが無ければ有効にしない (`my:magit-watch--backend')。
+;; 範囲の違い (Windows はワークツリー全体、mac は `.git/' だけ) は
+;; Commentary を参照。
+(when my:magit-watch--backend
   (my:magit-watch-mode 1))
 
 (provide 'my-magit-watch)

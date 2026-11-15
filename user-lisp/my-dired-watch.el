@@ -5,7 +5,12 @@
 ;; dired バッファを、**既にある行の中身が変わったとき**にも追従させる。
 ;; サイズ・更新日時・属性の変化が対象で、`g' を押さなくてよくする。
 ;;
-;; Windows のみ。設計と実測は tmp/dired-auto-update-design.md を参照。
+;; 変化の見つけ方だけが OS で違い、**貼り替えの経路は 1 本に合流する**。
+;;
+;;   Windows  w32notify の `modified' イベントを拾う
+;;   それ以外 アイドル中に stat を取って前回と比べる (下記)
+;;
+;; 設計と実測は docs/dired/dired-extensions.md を参照。
 ;;
 ;;; なぜ素の autorevert では足りないのか
 ;;
@@ -28,6 +33,32 @@
 ;; 自分で拾う**。行が増減する変化 (作成 / 削除 / 改名) は門 1 を通るので
 ;; 今までどおり `my-dired.el' の `auto-revert-mode' に任せる。
 ;; **既存の挙動には触らない。**
+;;
+;;; 【重要】mac では「中身が変わった」が通知では分からない (2026-11-15 に実測)
+;;
+;; macOS の Emacs のバックエンドは kqueue (`(featurep (quote kqueue))' が t)。
+;; ディレクトリに watch を張ると**行の増減は届くのに、既存のファイルの
+;; サイズ・属性の変化は 1 件も届かない**。実測:
+;;
+;;   ファイルを作る    -> (created "new.txt") (changed "new.txt")  即座
+;;   既存ファイルに追記 -> **0 件**
+;;   chmod             -> **0 件**
+;;   そのあと別の操作   -> ここで初めて (changed "exist.txt")
+;;                         (attribute-changed "exist.txt") が遅れて届く
+;;
+;; kqueue はディレクトリの `NOTE_WRITE' しか見ず、エントリの一覧を
+;; Emacs 側で持って差分を合成している。**中身を書いてもディレクトリは
+;; 書き換わらない**ので、次に何かが起きるまで気づけない。
+;; 個々のファイルに watch を張れば届くが、kqueue は 1 watch = 1 fd なので
+;; 数千件のディレクトリで破綻する (eglot が 6751 本張って固まったのと同じ轍)。
+;;
+;; そこで mac では**通知をあきらめて stat を比べる**。`modified' の
+;; イベントの代わりに差分を作るだけで、その先は Windows と同じ経路。
+;; コストは実測で足りる (`directory-files-and-attributes' が 44 件 0.097 ms /
+;; 936 件 5.97 ms)。アイドル中にしか走らせないので入力は邪魔しない。
+;;
+;; **ポーリングは可視のバッファだけを見る。** 隠れている dired は見えない
+;; ものを貼り替えても意味がなく、可視になった次の窓で差分がまとめて出る。
 ;;
 ;;; 【重要】全体 revert ではなく 1 行だけ貼り替える
 ;;
@@ -77,6 +108,10 @@
 ;; 拾うには `subtree' を足すしかなく、それはビルド出力のディレクトリを
 ;; 開いているときに毎秒数千件を呼び込む。**得るもの (ディレクトリ行の
 ;; mtime) に対して代償が大きすぎる**ので取らない。`g' を押せば直る。
+;;
+;; **mac では追従する。** ポーリングは表示している行を端から stat するので、
+;; サブディレクトリ自身の mtime も差分に出る。わざわざ配下を覗きに
+;; いかずに済むのはポーリング側の利点で、Windows に合わせて落とす理由も無い。
 
 ;;; Code:
 
@@ -116,6 +151,14 @@ dired でビルド出力のディレクトリを開いていると毎秒数千�
 多数の行が変わったなら、貼り替えを繰り返すより 1 回読み直すほうが安い。"
   :type 'integer)
 
+(defcustom my:dired-watch-poll-interval 1.0
+  "stat を取り直す間隔 (秒)。`poll' のバックエンドでだけ使う。
+
+**アイドルタイマーなので、この秒数は「アイドルが続いている間の間隔」。**
+入力中は 1 度も走らない。応答は最悪このあと `my:dired-watch-debounce' で、
+mac では 1.3 秒。通知で即座に拾える Windows (0.3 秒) との差はここ。"
+  :type 'number)
+
 ;;; ---------------------------------------------------------------- 状態
 
 (defvar-local my:dired-watch--watches nil
@@ -131,15 +174,37 @@ dired はバッファ 1 つにディレクトリが複数ありうる (`i' で�
 (defvar-local my:dired-watch--overflow nil
   "件数が `my:dired-watch-relist-limit' を超えたら t。全体 revert に倒す。")
 
+(defvar-local my:dired-watch--snapshot nil
+  "`poll' のバックエンドで前回 stat した結果のハッシュ。
+
+絶対ファイル名 -> (SIZE MTIME MODES)。**nil なら「まだ基準が無い」**で、
+その回は取るだけで差分を出さない (dired を開いた直後に全行が変化したことに
+なるのを防ぐ)。")
+
 (defvar-local my:dired-watch--timer nil)
 (defvar-local my:dired-watch--last 0.0
   "最後に更新した時刻 (レート制限用)。")
 
+(defvar my:dired-watch--poll-timer nil
+  "`poll' のバックエンドのアイドルタイマー (グローバルに 1 本)。")
+
 (defvar my:dired-watch--stats
-  (list :events 0 :relisted 0 :reverted 0 :deferred 0 :throttled 0 :missing 0)
+  (list :events 0 :relisted 0 :reverted 0 :deferred 0 :throttled 0 :missing 0
+        :polls 0)
   "統計。`my:dired-watch-stats' で表示する。")
 
 ;;; ---------------------------------------------------------------- 監視
+
+(defconst my:dired-watch--backend
+  (if (and (eq system-type 'windows-nt) (fboundp 'w32notify-add-watch))
+      'w32notify
+    'poll)
+  "変化の見つけ方。`w32notify' (通知) か `poll' (stat の比較)。
+
+**`file-notify' は使えない。** mac の kqueue も Linux の inotify も、
+ディレクトリの watch では既存のファイルの中身の変化を報告しない
+(Commentary の実測)。autorevert がそれで足りているのは、あちらが
+行の増減しか見ていないから。")
 
 (defconst my:dired-watch--flags '(size last-write-time attributes)
   "w32notify に渡すフラグ。
@@ -160,6 +225,18 @@ dired はバッファ 1 つにディレクトリが複数ありうる (`i' で�
                       :test #'equal))))
     dirs))
 
+(defun my:dired-watch--note-change (file)
+  "FILE (絶対パス) が変わったことを控える。カレントバッファが対象。
+
+通知とポーリングの合流点。件数が `my:dired-watch-relist-limit' を超えたら
+1 行ずつ貼り替えるのをやめ、全体 revert に倒す印を立てる。"
+  (let ((h (or my:dired-watch--pending
+               (setq my:dired-watch--pending
+                     (make-hash-table :test #'equal)))))
+    (if (>= (hash-table-count h) my:dired-watch-relist-limit)
+        (setq my:dired-watch--overflow t)
+      (puthash file t h))))
+
 (defun my:dired-watch--callback (buffer dir ev)
   "w32notify のコールバック。**軽く保つこと。**
 
@@ -172,47 +249,155 @@ dired はバッファ 1 つにディレクトリが複数ありうる (`i' で�
       (when (eq (nth 1 ev) 'modified)
         (let ((name (nth 2 ev)))
           (when (and (stringp name) (not (string-empty-p name)))
-            (let ((h (or my:dired-watch--pending
-                         (setq my:dired-watch--pending
-                               (make-hash-table :test #'equal)))))
-              (if (>= (hash-table-count h) my:dired-watch-relist-limit)
-                  (setq my:dired-watch--overflow t)
-                (puthash (expand-file-name (subst-char-in-string ?\\ ?/ name)
-                                           (file-name-as-directory dir))
-                         t h)))
+            (my:dired-watch--note-change
+             (expand-file-name (subst-char-in-string ?\\ ?/ name)
+                               (file-name-as-directory dir)))
             (my:dired-watch--arm buffer my:dired-watch-debounce)))))))
 
+(defun my:dired-watch--stat-dirs ()
+  "表示しているディレクトリを stat して、絶対名 -> (SIZE MTIME MODES) を返す。
+
+ID-FORMAT に `integer' を渡すのは uid / gid の名前解決を省くため。
+ここで見るのはサイズ・更新日時・属性の 3 つだけで、持ち主は使わない。
+
+`.' と `..' は入れない。前者に対応する行は無く (`total' の行になる)、
+後者を貼り替えても意味が無い。w32notify 側もこの 2 つのイベントは出さない。"
+  (let ((h (make-hash-table :test #'equal)))
+    (dolist (dir (my:dired-watch--dirs))
+      (dolist (e (ignore-errors
+                   (directory-files-and-attributes dir t nil t 'integer)))
+        (let ((f (car e)))
+          (unless (member (file-name-nondirectory f) '("." ".."))
+            (let ((a (cdr e)))
+              (puthash f (list (file-attribute-size a)
+                               (file-attribute-modification-time a)
+                               (file-attribute-modes a))
+                       h))))))
+    h))
+
+(defun my:dired-watch--poll-buffer ()
+  "カレントバッファを stat し直し、変わった行を控える。控えたら非 nil。
+
+**行の増減は見ない。** 現れた / 消えたファイルは autorevert の担当で、
+こちらが触ると同じ変化で二重に revert することになる。両方の
+スナップショットに在って値が違うものだけを拾う。"
+  (let ((new (my:dired-watch--stat-dirs))
+        (old my:dired-watch--snapshot)
+        (found nil))
+    (setq my:dired-watch--snapshot new)
+    (when old
+      (maphash (lambda (f v)
+                 (let ((o (gethash f old)))
+                   (when (and o (not (equal o v)))
+                     (setq found t)
+                     (my:dired-watch--note-change f))))
+               new))
+    found))
+
+(defun my:dired-watch--arm-poll ()
+  "走査のタイマーを張る。**定期タイマーであること。**
+
+【重要】アイドルタイマーは使えない。2026-11-15 に 2 通り試して両方外れた。
+
+  (1) REPEAT 付きの `run-with-idle-timer'
+      あれは「**アイドル期間ごとに 1 回**」で、アイドルが続いている間は
+      再実行されない (`timer-event-handler' が `timer-activate-when-idle'
+      を DONT-WAIT nil で呼び直す)。しかも **emacsclient 経由の評価は
+      アイドル時間をリセットしない**ので、実測では 1956 秒アイドルのまま
+      **1 回も走らなかった**。dired を開いて放置し、外部の変更を待つ
+      という**いちばん普通の使い方がそれに当たる**。
+
+  (2) 走り終わるたびに `run-with-idle-timer' を張り直す
+      **Emacs が CPU 100% で固まった** (実測。emacsclient も届かなくなり、
+      SIGUSR2 でしか抜けられなかった)。`run-with-idle-timer' は
+      DONT-WAIT を t で登録するので、**既にアイドルなら待たずに発火条件を
+      満たす**。`timer-event-handler' は期限の来たタイマーを続けて処理
+      するので、張り直したものが同じループでまた走り、**入力の処理まで
+      戻ってこない**。
+
+そこで定期タイマーにして、「入力中は走らせない」は `my:dired-watch--poll'
+の側で `input-pending-p' を見て実現する。"
+  (setq my:dired-watch--poll-timer
+        (run-with-timer my:dired-watch-poll-interval
+                        my:dired-watch-poll-interval
+                        #'my:dired-watch--poll)))
+
+(defun my:dired-watch--poll ()
+  "アイドルタイマーから呼ばれる。**表示中の dired だけを見る。**
+
+隠れているバッファまで stat すると、見えないものに毎秒払うことになる。
+可視になれば次の窓で差分がまとめて出るので取りこぼしは無い (件数が多ければ
+`my:dired-watch--overflow' で全体 revert に倒れる)。
+
+同じバッファが 2 つのウィンドウに出ていることがあるので、見たバッファは
+覚えて 1 回に絞る。リモート (tramp) は stat が高いので見ない。
+
+**入力中は何もしない。** 定期タイマーなのでタイプしている間も起きるが、
+stat は 936 件で 5.97 ms 払う。見送っても次の窓で拾える
+\(アイドルタイマーで同じことをしようとして 2 度失敗した経緯は
+`my:dired-watch--arm-poll' を参照)。"
+  (unless (input-pending-p)
+    (let ((seen nil))
+      (dolist (frame (frame-list))
+        (dolist (win (window-list frame 'no-minibuf))
+          (let ((buf (window-buffer win)))
+            (unless (memq buf seen)
+              (push buf seen)
+              (with-current-buffer buf
+                (when (and (derived-mode-p 'dired-mode)
+                           (not (file-remote-p default-directory)))
+                  (cl-incf (plist-get my:dired-watch--stats :polls))
+                  (when (my:dired-watch--poll-buffer)
+                    (cl-incf (plist-get my:dired-watch--stats :events))
+                    (my:dired-watch--arm buf my:dired-watch-debounce)))))))))))
+
 (defun my:dired-watch--sync ()
-  "`dired-after-readin-hook'。表示中のディレクトリに watch を合わせる。
+  "`dired-after-readin-hook'。このバッファの監視を表示に合わせる。
 
 revert とサブディレクトリの挿入の両方でここに来る。**貼り替えの間は
-`dired-after-readin-hook' を nil に束縛しているので再入しない。**"
+`dired-after-readin-hook' を nil に束縛しているので再入しない。**
+
+`poll' のバックエンドでは watch を張る代わりに**基準の stat を取り直す**。
+読み直した直後が基準になるので、いま反映した行が次の窓でもう一度
+「変化した」と見えることがない。"
   (when (and my:dired-watch-mode (derived-mode-p 'dired-mode))
-    (let ((want (my:dired-watch--dirs))
-          (buffer (current-buffer)))
-      ;; 消えたものを外す
-      (let (keep)
-        (dolist (w my:dired-watch--watches)
-          (if (member (car w) want)
-              (push w keep)
-            (ignore-errors (w32notify-rm-watch (cdr w)))))
-        (setq my:dired-watch--watches keep))
-      ;; 増えたものを張る
-      (dolist (dir want)
-        (unless (assoc dir my:dired-watch--watches)
-          (when-let* ((desc (ignore-errors
-                              (w32notify-add-watch
-                               dir my:dired-watch--flags
-                               (lambda (ev)
-                                 (my:dired-watch--callback buffer dir ev))))))
-            (push (cons dir desc) my:dired-watch--watches)
-            (add-hook 'kill-buffer-hook #'my:dired-watch--unwatch nil t)))))))
+    (if (eq my:dired-watch--backend 'poll)
+        (unless (file-remote-p default-directory)
+          (setq my:dired-watch--snapshot (my:dired-watch--stat-dirs))
+          (add-hook 'kill-buffer-hook #'my:dired-watch--unwatch nil t))
+      (my:dired-watch--sync-w32notify))))
+
+(defun my:dired-watch--sync-w32notify ()
+  "表示中のディレクトリに w32notify の watch を合わせる。"
+  (let ((want (my:dired-watch--dirs))
+        (buffer (current-buffer)))
+    ;; 消えたものを外す
+    (let (keep)
+      (dolist (w my:dired-watch--watches)
+        (if (member (car w) want)
+            (push w keep)
+          (ignore-errors (w32notify-rm-watch (cdr w)))))
+      (setq my:dired-watch--watches keep))
+    ;; 増えたものを張る
+    (dolist (dir want)
+      (unless (assoc dir my:dired-watch--watches)
+        (when-let* ((desc (ignore-errors
+                            (w32notify-add-watch
+                             dir my:dired-watch--flags
+                             (lambda (ev)
+                               (my:dired-watch--callback buffer dir ev))))))
+          (push (cons dir desc) my:dired-watch--watches)
+          (add-hook 'kill-buffer-hook #'my:dired-watch--unwatch nil t))))))
 
 (defun my:dired-watch--unwatch ()
-  "このバッファの watch を全部外す。"
+  "このバッファの監視をやめる。
+
+`w32notify-rm-watch' は Windows にしか無い関数だが、`poll' のバックエンド
+では `my:dired-watch--watches' が空なので dolist が空振りして呼ばれない。"
   (dolist (w my:dired-watch--watches)
     (ignore-errors (w32notify-rm-watch (cdr w))))
   (setq my:dired-watch--watches nil)
+  (setq my:dired-watch--snapshot nil)
   (when my:dired-watch--timer
     (cancel-timer my:dired-watch--timer)
     (setq my:dired-watch--timer nil)))
@@ -316,6 +501,35 @@ dired の行は必ず**マーク 1 桁 + 空白 1 桁**で始まる
                   ;; アイコンは付け直さない。どうせ revert で引き直される
                   'misaligned))))))
 
+(declare-function diff-hl-dired-update "diff-hl-dired")
+
+(defun my:dired-watch--update-vc-marks ()
+  "貼り替えた行の VC マーク (diff-hl) を取り直す。
+
+`diff-hl-dired-update' が載っているのは `dired-after-readin-hook' だけで、
+1 行の貼り替えはそのフックを外して走る。**そのままではワークツリーを
+書き換えてもマークが古いまま残る。** 全体 revert のときはフック経由で
+取り直されるので、呼ぶのは貼り替えたときだけでよい。
+
+**Windows では何もしない。** あちらは `my-magit-watch' がワークツリーを
+subtree watch で見ていて、`my:magit-watch--refresh-dired' がリポジトリ単位で
+取り直す。mac の kqueue はワークツリーの中身の変化を報告しないので
+\(Commentary)、**ワークツリーの変更を VC マークに届けているのはここだけ**。
+`.git/' 側の変化 (commit / stage / checkout) は mac でも `my-magit-watch' が
+拾うので、そちらと二重にはならない。
+
+1 回 47 ms (mac で実測)。1 行の貼り替え (0.71 ms) より桁違いに高いので、
+`my:dired-watch-min-interval' のレート制限が効くこの位置に置く。
+再入の抑制は `my-vc.el' の `my:diff-hl-dired-update-guard' が引き受ける。"
+  (when (and (eq my:dired-watch--backend 'poll)
+             (bound-and-true-p diff-hl-dired-mode)
+             (fboundp 'diff-hl-dired-update)
+             ;; 隠れたバッファには払わない (`my-vc.el' が可視になった時点で
+             ;; 取り直す)。ポーリングは可視のものしか見ないが、デバウンスの
+             ;; 間に隠れることはある
+             (get-buffer-window (current-buffer) t))
+    (diff-hl-dired-update)))
+
 (defun my:dired-watch--fire (buffer)
   "デバウンスタイマーから呼ばれる。"
   (when (buffer-live-p buffer)
@@ -346,15 +560,21 @@ dired の行は必ず**マーク 1 桁 + 空白 1 桁**で始まる
               ;; 桁が揃わなかった行が 1 つでもあれば、最後にまとめて
               ;; 読み直す。列の幅が変わったのだから、周りの行も含めて
               ;; 出し直すしかない。
-              (let (widened)
+              (let (widened relisted)
                 (dolist (f files)
                   (pcase (my:dired-watch--update-line f)
-                    ('relisted (cl-incf (plist-get my:dired-watch--stats :relisted)))
+                    ('relisted
+                     (setq relisted t)
+                     (cl-incf (plist-get my:dired-watch--stats :relisted)))
                     ('misaligned (setq widened t))
                     (_ (cl-incf (plist-get my:dired-watch--stats :missing)))))
-                (when widened
-                  (cl-incf (plist-get my:dired-watch--stats :reverted))
-                  (revert-buffer)))))))))))
+                (if widened
+                    (progn
+                      (cl-incf (plist-get my:dired-watch--stats :reverted))
+                      (revert-buffer))
+                  ;; revert したときはフック経由で取り直されるので、
+                  ;; 貼り替えだけで済んだときに呼ぶ
+                  (when relisted (my:dired-watch--update-vc-marks))))))))))))
 
 (defun my:dired-watch--arm (buffer delay)
   (with-current-buffer buffer
@@ -366,16 +586,18 @@ dired の行は必ず**マーク 1 桁 + 空白 1 桁**で始まる
 
 ;;;###autoload
 (defun my:dired-watch-stats ()
-  "監視中のバッファ数とイベント数を表示する。"
+  "監視中のバッファ数と、これまでの更新の内訳を表示する。"
   (interactive)
   (let ((bufs 0) (watches 0))
     (dolist (b (buffer-list))
       (with-current-buffer b
-        (when my:dired-watch--watches
+        (when (or my:dired-watch--watches my:dired-watch--snapshot)
           (cl-incf bufs)
           (cl-incf watches (length my:dired-watch--watches)))))
-    (message "dired-watch: %d バッファ / watch %d / イベント %d / 貼り替え %d / 全体 revert %d / 行が無くて見送り %d / 操作中で待ち直し %d / レート制限で待ち直し %d"
+    (message "dired-watch[%s]: %d バッファ / watch %d / 走査 %d / 変化 %d / 貼り替え %d / 全体 revert %d / 行が無くて見送り %d / 操作中で待ち直し %d / レート制限で待ち直し %d"
+             my:dired-watch--backend
              bufs watches
+             (plist-get my:dired-watch--stats :polls)
              (plist-get my:dired-watch--stats :events)
              (plist-get my:dired-watch--stats :relisted)
              (plist-get my:dired-watch--stats :reverted)
@@ -391,19 +613,28 @@ dired の行は必ず**マーク 1 桁 + 空白 1 桁**で始まる
   (if my:dired-watch-mode
       (progn
         (add-hook 'dired-after-readin-hook #'my:dired-watch--sync)
+        ;; `poll' のバックエンドではタイマーが監視そのもの。
+        ;; 入力中に走らせない工夫は `my:dired-watch--poll' 側 (input-pending-p)。
+        ;; **アイドルタイマーにしてはいけない** (暴走した。詳細は
+        ;; `my:dired-watch--arm-poll' の docstring)。
+
+        (when (eq my:dired-watch--backend 'poll)
+          (unless my:dired-watch--poll-timer
+            (my:dired-watch--arm-poll)))
         ;; 既にある dired バッファを拾う
         (dolist (b (buffer-list))
           (with-current-buffer b
             (when (derived-mode-p 'dired-mode) (my:dired-watch--sync)))))
     (remove-hook 'dired-after-readin-hook #'my:dired-watch--sync)
+    (when my:dired-watch--poll-timer
+      (cancel-timer my:dired-watch--poll-timer)
+      (setq my:dired-watch--poll-timer nil))
     (dolist (b (buffer-list))
       (with-current-buffer b (my:dired-watch--unwatch)))))
 
-;; 対象は Windows のみ。他のバックエンドへの対応は、必要になってから
-;; `file-notify-add-watch' 経由に一般化する (dired の watch は非再帰なので
-;; inotify / kqueue でもそのまま張れる。`subtree' が要る magit とは違う)。
-(when (and (eq system-type 'windows-nt) (featurep 'w32notify))
-  (my:dired-watch-mode 1))
+;; Windows は通知で、それ以外は stat の比較で拾う (`my:dired-watch--backend')。
+;; どちらも無い環境は無いので、条件を付けずに有効にする。
+(my:dired-watch-mode 1)
 
 (provide 'my-dired-watch)
 ;;; my-dired-watch.el ends here
