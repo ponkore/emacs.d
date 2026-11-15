@@ -356,31 +356,37 @@ nil … 何もしない。"
 ;;
 ;; tty では initial-frame-alist が使われないうえ workarea も当てにならないので
 ;; nil を返す。呼び出し側は従来の固定値にフォールバックする。
-(defun my:frame-geometry-right-edge (width-ratio)
-  "作業領域の右上いっぱいに置くフレームの位置とサイズを返す。
-WIDTH-RATIO は作業領域の横幅に対する割合。高さは作業領域に収まる最大の行数、
-位置は右端・上端。"
+(defun my:frame-geometry-right-edge (width-ratio &optional columns rows)
+  "作業領域の右上に置くフレームの位置とサイズを返す。
+
+幅は COLUMNS (桁) を渡せばその桁数、省略すれば作業領域の横幅に対する
+WIDTH-RATIO の割合から求める。高さは ROWS (行) を渡せばその行数、
+省略すれば作業領域に収まる最大の行数。位置はどちらの場合も右端・上端。
+
+COLUMNS と ROWS の両方を渡すときは WIDTH-RATIO は使われないので nil でよい。"
   (when (display-graphic-p)
     (pcase-let* ((`(,area-x ,area-y ,area-width ,area-height)
                   (alist-get 'workarea (car (display-monitor-attributes-list))))
                  ;; タイトルバー・ボーダー・fringe の分。frame-outer-* と
                  ;; frame-text-* の差で取る。フォントに依らない値なので、
                  ;; 起動時の暫定フレームで測っても最終形と同じ
-                 ;; (実測: 32 x 39 px)。
+                 ;; (実測: Windows 32 x 39 px、macOS 16 x 54 px)。
                  (chrome-width (- (frame-outer-width) (frame-text-width)))
                  (chrome-height (- (frame-outer-height) (frame-text-height)))
                  (char-width (frame-char-width))
-                 (columns (/ (round (* area-width width-ratio)) char-width)))
+                 (columns (or columns
+                              (/ (round (* area-width width-ratio)) char-width))))
       `((top . ,area-y)
         ;; 右端に接する位置を自分で計算する。`(left . (- 0))' は
         ;; デスクトップ全体の右端に飛ぶ (実測: 3 画面構成で x=3936)。
         (left . ,(- (+ area-x area-width) (* columns char-width) chrome-width))
         (width . ,columns)
-        ;; 高さは「作業領域 - 外枠」に収まる最大の行数。行単位でしか
-        ;; 指定できないので端数は余る (2560x1392 のとき 10px)。
+        ;; 高さを省略したときは「作業領域 - 外枠」に収まる最大の行数。行単位で
+        ;; しか指定できないので端数は余る (2560x1392 のとき 10px)。
         ;; fullscreen を fullheight にすればぴったり埋まるが、
         ;; default-frame-alist に載って以降の全フレームに効いてしまう。
-        (height . ,(/ (- area-height chrome-height) (frame-char-height)))))))
+        (height . ,(or rows (/ (- area-height chrome-height)
+                               (frame-char-height))))))))
 
 ;;; [3] Mac用
 
@@ -393,10 +399,18 @@ WIDTH-RATIO は作業領域の横幅に対する割合。高さは作業領域�
          '((ns-transparent-titlebar . t) ;; タイトルバーを透過
            (vertical-scroll-bars . nil) ;; スクロールバーを消す
            ;; (ns-appearance . dark) ;; 26.1 {light, dark}
-           (internal-border-width . 0)
-           (top . 0)
-           (width . 180)
-           (height . 83))
+           (internal-border-width . 0))
+         ;; position / size
+         ;; 180 桁 x 72 行 (2026-11-15 に実機のフレームを実測した大きさ) を、
+         ;; 作業領域の右上に置く。left を固定値で持つとモニタ構成が変わった
+         ;; ときに画面外へ出るので、Windows と同じ計算に乗せる。
+         ;;
+         ;; 高さは Windows と違って作業領域いっぱいにしない (実測した 72 行を
+         ;; そのまま使う。いっぱいだと 75 行)。
+         (or (my:frame-geometry-right-edge nil 180 72)
+             ;; tty / batch 用のフォールバック。LG HDR 4K の
+             ;; workarea 0 31 2560 1409・文字セル 8x18px・外枠 16x54px での値。
+             '((top . 31) (left . 1104) (width . 180) (height . 72)))
          initial-frame-alist))
   (setq default-frame-alist (append initial-frame-alist default-frame-alist)))
 
