@@ -285,6 +285,10 @@ zsh 版だけは**カレントディレクトリ（OSC 7）もこのスクリプ
 （pwsh は `etc/pwsh-emacs-shell.ps1`、bash は利用者の PS1 が出しているが、
 starship は出さないため）。
 
+**yazi も同じ道で Emacs に開く。** `~/.config/yazi`（dotfiles 側。このリポジトリの外）の
+プラグイン `embterm-open.yazi` が `<Enter>` を差し替え、EmbTerm の中なら
+ファイルは `find-file-other-window`、ディレクトリは `dired-other-window`、外では従来どおり vim。
+
 **ホイール**は、マウスを見るアプリ（claude / vim / yazi）の上では**アプリに渡る**ので、
 アプリが自分でスクロールする。端末のスクロールバックを遡りたいときは **`Shift` + ホイール**
 （`S-<prior>` / `S-<next>` でも。代替画面のアプリにはスクロールバックが無い）。
