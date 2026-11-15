@@ -1,6 +1,8 @@
 ;;; my-genpreview.el --- GenPreview でファイルをプレビューする  -*- lexical-binding: t -*-
 ;;; Commentary:
-;; GenPreview (~/Projects/GenPreview) の Emacs 連携。Windows のみ。
+;; GenPreview (~/Projects/GenPreview) の Emacs 連携。GenPreview 自体は
+;; Windows のみ。**macOS では dired の `v' を Preview.app に回す**
+;; (同じ拡張子の表を使う。下の「macOS では Preview.app に渡す」)。
 ;;
 ;; 画像 (HEIC を含む)、SVG、PDF、Markdown、ソースコードを、Direct2D で描いた
 ;; 画像として Emacs のバッファに表示する。描画は dynamic module
@@ -84,21 +86,81 @@ GenPreview 側の各フォーマットの `extensions()' から取ってある�
        (not (file-directory-p file))
        t))
 
-(defun my:genpreview-dired-view-file (&optional plain)
-  "dired の `v'。GenPreview が扱える形式ならプレビューする。
+;;; --------------------------------------------------
+;;; macOS では Preview.app に渡す
+;;; --------------------------------------------------
 
-`my:genpreview-extensions' に載っている拡張子なら
-`genpreview-dired-preview' に渡す。それ以外 (ディレクトリ、ソースコード、
-GenPreview が無い環境) は素の `dired-view-file'。
+;; GenPreview は Direct2D / WIC / pdfium を直に叩くので Windows から出られない。
+;; macOS で同じ役目を果たすのは Preview.app なので、`my:genpreview-extensions'
+;; と同じ表を使って open(1) に渡す。表を 2 つ持たないのは、GenPreview 側に
+;; 形式が増えたときに mac だけ取り残されないようにするため。
+
+(defcustom my:genpreview-mac-exclude-extensions
+  '(;; SVG。Preview.app は public.svg-image を宣言していない
+    ;; (Quick Look は描けるが Preview.app では開けない)
+    "svg" "svgz"
+    ;; JPEG XR (Windows HD Photo)。WIC 専用
+    "jxr" "wdp"
+    ;; Markdown と表。Emacs で読んだほうが速く、検索も移動もできる
+    "md" "markdown" "mdown" "mkd" "mkdn" "mdx"
+    "csv" "tsv")
+  "macOS で Preview.app に渡さない拡張子。ドット無し・小文字で書く。
+
+`my:genpreview-extensions' から引いて使う。GenPreview (Windows) が扱える
+形式のうち、**Preview.app が `CFBundleDocumentTypes' に宣言していないもの**を
+並べてある (/System/Applications/Preview.app/Contents/Info.plist を実測)。
+渡しても「開けません」と言われるだけなので、ここに載せたものは素の
+`dired-view-file' に落とす。
+
+画像 (RAW を含む)・HEIF / HEIC・PDF は宣言があるので除外していない。"
+  :type '(repeat string))
+
+(defun my:genpreview-mac-previewable-p (file)
+  "FILE を macOS の Preview.app に渡すなら non-nil。"
+  (and (eq system-type 'darwin)
+       (let ((ext (file-name-extension file)))
+         (and ext
+              (member (downcase ext) my:genpreview-extensions)
+              (not (member (downcase ext) my:genpreview-mac-exclude-extensions))))
+       ;; 拡張子が一致したときだけ stat する (f.pdf という名前のディレクトリ)。
+       (not (file-directory-p file))
+       t))
+
+(defun my:genpreview-mac-preview (file)
+  "FILE を Preview.app で開く。"
+  (let ((file (expand-file-name file)))
+    (unless (file-exists-p file)
+      (user-error "No such file: %s" file))
+    ;; -b はバンドル識別子。-a \"Preview\" はアプリ名での検索になるので、
+    ;; 同名のアプリや表示名のローカライズに左右されうる。
+    ;; DESTINATION の 0 で非同期にして Emacs を待たせない
+    ;; (`my:open-file-externally' と同じ)。
+    (call-process "open" nil 0 nil "-b" "com.apple.Preview" file)
+    (message "Preview.app: %s" (abbreviate-file-name file))))
+
+;;; --------------------------------------------------
+;;; dired の v の振り分け
+;;; --------------------------------------------------
+
+(defun my:genpreview-dired-view-file (&optional plain)
+  "dired の `v'。絵として見たい形式を外部のプレビューに回す。
+
+`my:genpreview-extensions' に載っている拡張子なら、Windows では
+`genpreview-dired-preview'、macOS では Preview.app
+(`my:genpreview-mac-preview') に渡す。それ以外 (ディレクトリ、
+ソースコード、Preview.app が開けない形式、GenPreview が無い環境) は
+素の `dired-view-file'。
 
 \\[universal-argument] を付けると PLAIN が non-nil になり、常に
 `dired-view-file' で開く。CSV や Markdown を `view-mode' の中で
 検索したいときの逃げ道。"
   (interactive "P")
-  (if (and (not plain)
-           (my:genpreview-previewable-p (dired-get-file-for-visit)))
-      (genpreview-dired-preview)
-    (dired-view-file)))
+  (let ((file (dired-get-file-for-visit)))
+    (cond
+     (plain (dired-view-file))
+     ((my:genpreview-previewable-p file) (genpreview-dired-preview))
+     ((my:genpreview-mac-previewable-p file) (my:genpreview-mac-preview file))
+     (t (dired-view-file)))))
 
 ;;; --------------------------------------------------
 ;;; 有効化 (Windows で配布物があるときだけ)
@@ -112,13 +174,19 @@ GenPreview が無い環境) は素の `dired-view-file'。
   ;; 表示は、単体ウィンドウ版のビューアを Emacs のウィンドウに重ねる方式が既定
   ;; (`genpreview-view'。GenPreview の ADR 0008、2026-11-10 から)。不調なら
   ;; (setq genpreview-view nil) で画像の短冊を貼る従来の表示に戻る。
-  ;; genpreview.el はまだ読まれていないが、defcustom は既に値があれば上書きしない
-  ;; dired の v (view) を乗せ替える。
-  ;;
-  ;; dired-x は v を触らないので (奪うのは V / F / M-! / M-( / C-x M-o)、
-  ;; my-dired.el の V のようにロード順を気にしなくてよい。
-  ;; `dired-sidebar-mode-map' は `dired-mode-map' を継承するので
-  ;; サイドバー (F8) でもそのまま効く。
+  ;; genpreview.el はまだ読まれていないが、defcustom は既に値があれば上書きしない。
+  )
+
+;; dired の v (view) を乗せ替える。Windows は GenPreview、macOS は Preview.app。
+;; どちらも無い環境 (Linux、配布物が無い Windows) では素の `dired-view-file' の
+;; ままにしておく。
+;;
+;; dired-x は v を触らないので (奪うのは V / F / M-! / M-( / C-x M-o)、
+;; my-dired.el の V のようにロード順を気にしなくてよい。
+;; `dired-sidebar-mode-map' は `dired-mode-map' を継承するので
+;; サイドバー (F8) でもそのまま効く。
+(when (or (my:genpreview-available-p)
+          (eq system-type 'darwin))
   (with-eval-after-load 'dired
     (define-key dired-mode-map "v" #'my:genpreview-dired-view-file)))
 

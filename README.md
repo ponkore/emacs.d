@@ -137,7 +137,7 @@ git clone git@github.com:ponkore/emacs.d.git ~/.emacs.d
 | `my-ghostel` | libghostty の端末を dynamic module で動かす（`C-c S`）。EmbTerm に移る間だけ残している |
 | `my-embterm` | EmbTerm の端末を Emacs のウィンドウに重ねて動かす（`C-c s`）。Ghostel の置き換え候補。Windows / macOS |
 | `my-ideco` | iDeCo の日次サマリを psql で見る（`M-x check-ideco`） |
-| `my-genpreview` | GenPreview でファイルをプレビューする（`M-x genpreview-open`、dired の `v`）。Windows のみ |
+| `my-genpreview` | GenPreview でファイルをプレビューする（`M-x genpreview-open`、dired の `v`）。Windows のみ。**macOS では同じ `v` が Preview.app を開く** |
 | `my-translate` | ローカル LLM（PLaMo 3 Translate）で翻訳する（`C-c T`）。モデルが無ければ無効 |
 | `my-platform` | Windows / macOS 固有設定 |
 
@@ -525,7 +525,7 @@ machine 192.168.1.5 port 5432 login postgres password ********
 |---|---|
 | `.` | hydra |
 | `RET` / `f` / `e` | 開く（Excel なら OS の関連付けへ） |
-| `v` | プレビュー（PDF / 画像 / SVG / markdown / CSV は GenPreview。`C-u` で `view-mode`） |
+| `v` | プレビュー（PDF / 画像 / SVG / markdown / CSV は GenPreview。macOS では PDF と画像を Preview.app。`C-u` で `view-mode`） |
 | `TAB` / `S-TAB` | サブツリーの開閉 / 巡回 |
 | `V` | `dired-vc-status` |
 | `G` | ripgrep |
