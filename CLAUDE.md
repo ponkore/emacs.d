@@ -1452,6 +1452,41 @@ EmbTerm（`my:embterm-source-directory`。設計と決定事項はあちらの `
   成功時の `kill-buffer` でその編集が黙って消える。札
   （`my:htnblog--posting`）は二重送信と `C-u M-x htnblog` の入れ直しも断る
 
+## `my-shell` — ログインシェルの環境変数（mac / Linux）
+
+GUI から起動した Emacs は PATH も `SSH_AUTH_SOCK` も持っていないので
+ログインシェルから引く。**その値段は対話シェル 1 回ぶん**で、ここでは
+**1051 ms** かかっていた（`zsh -l -i` が 650 ms。zim / compinit / starship /
+zoxide、なかでも nvm だけで 282 ms。`zsh -l` なら 13 ms だが、**それでは
+`.zshrc` を読まないので何も取れない**）。そのため値はキャッシュし、
+**起動時は子プロセスを 1 本も起こさない**。取り直しは
+`emacs-startup-hook` から非同期で 1 回だけ走る。
+
+- **「素の `exec-path-from-shell-initialize` と同じ値になること」が正しさの
+  基準。** 検算は「キャッシュ有りの起動」と「キャッシュ無しの起動」で
+  `getenv "PATH"` を突き合わせる（clean env の batch で実測して一致）
+- **【重要】取り直しのシェルには、起動時の環境（`my:shell-env--initial`）を
+  復元して渡す。** `.zshrc` は `PATH=/opt/homebrew/bin:$PATH` の形で既存の
+  値の前に積むので、**キャッシュを当てた後の PATH を渡すと同じ要素が
+  二重に入る**。それをキャッシュすると次の起動がその値から始まるので
+  **起動のたびに PATH が伸びる**（実測で 27 → 37 要素。エラーは出ない）
+- **【重要】`my:shell-env--normalize` が PATH / MANPATH の重複を落とす**
+  （二重の保険。端末から起動した Emacs では起動時の環境自体に PATH が
+  通っているので、上の復元だけでは防げない）。探索は先に一致したものが
+  勝つので意味は変わらない
+- **`-i` を外して速くしてはいけない。** `SSH_AUTH_SOCK`（Bitwarden の SSH
+  agent）の export は `.zshrc` 側 = 対話シェル専用で、zsh の非対話
+  ログインシェルは `.zshrc` を読まない。**速くする方向は「起こさない」**
+- 未設定と空文字列を区別する（印は `my:shell-env--unset`）。`MANPATH` を
+  空文字列で設定すると man の既定の探索パスが消える
+- 出力は `__RESULT` で囲んだ範囲だけ読む。`-i` で tty が無い zsh は
+  `can't change option: zle` を書くので、素で読むと混ざる
+- キャッシュ（`shell-env-cache.el`。git 管理外）は**消しても壊れない**。
+  次の起動が同期で引き直して作り直す（その 1 回だけ 1 秒払う。警告は
+  `exec-path-from-shell-warn-duration-millis` を束縛して黙らせてある）
+- `brew install` や `.zshrc` の編集をすぐ反映したいときは
+  **`M-x my:shell-env-refresh`**（次の起動を待ってもよい）
+
 ## `my-ideco` — iDeCo の日次サマリ（`M-x check-ideco`）
 
 psql を 1 回起こして、`ideco_daily_summary` の直近の推移と、最新の日の

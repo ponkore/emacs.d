@@ -57,25 +57,238 @@ UTF-8 固定・starship・OSC 7 の設定が入っている。")
 
 ;;; [3] exec-path-from-shell
 
+;; GUI から起動した Emacs は launchd (mac) / デスクトップ環境 (Linux) が渡す
+;; 最小限の PATH しか持たないので、ログインシェルから引き直す必要がある。
+;; 問題はその値段で、対話シェル (-i) を起こすと zim / compinit / nvm /
+;; starship / zoxide が全部走る。実測 (mac, 2026-11-16):
+;;
+;;   zsh -l       13 ms   .zshrc を読まないので PATH も SSH_AUTH_SOCK も空
+;;   zsh -l -i   650 ms   必要な値は揃う (うち nvm_auto だけで 282 ms)
+;;
+;; Emacs の中では 1051 ms かかっていて、exec-path-from-shell 自身が
+;; 「execution took 1051ms」と警告を出していた。
+;;
+;; 欲しいのは 3 つの文字列だけで、しかもほとんど変わらない。そこで
+;;
+;;   起動時   : キャッシュを当てる (子プロセス 0 本、ファイル 1 つを読むだけ)
+;;   起動直後 : 裏でシェルを 1 回起こし、違っていればその場で直してキャッシュを更新
+;;
+;; という形にした。シェルは起動のたびに必ず起こすので「キャッシュだから古い」
+;; 状態は起動から 1 秒ほどで閉じる。dotfiles の構造には触らない。
+;;
+;; SSH_AUTH_SOCK を引いているのは Bitwarden の SSH agent のため。GUI から
+;; 起動した Emacs は launchd が渡す macOS 標準 agent
+;; (/var/run/com.apple.launchd.*/Listeners) を指したままで、そこには鍵が
+;; 1 本も入っていない。ローカルに秘密鍵ファイルを置かない運用だと magit や
+;; TRAMP の公開鍵認証が黙って全滅する。
+;;
+;; 【重要】ソケットの export は .zshrc 側に書いてある = 対話シェル専用なので、
+;; `exec-path-from-shell-arguments' から "-i" を外すと引けなくなる
+;; (zsh の非対話ログインシェルは .zshrc を読まない。実測済み)。既定値が
+;; '("-l" "-i") であることに依存している。**速くするために "-i" を外すのでは
+;; なく、起動時に起こさないことで速くしている。**
+
+;; exec-path-from-shell は mac / Linux でしか読まないので、flymake のために
+;; 宣言しておく (バイトコンパイルしない方針なのでロード時には出ない)。
+(declare-function exec-path-from-shell-setenv "exec-path-from-shell" (name value))
+(declare-function exec-path-from-shell-getenvs "exec-path-from-shell" (names))
+(defvar exec-path-from-shell-variables)
+(defvar exec-path-from-shell-arguments)
+(defvar exec-path-from-shell-shell-name)
+(defvar exec-path-from-shell-warn-duration-millis)
+
+(defvar my:shell-env-cache-file
+  (expand-file-name "shell-env-cache.el" user-emacs-directory)
+  "ログインシェルから引いた環境変数のキャッシュ。
+マシンごとに違う値なので git の管理外に置く (.gitignore 済み)。
+消しても壊れない (次の起動が同期で引き直して作り直す)。")
+
+(defconst my:shell-env--unset "__my:shell-env-unset__"
+  "シェル側で変数が未設定だったことを表す印。
+空文字列では「未設定」と「空」が区別できない。たとえば MANPATH を
+空文字列で設定すると man の既定の探索パスが消える。")
+
+(defconst my:shell-env--path-like '("PATH" "MANPATH")
+  "コロン区切りの探索パスとして扱う変数。重複を落とす対象。")
+
+(defvar my:shell-env--initial nil
+  "この Emacs が起動した時点、つまり何も当てる前の値。
+取り直すときにこれを復元してシェルへ渡す。理由は
+`my:shell-env-refresh' の docstring を参照。")
+
+(defvar my:shell-env--process nil
+  "`my:shell-env-refresh' が起こしたプロセス。二重起動の抑止に使う。")
+
+(defun my:shell-env--read-cache ()
+  "`my:shell-env-cache-file' を読んで ((NAME . VALUE) ...) を返す。
+読めない・壊れているときは nil。起動を止めてはいけないので握り潰す。"
+  (ignore-errors
+    (when (file-readable-p my:shell-env-cache-file)
+      (with-temp-buffer
+        (insert-file-contents my:shell-env-cache-file)
+        (let ((alist (read (current-buffer))))
+          (and (consp alist) (consp (car alist)) alist))))))
+
+(defun my:shell-env--write-cache (alist)
+  "ALIST を `my:shell-env-cache-file' に書く。"
+  (ignore-errors
+    (with-temp-file my:shell-env-cache-file
+      (let ((print-length nil)
+            (print-level nil))
+        (insert ";; -*- lexical-binding: t -*-\n"
+                ";; my-shell.el が自動生成する。手で書いても次の起動で上書きされる。\n")
+        (prin1 alist (current-buffer))
+        (insert "\n")))))
+
+(defun my:shell-env--normalize (alist)
+  "ALIST の PATH / MANPATH から重複した要素を落とす (先に出たものを残す)。
+
+【重要】これが無いと PATH が起動のたびに伸びる。.zshrc は
+\"PATH=/opt/homebrew/bin:$PATH\" の形で既存の値の前に積んでいくので、
+既に PATH が通った Emacs からシェルを起こすと同じ要素が二重に入る
+\(実測: 27 要素が 37 要素になった)。それをキャッシュすると次の起動が
+その値から始まるので、際限なく積み上がる。探索は先に一致したものが
+勝つので、重複を落としても意味は変わらない。"
+  (mapcar (lambda (pair)
+            (if (and (member (car pair) my:shell-env--path-like)
+                     (cdr pair))
+                (cons (car pair)
+                      (string-join (delete-dups (split-string (cdr pair) ":")) ":"))
+              pair))
+          alist))
+
+(defun my:shell-env--apply (alist)
+  "ALIST の環境変数をこのセッションに反映し、実際に変えた名前の一覧を返す。
+PATH のときは `exec-path' と `eshell-path-env' も揃う
+\(`exec-path-from-shell-setenv' の仕事)。"
+  (let (changed)
+    (pcase-dolist (`(,name . ,value) alist)
+      (unless (equal value (getenv name))
+        ;; SSH_AUTH_SOCK の実体が消えていることがある (Bitwarden を終了した
+        ;; 後など)。死んだソケットを掴ませると ssh は agent が無い場合と違って
+        ;; 「繋げない」で失敗するので、launchd が渡したものを残したまま
+        ;; 裏の取り直しに任せる。
+        (unless (and (equal name "SSH_AUTH_SOCK")
+                     value
+                     (not (file-exists-p value)))
+          (exec-path-from-shell-setenv name value)
+          (push name changed))))
+    (nreverse changed)))
+
+(defun my:shell-env--command ()
+  "ログインシェルに環境変数を出力させるコマンド行を返す。"
+  (let* ((names exec-path-from-shell-variables)
+         (shell (or exec-path-from-shell-shell-name
+                    shell-file-name
+                    (getenv "SHELL")
+                    "/bin/sh"))
+         (printf (or (executable-find "printf") "printf"))
+         ;; __RESULT で囲むのは exec-path-from-shell と同じ理由。対話シェルの
+         ;; 初期化スクリプトや zsh 自身 (-i で tty が無いと "can't change
+         ;; option: zle") が標準出力・標準エラーに書くので、素で読むと混ざる。
+         (expr (concat (shell-quote-argument printf)
+                       " '__RESULT\\000"
+                       (mapconcat (lambda (_) "%s") names "\\000")
+                       "\\000__RESULT' "
+                       (mapconcat (lambda (name)
+                                    (format "\"${%s-%s}\"" name my:shell-env--unset))
+                                  names " "))))
+    (append (list shell) exec-path-from-shell-arguments (list "-c" expr))))
+
+(defun my:shell-env--parse (buffer)
+  "BUFFER に出たシェルの出力を ((NAME . VALUE) ...) に直す。読めなければ nil。"
+  (with-current-buffer buffer
+    (goto-char (point-min))
+    (when (re-search-forward "__RESULT\0\\(.*\\)\0__RESULT" nil t)
+      (let ((values (split-string (match-string 1) "\0")))
+        (when (= (length values) (length exec-path-from-shell-variables))
+          (my:shell-env--normalize
+           (seq-mapn (lambda (name value)
+                       (cons name (unless (equal value my:shell-env--unset) value)))
+                     exec-path-from-shell-variables values)))))))
+
+(defun my:shell-env--sentinel (proc _event)
+  "シェルが終わったら値を反映してキャッシュを更新する。"
+  (when (memq (process-status proc) '(exit signal))
+    (let ((buffer (process-buffer proc)))
+      (unwind-protect
+          (let ((alist (and (eq (process-status proc) 'exit)
+                            (zerop (process-exit-status proc))
+                            (buffer-live-p buffer)
+                            (my:shell-env--parse buffer))))
+            (if (not alist)
+                ;; 黙って失敗させない。ここが落ちると PATH が永久に
+                ;; キャッシュのまま古くなるので、気づく手がかりを残す。
+                (message "my:shell-env-refresh: シェルから値を取れなかった (exit %s)"
+                         (process-exit-status proc))
+              (let ((changed (my:shell-env--apply alist)))
+                (my:shell-env--write-cache alist)
+                (when changed
+                  (message "シェルの環境変数を更新した: %s"
+                           (mapconcat #'identity changed " "))))))
+        (when (buffer-live-p buffer)
+          (kill-buffer buffer))))))
+
+(defun my:shell-env-refresh (&optional interactive)
+  "ログインシェルから環境変数を取り直し、キャッシュを更新する。
+非同期なのでこの呼び出し自体はすぐ返る。値が変わっていればその場で反映する。
+`brew install' や .zshrc の編集を今すぐ反映したいときは手で呼ぶ。
+
+シェルに渡す環境は `my:shell-env--initial' に戻してから起動する。
+キャッシュを当てた後の PATH を渡すと、.zshrc が既にある要素をもう一度
+前に積むため、素の `exec-path-from-shell-initialize' とは違う値になる
+\(重複は `my:shell-env--normalize' も落とすが、二重の保険にしている)。"
+  (interactive (list t))
+  (unless (boundp 'exec-path-from-shell-arguments)
+    (user-error "この環境では exec-path-from-shell を使っていない"))
+  (if (process-live-p my:shell-env--process)
+      (when interactive (message "取り直しはすでに走っている"))
+    ;; TRAMP のバッファから呼ばれるとリモートでシェルが起動してしまう。
+    (let* ((default-directory (expand-file-name "~"))
+           (process-environment (copy-sequence process-environment))
+           (buffer (generate-new-buffer " *shell-env*")))
+      (pcase-dolist (`(,name . ,value) my:shell-env--initial)
+        (setenv name value))
+      (setq my:shell-env--process
+            (make-process :name "shell-env"
+                          :buffer buffer
+                          :command (my:shell-env--command)
+                          :connection-type 'pipe
+                          :coding '(utf-8-unix . utf-8-unix)
+                          :noquery t
+                          :sentinel #'my:shell-env--sentinel))
+      (when interactive
+        (message "シェルの環境変数を取り直している…")))))
+
 (use-package exec-path-from-shell
   :straight t
   ;; macOS 限定だったが、Linux でも GUI 起動時はログインシェルの
   ;; 環境変数を引き継がないため必要になる。
   ;; berkeley-unix (FreeBSD) は対象外にした (計画書の L-4)
   :if (memq system-type '(darwin gnu/linux))
-  ;; SSH_AUTH_SOCK を足してあるのは Bitwarden の SSH agent のため。
-  ;; GUI から起動した Emacs は launchd が渡す macOS 標準 agent
-  ;; (/var/run/com.apple.launchd.*/Listeners) を指したままで、そこには
-  ;; 鍵が 1 本も入っていない。ローカルに秘密鍵ファイルを置かない運用だと
-  ;; magit や TRAMP の公開鍵認証が黙って全滅する。
-  ;;
-  ;; 注意: ソケットの export は .zshrc 側に書いてある = 対話シェル専用なので、
-  ;; `exec-path-from-shell-arguments' から "-i" を外すと引けなくなる
-  ;; (zsh の非対話ログインシェルは .zshrc を読まない。実測済み)。
-  ;; 既定値が '("-l" "-i") であることに依存している。
   :custom (exec-path-from-shell-variables '("PATH" "MANPATH" "SSH_AUTH_SOCK"))
   :config
-  (exec-path-from-shell-initialize))
+  ;; 当てる前の値を覚えておく (取り直しのときにこれを渡す)。
+  (setq my:shell-env--initial
+        (mapcar (lambda (name) (cons name (getenv name)))
+                exec-path-from-shell-variables))
+  (let ((cache (my:shell-env--read-cache)))
+    (if (and cache
+             ;; 変数を足した直後はキャッシュに無いものがある。
+             (seq-every-p (lambda (name) (assoc name cache))
+                          exec-path-from-shell-variables))
+        (my:shell-env--apply cache)
+      ;; キャッシュが無い初回だけ同期で引く。my-shell より後ろのモジュールが
+      ;; executable-find を使うので、ここを非同期にすると PATH が決まる前に
+      ;; 判定が走る。1 回払えば次の起動からは 0 になるので警告は黙らせる。
+      (let* ((exec-path-from-shell-warn-duration-millis most-positive-fixnum)
+             (alist (my:shell-env--normalize
+                     (exec-path-from-shell-getenvs exec-path-from-shell-variables))))
+        (my:shell-env--apply alist)
+        (my:shell-env--write-cache alist))))
+  ;; 起動が済んでから裏で取り直す。make-process はすぐ返るので起動時間には
+  ;; 乗らない。
+  (add-hook 'emacs-startup-hook #'my:shell-env-refresh))
 
 ;;; [3] Windows環境用 Shell
 

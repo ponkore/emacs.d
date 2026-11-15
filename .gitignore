@@ -50,3 +50,7 @@
 # --- embterm (2026-11) ---
 # EmbTerm の配布物（M-x my:embterm-update が EmbTerm のリポジトリの target/dist から写す）
 /embterm/
+
+# --- shell-env cache (2026-11) ---
+# my-shell.el が書くログインシェルの環境変数のキャッシュ（マシン固有）
+/shell-env-cache.el

@@ -130,7 +130,7 @@ git clone git@github.com:ponkore/emacs.d.git ~/.emacs.d
 | `my-vc` | magit、diff-hl（`C-c g`）、Windows の SVN 対応 |
 | `my-gitd` | magit の git 実行を常駐プロセスに肩代わりさせる。Windows のみ |
 | `my-magit-watch` | リポジトリを監視して magit バッファと dired の VC マークを自動更新（Windows はワークツリー全体、mac は `.git/` のみ） |
-| `my-shell` | exec-path-from-shell、Windows 用 shell 設定 |
+| `my-shell` | ログインシェルの環境変数（exec-path-from-shell。起動時はキャッシュを当て、裏で取り直す）、Windows 用 shell 設定 |
 | `my-utils` | calendar（日本の祝日）、open-junk-file、grep/ripgrep、server |
 | `my-claude` | Claude Code を stream-json で使う（`C-c a`） |
 | `my-htnblog` | はてなブログ AtomPub API へ投稿する（`M-x htnblog`） |
@@ -440,6 +440,11 @@ machine 192.168.1.5 port 5432 login postgres password ********
 - **カレンダーに日本の祝日**（`japanese-holidays`。Emacs 本体には入っていない）
 - **PDF をバッファでプレビュー**（`doc-view-mode` + mupdf。SVG で出るので拡大しても崩れない）
 - **editorconfig**（Emacs 30 で本体入り）
+- **起動時にログインシェルを起こさない**（mac / Linux。GUI 起動の Emacs が
+  欲しいのは PATH / MANPATH / `SSH_AUTH_SOCK` の 3 つだけで、しかもほとんど変わらないので
+  キャッシュから当てる。対話シェルは **1051 ms** かかるので起動時には払わず、
+  起動直後に裏で 1 回起こして違っていたらその場で直す。
+  すぐ反映したいときは `M-x my:shell-env-refresh`）
 
 ---
 
