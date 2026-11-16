@@ -8,6 +8,10 @@
 当初は公開情報からの見積もりだけだったが、**同日に実機で測って裏を取った**。
 見積もりだった箇所は実測値に差し替え、**見積もりと実測のずれも残してある**（§4）。
 
+**§9 までは Windows（Intel iGPU + Vulkan）の話。**
+**macOS（Apple Silicon + Metal）での手順と実測は §10**
+（2026-11-16 に追記。Emacs 側のコードは無改修で動いた）。
+
 ## 結論
 
 **できる。実機で動かして確認した。** ただし
@@ -944,6 +948,87 @@ and replace a sub-expression, e.g.
 - Intel ドライバの更新で `coopmat` が直るか（直れば pp が 2.3 倍になる）
 - SYCL / OpenVINO バックエンド。OpenVINO は NPU を使える可能性がある
 - 対訳履歴を積んだときの文体と訳語の安定度（§4.5-2 の対策の効果）
+
+---
+
+## 10. macOS（Apple Silicon）で動かす — 2026-11-16 実測
+
+Windows で作ったものを mac に移すのに、**Emacs 側のコードの変更は要らなかった**
+（`my:translate-disable-coopmat` の既定値だけ OS で分けた）。違うのは
+`llama-server` の入手先だけで、モデルの置き場も `my:translate-server-args` も共通。
+
+### 環境
+
+| | |
+|---|---|
+| マシン | Apple M1 Max / メモリ 32 GB / macOS 27.2（26B123） |
+| GPU | MTLGPUFamilyApple7。`recommendedMaxWorkingSetSize` = **26800 MB** |
+| llama.cpp | **`brew install llama.cpp`**（1.0.0 / build 12359 / commit b1b770d90）。bottle なので**ビルド不要** |
+| バックエンド | **Metal**（`BLAS,MTL`）。unified memory なので CPU ↔ GPU の転送が無い |
+
+### 手順（これだけ）
+
+```sh
+brew install llama.cpp
+mkdir -p ~/.local/share/plamo-models && cd ~/.local/share/plamo-models
+for m in 0.8b 2b; do
+  f="plamo-3-translate-$m-Q4_K_M.gguf"
+  curl -sL -o "$f" "https://huggingface.co/pfnet/plamo-3-translate-$m-GGUF/resolve/main/$f"
+done
+```
+
+- **置き場の指定は要らない。** `my:translate--llama-server` は
+  `my:translate-search-dirs` を見てから `executable-find` に落ちるので、
+  brew の `/opt/homebrew/bin/llama-server` を PATH から拾う。GUI 起動の
+  Emacs でも `my-shell.el` がキャッシュした PATH に `/opt/homebrew/bin` が
+  入っている（起動中の Emacs で実測）
+- **モデルの置き場は Windows と同じ**（`~/.local/share/plamo-models/`）。
+  `:match` が `0.8b` / `-2b` なので、pfnet の公式ファイル名のまま置けば
+  プロファイルに当たる
+- Homebrew の llama.cpp は `--no-webui` / `-ngl` / `-b` / `-ub` /
+  `--parallel` を全部受ける（`my:translate-server-args` は無改修で通る）
+- モデルは gated ではない（HF のトークンも同意も要らない）。計 2.2 GB
+
+### 【重要】`coopmat` は Windows だけの話
+
+`GGML_VK_DISABLE_COOPMAT=1` は **Vulkan バックエンドの変数**で、Metal には
+coopmat が無い。立てても害は無いが、無関係な環境変数が残ると原因を探すときに
+紛らわしいので、既定値を `(eq system-type 'windows-nt)` にした。
+**§3.4 の罠そのものは Windows で有効**なので、あちらでは外さない。
+
+### 速度（`llama-bench`、`-ngl 99 -p 512 -n 128`）
+
+| モデル | | pp512 | tg128 |
+|---|---|---|---|
+| **0.8b** | **mac（Metal）** | **5630.1 tok/s** | **249.9 ± 65.3 tok/s** |
+| | Windows（Vulkan、coopmat 切） | 2178 | 123.5 ± 3.0 |
+| **2b** | **mac（Metal）** | **1472.9 tok/s** | **117.3 ± 0.2 tok/s** |
+| | Windows（Vulkan、coopmat 切） | 613 | 36.0 ± 4.1 |
+
+**生成は 0.8b で 2.0 倍、2b で 3.3 倍速く**、プロンプト処理も 2.4〜2.6 倍。
+0.8b の tg の分散が大きい（± 65）のは小さすぎて 1 回の実行が短いため。
+2b は ± 0.2 で安定している。
+
+**mac では 2b が Windows の 0.8b より速い**（117 対 123 tok/s はほぼ同等で、
+プロンプト処理は 2.4 倍）。`C-u`（丁寧なほう）を常用してよい。
+
+### end-to-end（Emacs 経由、`my:translate--post`）
+
+| | |
+|---|---|
+| 0.8b で 1 文、**サーバのコールドスタート込み** | **1.95 秒** |
+| 2b で 1 文、同（0.8b が常駐した状態で 2 本目を起こす） | **2.38 秒** |
+| 常駐後の 1 文（curl、0.8b） | **0.41 秒**（生成 222.6 tok/s） |
+
+0.8b + 2b の 2 本（2.2 GB）を同時に常駐させても問題ない（§4.6 と同じ）。
+
+### §2 の「31b は使わない」の前提は Windows の数字
+
+[CLAUDE.md](../../CLAUDE.md) §2 の判断は「iGPU から使える 17.6 GB に Q4_K_M の
+19.5 GB が載らない」という**このマシンでは成り立たない前提**に拠っている
+（mac の working set は 26.8 GB なので、数字の上では載る）。
+**それでも変えない。** 2b が 117 tok/s 出て訳質も足りており、31b は帯域から
+見ても 20 tok/s 程度で、同じ用途に 19.5 GB を常駐させる理由が無い。
 
 ---
 

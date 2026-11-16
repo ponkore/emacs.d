@@ -1600,14 +1600,24 @@ PLaMo 3 Translate を `llama-server` に持たせて常駐させ、localhost へ
 投げる。**Phase 1〜4（リージョン/段落・コメントの overlay・markdown・
 help バッファ）まで実装済み。**
 
-- **【重要】`my:translate-disable-coopmat` を nil にしてはいけない。**
+- **Windows / macOS の両方で動く。違うのは実行ファイルの入手先だけ。**
+  Windows は Vulkan ビルドの zip を `~/.local/opt/llama.cpp-*/` に展開、
+  **mac は `brew install llama.cpp`**（`my:translate--llama-server` の最後が
+  `executable-find` なので PATH で拾う。`my-shell.el` がキャッシュした PATH に
+  `/opt/homebrew/bin` が入っている）。**モデルの置き場は共通**
+  （`~/.local/share/plamo-models/`）。mac の実測は
+  [docs §10](docs/translate/plamo-3-translate-study.md)
+- **【重要】Windows では `my:translate-disable-coopmat` を nil にしてはいけない。**
   `GGML_VK_DISABLE_COOPMAT=1` が無いと Intel の iGPU で **GPU が落ちて
   `llama-server` がプロセスごと死ぬ**（終了コード 9）。実測で 3 回再現。
   **落ちるまでの時間が毎回違い（175 / 26 / 34 秒）、Windows の
   イベントログに 4101 も出ない**ので、知らずに当たると原因が分からない。
   `-b` / `-ub` の縮小も `--parallel 1` も効かない。
   切っても**生成速度は落ちない**（123.5 対 121.5 tok/s。プロンプト処理だけ
-  57% 落ちるが、翻訳は生成律速なので実質タダ）
+  57% 落ちるが、翻訳は生成律速なので実質タダ）。
+  **既定値は `(eq system-type 'windows-nt)`。** これは Vulkan だけに効く
+  変数で、**Metal には coopmat が無い**ので mac では立てない（立てても害は
+  無いが、無関係な環境変数が残ると紛らわしい）
 - **【重要】訳文の検証は `string-search` で行う。`string-match` は使えない。**
   保護対象（インラインコード・URL）にはバッククォート・括弧・ドットが
   含まれるので、正規表現として解釈されると**全件が「消失」と誤報される**
@@ -1910,7 +1920,9 @@ U+2605 と U+203B は手元のどのフォントでも全角。撤去した `my-
 はみ出させる。EmbTerm の `embterm-narrow-wide`）。
 → [docs/pty/ghostel.md](docs/pty/ghostel.md)
 
-### 翻訳は `coopmat` を切っている間、プロンプト処理が 2.3 倍遅い（2026-11-05）
+### 翻訳は `coopmat` を切っている間、プロンプト処理が 2.3 倍遅い（2026-11-05、Windows のみ）
+
+**mac には関係ない**（Metal に coopmat が無いので既定で立てない）。
 
 Intel のドライバの不具合を避けるために `GGML_VK_DISABLE_COOPMAT=1` を立てて
 いる（§3 `my-translate`）ので、プロンプト処理が 5092 → 2178 tok/s に落ちている。

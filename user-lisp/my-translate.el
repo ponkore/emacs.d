@@ -7,7 +7,11 @@
 ;; 構成は常駐サーバ + HTTP。llama.cpp の `llama-server' にモデルを持たせて
 ;; 常駐させ、Emacs からは localhost へ JSON を投げる。
 ;;
-;;   Emacs ──HTTP(localhost)──> llama-server.exe ──Vulkan──> iGPU
+;;   Emacs ──HTTP(localhost)──> llama-server ──Vulkan / Metal──> GPU
+;;
+;; Windows (Intel iGPU + Vulkan) と macOS (Apple Silicon + Metal) の両方で
+;; 動く。違うのは実行ファイルの入手先と `my:translate-disable-coopmat' の
+;; 既定値だけで、Emacs 側の経路は 1 本。
 ;;
 ;; リクエストごとにプロセスを起こさないのは、Windows の Emacs では
 ;; `call-process' のプロセス生成だけで 59〜76 ms 払うため (CLAUDE.md)。
@@ -17,7 +21,8 @@
 ;; 触る前にそちらを読むこと。とくに次の 3 つは知らないと必ず踏む。
 ;;
 ;;   1. Intel の Vulkan は `GGML_VK_DISABLE_COOPMAT=1' が無いと GPU が
-;;      落ちてサーバがプロセスごと死ぬ (§3.4)
+;;      落ちてサーバがプロセスごと死ぬ (§3.4)。これは Windows だけの話で、
+;;      Metal には coopmat が無い (`my:translate-disable-coopmat')
 ;;   2. モデルに「構造を保て」と頼む経路が無い。PFML3 には指示文の欄が
 ;;      無く、渡せるのは target_lang / source_lang / context / glossary /
 ;;      form の 5 つだけ (§2)
@@ -136,10 +141,14 @@ PATH。見つからなければ翻訳コマンドは「未設定」と言って�
   :type '(choice (const :tag "指定しない" nil)
                  (const "plain") (const "polite")))
 
-(defcustom my:translate-disable-coopmat t
+(defcustom my:translate-disable-coopmat (eq system-type 'windows-nt)
   "非 nil なら `GGML_VK_DISABLE_COOPMAT=1' を立ててサーバを起こす。
 
-【重要】これを nil にすると Intel の iGPU で GPU が落ち、
+効くのは **Vulkan バックエンドだけ**。既定で Windows のときしか立てないのは、
+mac の Metal には coopmat が無く、立てても何もしないため（害は無いが、
+無関係な環境変数が残ると紛らわしい）。
+
+【重要】Windows でこれを nil にすると Intel の iGPU で GPU が落ち、
 サーバがプロセスごと死ぬ (docs §3.4)。実測で 3 回再現した。
 
   ggml_vulkan: device lost on Vulkan0

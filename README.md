@@ -364,6 +364,12 @@ PFN の翻訳特化 LLM **PLaMo 3 Translate** を、このマシンの中だけ�
 **元のバッファは絶対に書き換えず**、結果は `*translation*` に原文と訳文の対で出る。
 0.8b が速く（1 段落 0.4 秒）、`C-u` を付けると 2b で丁寧に訳す（1.3 秒）。
 
+**Windows（Intel iGPU + Vulkan）と macOS（Apple Silicon + Metal）の両方で動く。**
+違うのは `llama-server` の入手先だけで（下の[外部依存](#外部依存)の表）、
+モデルの置き場も Emacs 側の経路も共通。**mac のほうが 2〜3 倍速い**
+（M1 Max の実測で 0.8b が 250 tok/s、2b が 117 tok/s。
+→ [docs §10](docs/translate/plamo-3-translate-study.md)）。
+
 **ソースのコメントは `C-c T c` で、各コメントの下に overlay で出る**（`C-c T x` で消える）。
 コメントの検出は tree-sitter のパーサがあればそれ、無ければ `syntax-ppss` なので、
 文法を入れていない言語（Emacs Lisp / PHP / C++）でも効く。
@@ -605,7 +611,7 @@ jsdoc / json / python / rust / toml / tsx / typescript / yaml の 17 個。
 | golangci-lint | `C-c C-l` |
 | SQLcl | `M-x my:sql-sqlcl`（`scoop install sqlcl`。接続は SQLcl の `connmgr` に登録しておく。Windows では `~/bin/sql.cmd` のラッパがあればそれを使う） |
 | psql | `M-x check-ideco`。**Windows には入れず WSL のものを使う**（`wsl.exe -e psql`。起動は実測 0.16 秒）。入れ替えるなら `my:ideco-psql-command` |
-| llama.cpp | `C-c T` の翻訳。[リリース](https://github.com/ggml-org/llama.cpp/releases)の `llama-b*-bin-win-vulkan-x64.zip` を `~/.local/opt/llama.cpp-*/` へ展開する（ビルド不要）。**Intel の iGPU では `GGML_VK_DISABLE_COOPMAT=1` が無いと GPU が落ちる**（既定で付ける） |
+| llama.cpp | `C-c T` の翻訳。**Windows** は[リリース](https://github.com/ggml-org/llama.cpp/releases)の `llama-b*-bin-win-vulkan-x64.zip` を `~/.local/opt/llama.cpp-*/` へ展開する（ビルド不要）。**Intel の iGPU では `GGML_VK_DISABLE_COOPMAT=1` が無いと GPU が落ちる**（既定で付ける）。**macOS は `brew install llama.cpp`**（Metal。PATH から拾うので置き場の指定は要らない。coopmat は Metal に無いので既定で立てない） |
 | PLaMo 3 Translate | 同上。`pfnet/plamo-3-translate-{0.8b,2b}-GGUF` の Q4_K_M を `~/.local/share/plamo-models/` へ置く（計 2.2 GB）。**商用利用には[登録](https://forms.gle/mTL8tBLrMYXKNZD56)が要る**（無償） |
 
 ---
