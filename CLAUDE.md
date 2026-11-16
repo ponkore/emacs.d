@@ -1618,6 +1618,13 @@ help バッファ）まで実装済み。**
 - **サーバは死ぬ前提で書く。** `my:translate--post` が、接続できなければ
   起こし直して応答するまで待って投げ直す。**起動待ちと死亡からの復帰を
   同じ経路で処理している**ので、呼ぶ側は気にしなくてよい
+- **`url` はトップレベルで `require` しない**（2026-11-16）。単体で 50 ms 前後
+  かかり、要るのは `my:translate--post`（サーバへ投げる関数）だけなので
+  あの関数の入口で読む。起動は実測で 1.221 → 1.153 秒。これで
+  **起動時に url.el がまったく読まれなくなった**（`my-htnblog` と 2 つで
+  最後の 1 つだった。batch で `(featurep 'url)` が nil を確認）。
+  **`eval-when-compile` では遅延しない**（§1）。宣言は `declare-function` と
+  値を伴わない `defvar` で置いてある
 - **`url-request-data` は unibyte にする**（`my-htnblog` と同じ罠）。
   `encode-coding-string ... 'utf-8` を通さないと日本語が化ける
 - **本文に `<|plamo:` が混ざったら拒否する**（`my:translate--check-text`）。

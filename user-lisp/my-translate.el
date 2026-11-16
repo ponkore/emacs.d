@@ -45,7 +45,6 @@
 
 ;;; Code:
 
-(require 'url)
 (require 'subr-x)
 (require 'seq)
 (require 'cl-lib)
@@ -53,6 +52,23 @@
 ;; tree-sitter 無しでビルドされた Emacs でも読めるようにする。
 ;; コメントの検出は `fboundp' で見て `syntax-ppss' に落ちる。
 (require 'treesit nil t)
+
+;; url.el は起動時に読まない。単体で 50 ms 前後かかるが、要るのは
+;; 翻訳サーバへ投げる `my:translate--post' だけなので、あの関数の入口で
+;; require する。
+;;
+;; 【重要】`eval-when-compile' では遅延しない。あれはインタプリタでは
+;; `progn' と同じで、この設定は user-lisp/ をバイトコンパイルしない
+;; (CLAUDE.md §1)。宣言だけを置く。値を伴わない `defvar' は「このファイルの
+;; 中では special」という意味なので、url が未ロードのまま `let' しても
+;; 動的束縛になる (`lexical-binding' が t でも安全)。
+(defvar url-request-method)
+(defvar url-request-extra-headers)
+(defvar url-request-data)
+(defvar url-http-response-status)
+
+(declare-function url-retrieve "url"
+                  (url callback &optional cbargs silent inhibit-cookies))
 
 ;;; --------------------------------------------------
 ;;; カスタマイズ
@@ -433,6 +449,9 @@ DEADLINE は内部用。サーバの起動待ちと再試行をここで吸収�
 【重要】サーバはプロセスごと死ぬことがある (docs §8-B)。死んでいたら
 起こし直して、応答するようになるまで待ってから投げ直す。この関数が
 その面倒を全部見るので、呼ぶ側は気にしなくてよい。"
+  ;; url.el はここで読む（起動時には読まない）。下の let で
+  ;; `url-request-*' を束縛するより先であること。
+  (require 'url)
   (let* ((deadline (or deadline
                        (+ (float-time) my:translate-start-timeout)))
          (retry
