@@ -249,7 +249,13 @@ mac の Metal には coopmat が無く、立てても何もしないため（害
 `* [Contribute!](#contribute)' の形で **原文の見出しから生成された
 アンカー**を指すので、見出しだけ訳すと指す先が無くなる（実測）。
 併記しておけば GFM のアンカーは原文側からも作られるのでリンクが生きる。
-目次の行そのものは「リンクだけの行」として訳さず素通しする。"
+目次の行そのものは「リンクだけの行」として訳さず素通しする。
+
+**訳文が原文と同じになった見出しには併記しない**（見出しが識別子その
+ものだと `## dired-hacks-utils (dired-hacks-utils)' になる）。同じ語が
+2 回並ぶだけで、アンカーは訳文の側で既に原文と一致しているため。
+この判定は訳し終わってからでないとできないので、解析時ではなく
+`my:translate-markdown' の置き換えの時点で外している。"
   :type 'boolean)
 
 ;;; --------------------------------------------------
@@ -1590,7 +1596,28 @@ EXTRA は追加で守る正規表現、CHAIN が非 nil なら直前の原文を
                        ;; 【重要】訳文は折り返さない。GFM は段落内の
                        ;; 単独改行を空白 1 個として描画するので、
                        ;; 日本語の文の途中で改行すると字間に空白が入る。
-                       (insert text))))))))
+                       (insert text)
+                       ;; 見出しの原文併記が訳文と同じ語になったら外す
+                       ;; (`## dired-hacks-utils (dired-hacks-utils)')。
+                       ;; 【重要】**この判定は解析時にはできない。**
+                       ;; 併記の文字列は訳す前に `lit' として流し込んで
+                       ;; あるので、一致するかはここまで来ないと分からない。
+                       ;; 併記を出しているのは見出しだけなので、直後が
+                       ;; ` (原文)' そのものかを見て外す。
+                       ;; 比較は `string-equal' で行う。正規表現にすると
+                       ;; 括弧・ドット・バッククォートで誤判定する
+                       ;; (CLAUDE.md の `string-search' の項と同じ理由)。
+                       (let ((dup (format " (%s)" (string-trim source))))
+                         (when (and (equal (string-trim text)
+                                           (string-trim source))
+                                    (string-equal
+                                     dup
+                                     (buffer-substring-no-properties
+                                      (point)
+                                      (min (point-max)
+                                           (+ (point) (length dup))))))
+                           (delete-region (point)
+                                          (+ (point) (length dup))))))))))))
          (lambda (total errors)
            (my:translate--md-align-tables out runs)
            (when (buffer-live-p out)
