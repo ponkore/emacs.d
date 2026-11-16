@@ -52,11 +52,29 @@
   :group 'tools
   :prefix "my:claude-")
 
+(defcustom my:claude-environments-file
+  (expand-file-name "claude-environments.el" user-emacs-directory)
+  "環境の定義を書いておくファイル。`my:claude-environments' の実体。
+
+**アカウントはマシンごとに違うので git 管理外にしてある。**
+雛形は `claude-environments.el.sample'。中身は alist を 1 つ書くだけで、
+`read' で読む (評価はしない) ので `;' で選択肢を一時的に外せる。
+
+  ((\"personal\" . nil)
+   (\"jighead\"  . \"~/.claude-config/jighead\")
+   ;; (\"ESC-Web\" . \"~/.claude-config/ESC-Web\")
+   )
+
+ファイルが無ければ `my:claude-environments' の既定 (既定の環境 1 つ) の
+まま。編集したら `M-x my:claude-load-environments' で読み直せる。"
+  :type 'file)
+
 (defcustom my:claude-environments
-  '(("personal"  . nil)
-    ("jighead"   . "~/.claude-config/jighead")
-    ("ESC-Web"   . "~/.claude-config/ESC-Web"))
+  '(("personal" . nil))
   "使い分ける claude の環境。(ラベル . CLAUDE_CONFIG_DIR) の alist。
+
+**実際の値は `my:claude-environments-file' から読み込む** ので、
+ここに書いてあるのはファイルが無いマシンでの既定 (既定の環境 1 つ) だけ。
 
 CONFIG-DIR が nil なら CLAUDE_CONFIG_DIR を設定しない (claude の既定)。
 **既定の環境に対しては必ず nil にすること。** `~/.claude' を明示的に
@@ -69,7 +87,10 @@ CONFIG-DIR が nil なら CLAUDE_CONFIG_DIR を設定しない (claude の既定
 混ざることになるうえ、`auth status' の email / orgName も null になる。
 
 プラン名はここに書かない。`claude auth status --json' が実際の
-subscriptionType を返すので、選択時にそちらを見せる。"
+subscriptionType を返すので、選択時にそちらを見せる。
+
+**空にはしない。** 選択肢が 1 つのときは聞かずにそれを使う
+\(`my:claude--read-environment')。"
   :type '(alist :key-type string
                 :value-type (choice (const :tag "既定 (~/.claude)" nil)
                                     directory)))
@@ -1267,6 +1288,62 @@ inode とボリュームの組で比べるので、**同じドライブのディ
 (defvar my:claude--last-environment nil
   "前回選んだ環境のラベル。次回の既定にする。")
 
+(defun my:claude--environments-from-file (file)
+  "FILE から環境の alist を読む。読めない / 形が違うなら nil。
+
+**壊れていても起動を止めない。** 警告を出して呼び出し側に nil を返し、
+`my:claude-environments' を既定のまま残す。CLAUDE_CONFIG_DIR を
+間違えるとよそのアカウントに繋がるので、黙って一部だけ採用することは
+しない (全体を捨てる)。"
+  (when (file-readable-p file)
+    (let ((form (condition-case err
+                    ;; バッファから `read' すると、閉じ括弧が足りないときの
+                    ;; エラーが `End of file during parsing: #<killed buffer>'
+                    ;; になる (`with-temp-buffer' を抜けた後に整形されるため)。
+                    (car (read-from-string
+                          (with-temp-buffer
+                            (insert-file-contents file)
+                            (buffer-string))))
+                  (error
+                   (display-warning
+                    'my:claude
+                    (format "%s を読めない: %s" file (error-message-string err)))
+                   nil))))
+      (cond
+       ((null form) nil)
+       ((not (and (consp form)
+                  (seq-every-p (lambda (e)
+                                 (and (consp e)
+                                      (stringp (car e))
+                                      (or (null (cdr e)) (stringp (cdr e)))))
+                               form)))
+        (display-warning
+         'my:claude
+         (format "%s の形が違う ((ラベル . CONFIG-DIR) の alist): %S" file form))
+        nil)
+       (t form)))))
+
+;;;###autoload
+(defun my:claude-load-environments (&optional file)
+  "FILE (既定は `my:claude-environments-file') から環境を読み込む。
+
+ロード時に 1 回呼んである。ファイルを編集したら対話的に呼べば
+再起動せずに反映できる。アカウント情報のキャッシュも捨てる。"
+  (interactive)
+  (let* ((file (or file my:claude-environments-file))
+         (envs (my:claude--environments-from-file file)))
+    (when envs
+      (setq my:claude-environments envs)
+      (clrhash my:claude--auth-cache)
+      ;; 消えた環境を次回の既定にしない。
+      (unless (assoc my:claude--last-environment envs)
+        (setq my:claude--last-environment nil)))
+    (when (called-interactively-p 'interactive)
+      (message "claude の環境: %s%s"
+               (mapconcat #'car my:claude-environments " / ")
+               (if envs "" (format " (%s は読まなかった)" file))))
+    my:claude-environments))
+
 (defun my:claude--config-dir (env)
   "環境 ENV の CLAUDE_CONFIG_DIR。既定を使うなら nil。"
   (let ((dir (cdr (assoc env my:claude-environments))))
@@ -1323,15 +1400,25 @@ Emacs 自体が CLAUDE_CONFIG_DIR の設定された環境から起動されて�
   (message "claude のアカウント情報を取り直す"))
 
 (defun my:claude--read-environment ()
-  "使う環境をミニバッファで選ばせてラベルを返す。"
-  (let* ((envs (mapcar #'car my:claude-environments))
-         (lines (mapcar (lambda (e) (cons (my:claude--environment-line e) e)) envs))
-         (default (car (rassoc (or my:claude--last-environment (car envs)) lines)))
-         (choice (completing-read
-                  (format "claude の環境 (既定 %s): "
-                          (or my:claude--last-environment (car envs)))
-                  (mapcar #'car lines) nil t nil nil default)))
-    (setq my:claude--last-environment (cdr (assoc choice lines)))))
+  "使う環境をミニバッファで選ばせてラベルを返す。
+
+**選択肢が 1 つのマシンでは聞かない。** 選ぶ余地が無いうえ、
+`claude auth status' を呼ぶぶんだけ `C-c a a' が遅くなる。"
+  (unless my:claude-environments
+    (user-error "claude の環境が 1 つも無い (%s を見直す)"
+                my:claude-environments-file))
+  (if (null (cdr my:claude-environments))
+      (setq my:claude--last-environment (car (car my:claude-environments)))
+    (let* ((envs (mapcar #'car my:claude-environments))
+           (lines (mapcar (lambda (e) (cons (my:claude--environment-line e) e)) envs))
+           (default (car (rassoc (or my:claude--last-environment (car envs)) lines)))
+           (choice (completing-read
+                    (format "claude の環境 (既定 %s): "
+                            (or my:claude--last-environment (car envs)))
+                    (mapcar #'car lines) nil t nil nil default)))
+      (setq my:claude--last-environment (cdr (assoc choice lines))))))
+
+(my:claude-load-environments)
 
 ;;; --------------------------------------------------
 ;;; プロセスの起動
@@ -4857,8 +4944,15 @@ Opus と Haiku を行き来してもそれまでの話は消えない。"
   "環境 (アカウント) を選び直してセッションを立て直す。
 
 会話の文脈は引き継がれない。アカウントが違えばセッションの保存先も
-別なので、`--resume' でも繋がらない。"
+別なので、`--resume' でも繋がらない。
+
+**環境が 1 つしか無いマシンでは何もしない。** 選び直す先が無いので、
+立て直して会話を捨てるだけになる (立て直しは `C-u C-c a a')。"
   (interactive)
+  (unless (cdr my:claude-environments)
+    (user-error "claude の環境は %S だけ (%s)"
+                (car (car my:claude-environments))
+                my:claude-environments-file))
   (let* ((old (my:claude--current-session))
          (dir (if old (my:claude-session-directory old)
                 (my:claude--project-directory)))

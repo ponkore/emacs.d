@@ -54,3 +54,8 @@
 # --- shell-env cache (2026-11) ---
 # my-shell.el が書くログインシェルの環境変数のキャッシュ（マシン固有）
 /shell-env-cache.el
+
+# --- Claude Code の環境 (2026-11) ---
+# my:claude-environments の実体（アカウントはマシンごとに違う）。雛形は
+# claude-environments.el.sample
+/claude-environments.el

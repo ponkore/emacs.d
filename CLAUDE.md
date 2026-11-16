@@ -1252,6 +1252,13 @@ gopls は大文字のドライブレターで返す（§1「Windows 固有」）
   `Stack overflow in regexp matcher`**。`string-search` で境界を探す形に直し、
   ログの書き込み自体も `condition-case` で囲んだ。**巨大な文字列に正規表現の
   繰り返しを当てない**（否定クラスの 1 文字探索なら積まない）
+- **【重要】`my:claude-environments` の既定にアカウントを書き戻さない**
+  （2026-11-16）。実体は**リポジトリ直下の `claude-environments.el`**
+  （git 管理外。雛形は `.sample`、読むのは `my:claude-load-environments`）で、
+  defcustom の既定は「ファイルが無いマシンでの逃げ道」= 既定の環境 1 つだけ。
+  マシンごとに数が違うので**選択肢が 1 つなら聞かない**
+  （`my:claude--read-environment`。`C-c a e` は逆に `user-error` で断る）
+  → [docs](docs/claude/my-claude.md)
 - **起動オプションは 4 つとも省略できない。** とくに
   `--permission-prompt-tool stdio` が無いと**許可要求が黙って自動拒否される**
   （ツールが動かないときの第一容疑者）

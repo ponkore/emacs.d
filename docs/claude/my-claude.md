@@ -822,7 +822,7 @@ claude はこれを**プロセスの起動時にしか読まない**ので、切
 固定される（プロジェクトごとに別のアカウントを当てられる）。
 どれに送っているかはヘッダ行の 1 列目で確かめる。
 
-`my:claude-environments` に `(ラベル . CLAUDE_CONFIG_DIR)` で並べる。
+`my:claude-environments` に `(ラベル . CLAUDE_CONFIG_DIR)` で並ぶ。
 選択時に `claude auth status --json` を呼んで実際のアカウントを見せる
 （実測 0.24 秒。結果はキャッシュし、`M-x my:claude-refresh-auth` で捨てる）。
 
@@ -831,6 +831,48 @@ personal   pro         ponkore@gmail.com's Organization
 jighead    max         masao.kato@jighead.co.jp's Organization
 ESC-Web    enterprise  株式会社　熾火
 ```
+
+### 選択肢は外のファイルに置く（`claude-environments.el`）
+
+**アカウントはマシンごとに違う**（Windows は 3 つ、mac は `jighead` 1 つ）。
+そのため `my:claude-environments` の実体はリポジトリの外……ではなく
+**リポジトリ直下の git 管理外のファイル**に置いてある
+（`shell-env-cache.el` と同じ扱い。雛形は `claude-environments.el.sample`）。
+
+```elisp
+(("personal" . nil)
+ ("jighead"  . "~/.claude-config/jighead")
+ ;; ("ESC-Web" . "~/.claude-config/ESC-Web")
+ )
+```
+
+- **`read` で読むだけで評価はしない。** 式は書けないが、`;` で選択肢を
+  一時的に外せる（これが外だしの主目的の半分）。`~` は
+  `my:claude--config-dir` が `expand-file-name` する
+- **壊れていても起動を止めない。** `my:claude--environments-from-file` が
+  警告を出して nil を返し、`my:claude-environments` は既定
+  （`(("personal" . nil))` = 既定の環境 1 つ）のまま残る。**一部だけ
+  採用することはしない**（CLAUDE_CONFIG_DIR を取り違えるとよその
+  アカウントに繋がるので、中途半端に動かすより全部捨てるほうが安全）
+- **読み込みはモジュールのロード時にトップレベルで 1 回。**
+  編集したら `M-x my:claude-load-environments` で読み直せる
+  （アカウント情報のキャッシュも捨て、消えた環境が
+  `my:claude--last-environment` に残っていれば外す）
+- 閉じ括弧が足りないときのエラーを読めるようにするため、バッファから
+  `read` せず `read-from-string` を使う。前者だと
+  `End of file during parsing: #<killed buffer>` になる（`with-temp-buffer`
+  を抜けた後に整形されるため）
+
+### 【重要】選択肢が 1 つのときは聞かない
+
+`my:claude--read-environment` は `(cdr my:claude-environments)` が nil なら
+`completing-read` を通らず先頭のラベルをそのまま返す。選ぶ余地が無いうえ、
+`claude auth status` を呼ぶぶんだけ `C-c a a` が遅くなる。
+
+`my:claude-switch-environment`（`C-c a e`）は**逆に断る**
+（`user-error`）。あれは「選び直す」ためのコマンドなので、1 つしか無い
+マシンで通すと**立て直して会話を捨てるだけ**になる。立て直したいのなら
+`C-u C-c a a`。
 
 ヘッダ行に
 

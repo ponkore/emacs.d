@@ -1,0 +1,24 @@
+;;; claude-environments.el --- my:claude-environments の実体  -*- lexical-binding: t -*-
+;;
+;; `~/.emacs.d/claude-environments.el' にコピーして、このマシンで使う
+;; claude のアカウントだけを並べる。**このファイル自身は git 管理外**
+;; (`.gitignore')。読むのは `my:claude-load-environments'（my-claude.el）。
+;;
+;; 書式は (ラベル . CLAUDE_CONFIG_DIR) の alist を **1 つ**。`read' で
+;; 読むだけで評価はしないので、式は書けない（`~' は Emacs 側で展開する）。
+;; 行頭を `;' にすれば選択肢を一時的に外せる。
+;;
+;; **選択肢が 1 つなら `C-c a a' は環境を聞かない**（`C-c a e' も断る）。
+;;
+;; **既定の環境 (~/.claude) の CONFIG-DIR は必ず nil にすること。**
+;; `"~/.claude"' と明示すると claude は `~/.claude/.claude.json' を探しに
+;; 行くが実体は `~/.claude.json' なので見つからず、警告を **標準出力に**
+;; 吐く（stream-json に非 JSON の行が混ざる）。
+;;
+;; プラン名は書かない。選択時に `claude auth status --json' を呼んで
+;; 実際の subscriptionType とアカウントを見せる。
+
+(("personal" . nil)
+ ("jighead"  . "~/.claude-config/jighead")
+ ;; ("ESC-Web" . "~/.claude-config/ESC-Web")
+ )

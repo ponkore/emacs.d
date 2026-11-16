@@ -59,6 +59,7 @@ git clone git@github.com:ponkore/emacs.d.git ~/.emacs.d
 | **mupdf** | PDF をバッファで見る | `scoop install mupdf`（poppler では代用できない） |
 | **Rust ツールチェイン** | magit の高速化 | `M-x my:gitd-build`（Windows のみ）→ [gitd/README.md](gitd/README.md) |
 | **`~/Projects` の実体** | bookmark をマシン間で共有 | Windows はジャンクション（`C:\Projects` へ）、他は symlink か実ディレクトリ |
+| **`claude-environments.el`** | Claude Code のアカウント（`CLAUDE_CONFIG_DIR`）の選択肢 | `claude-environments.el.sample` をリポジトリ直下にコピーして要るものだけ残す。**無ければ既定の `~/.claude` 1 つ**（聞かれない） |
 | **`~/.htnblog`** | はてなブログ投稿 | `userid` / `endpointurl` / `apikey` を書く |
 | **WSL の psql** | iDeCo の日次サマリ（`M-x check-ideco`） | `wsl -- sudo apt install postgresql-client`。パスワードは `~/.authinfo.gpg` に（下記） |
 | **Docker + `~/.authinfo.gpg`** | Claude Code から ideco DB を引く MCP（`.mcp.json` の `ideco-postgres`。読み取り専用） | Docker Desktop を起動しておくだけ。パスワードは `check-ideco` と同じ行を使う |
@@ -206,6 +207,10 @@ Windows の Emacs には PTY が無いので、双方向のストリーミング
 駆動する。端末エミュレーションも常駐プロキシも要らない。セッションは
 **1 つのプロジェクトに何本でも持て**（2 本目は `*claude(PROJ)-1*`）、
 アカウント（`CLAUDE_CONFIG_DIR`）もセッションごとに選べる。
+**選択肢はマシンごとに `claude-environments.el`（git 管理外）に書く**
+（雛形は `claude-environments.el.sample`。`;` でコメントアウトできる。
+**1 つしか無いマシンでは聞かずにそれを使う**。編集したら
+`M-x my:claude-load-environments`）。
 逐次表示、画像添付（`M-v`）、許可プロンプト、AskUserQuestion への応答、
 markdown 装飾、ヘッダ行のステータス表示。
 **出力は端末の TUI に寄せて絞ってある**（`my:claude-subagent-display` /
