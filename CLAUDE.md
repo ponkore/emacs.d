@@ -1329,13 +1329,16 @@ gopls は大文字のドライブレターで返す（§1「Windows 固有」）
   フィールドを nil に戻すこと**（EOF 後 sentinel までの間に届いた行で
   `with-current-buffer` が落ちる） → [docs](docs/claude/my-claude.md)
 
-## `my-ghostel`
+## `my-ghostel`（撤去済み）
 
 → [docs/pty/ghostel.md](docs/pty/ghostel.md)
 
-libghostty-vt を dynamic module で動かす端末（Ghostel）。2026-11-09 に導入。
-**普段は EmbTerm（`my-embterm`）を使う**が、Ghostel の機能に EmbTerm へ移せるものが
-無いかを見るため**まだ消さない**（2026-11-11。`my-pty` は同じ日に撤去した）。
+libghostty-vt を dynamic module で動かす端末（Ghostel）。2026-11-09 に導入し、
+**2026-11-16 に撤去した**（EmbTerm の Issue #3）。EmbTerm（`my-embterm`、`C-c s`）と
+並べて使って評価した結果、EmbTerm へ移せて有用な機能は無かった。
+`my-ghostel.el`・`~/.emacs.d/ghostel/`・`init.el` の `require`・`C-c S` を消してある。
+
+以下は撤去前の記録（`my-pty` と同じく、経緯として残す）。
 
 - **【重要】`ghostel-module-directory` を straight の build ツリーの中に
   戻してはいけない。** 既定（nil）ではパッケージディレクトリ、つまり

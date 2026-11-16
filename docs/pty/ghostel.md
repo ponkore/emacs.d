@@ -1,5 +1,10 @@
 # Ghostel — libghostty の端末を Emacs の dynamic module で動かす
 
+> **この端末は 2026-11-16 に撤去しました。** EmbTerm（`my-embterm`、`C-c s`）と並べて使って
+> 評価した結果、EmbTerm へ移せて有用な機能は無かったため（EmbTerm の Issue #3）。
+> `user-lisp/my-ghostel.el`・`~/.emacs.d/ghostel/`・`init.el` の `require`・`C-c S` は消してあります。
+> **この文書は経緯の記録として残します**（`my-pty` と同じ扱い）。以下は撤去前の記述です。
+
 `user-lisp/my-ghostel.el` の根拠。2026-11-09 に Windows で導入可否を実測した記録。
 
 `my-pty`（`ptyd` + `eat`）との**比較評価のために並べて入れてある**。どちらを

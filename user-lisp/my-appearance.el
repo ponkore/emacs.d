@@ -47,8 +47,8 @@
 ;; 【重要】`Symbols Nerd Font Mono' のグリフは **送り幅が em と同じ**。
 ;; 本文の HackGen は半角 8 px なので、セル 1 つに対して倍近い。
 ;;
-;; 普通のバッファでは隣の桁にはみ出すだけで実害が無いが、**端末
-;; (`my-ghostel') では潰れる**。Ghostel はセルに収まらないグリフに
+;; 普通のバッファでは隣の桁にはみ出すだけで実害が無いが、**かつての端末
+;; (Ghostel。2026-11-16 に撤去) では潰れた**。Ghostel はセルに収まらないグリフに
 ;; `display' の `height' を付けて縮めるので (`ghostel-glyph-scale-floor')、
 ;;
 ;;     8 / 15 = 0.5333…
@@ -201,7 +201,7 @@ nil … 何もしない。"
             ;; Material Design アイコンは第 15 面 (Nerd Fonts v3)
             (set-fontset-font nil '(#xf0000 . #xfffff) spec))))
       ;; セル幅のグリフを持つフォントがあれば、上の割り当てより先に
-      ;; 試させる。端末 (my-ghostel) でアイコンが潰れるのを防ぐ。
+      ;; 試させる。かつての端末 (Ghostel) でアイコンが潰れるのを防いでいた。
       ;; 上の節「コンソール幅の Nerd Font」を参照。
       ;; 【重要】この prepend は上のブロックより後に置くこと。
       ;; ADD 無しの `set-fontset-font' は置き換えなので、先に書くと消える。

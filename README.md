@@ -135,8 +135,7 @@ git clone git@github.com:ponkore/emacs.d.git ~/.emacs.d
 | `my-utils` | calendar（日本の祝日）、open-junk-file、grep/ripgrep、server |
 | `my-claude` | Claude Code を stream-json で使う（`C-c a`） |
 | `my-htnblog` | はてなブログ AtomPub API へ投稿する（`M-x htnblog`） |
-| `my-ghostel` | libghostty の端末を dynamic module で動かす（`C-c S`）。EmbTerm に移る間だけ残している |
-| `my-embterm` | EmbTerm の端末を Emacs のウィンドウに重ねて動かす（`C-c s`）。Ghostel の置き換え候補。Windows / macOS |
+| `my-embterm` | EmbTerm の端末を Emacs のウィンドウに重ねて動かす（`C-c s`）。Windows / macOS |
 | `my-ideco` | iDeCo の日次サマリを psql で見る（`M-x check-ideco`） |
 | `my-genpreview` | GenPreview でファイルをプレビューする（`M-x genpreview-open`、dired の `v`）。Windows のみ。**macOS では同じ `v` が Preview.app を開く** |
 | `my-translate` | ローカル LLM（PLaMo 3 Translate）で翻訳する（`C-c T`）。モデルが無ければ無効 |
@@ -225,23 +224,6 @@ markdown 装飾、ヘッダ行のステータス表示。
 コミットバッファで差分を渡し、本文の位置に入れる）。
 → [docs/claude/my-claude.md](docs/claude/my-claude.md)
 
-### libghostty の端末（`C-c S s`）
-
-**Ghostel** は Ghostty のコア（libghostty-vt 1.0）を Emacs の dynamic module に
-載せた端末エミュレータ。VT の解釈と描画をネイティブ側が持ち、**PTY も module が
-自分で開く**（Windows は ConPTY、Microsoft 再配布版も同梱できる）。
-プロセスは Emacs 1 つで、Windows / macOS / Linux で動く。
-
-`M-x shell` では使えなかった **nyagos** も、本物のコンソールが渡るので
-動く見込み（未測）。Kitty graphics を持つので yazi の画像も出る。
-
-**普段は EmbTerm（`C-c s`）を使う。** Ghostel の機能に EmbTerm へ移せるものが
-無いかを見るため、しばらく `C-c S` に残している。
-`compile` / `shell-command` / comint を端末に置き換える統合は、既存の操作を
-黙って変えるので**有効にしていない**。
-**module が無ければ初回の `M-x ghostel` が入手方法を尋ねるだけ。**
-→ [docs/pty/ghostel.md](docs/pty/ghostel.md)
-
 ### EmbTerm の端末（`C-c s s`）
 
 **EmbTerm**（`~/Projects/EmbTerm`）は libghostty-vt で VT を解釈し、ネイティブに描いた面を
@@ -256,7 +238,8 @@ Emacs のウィンドウに重ねる端末。描画とキー入力のエンコ�
 | module | `embterm_module.dll` | `embterm_module.dylib` |
 | PTY | 同梱の再配布版 ConPTY（`conpty.dll` + `x64/OpenConsole.exe`） | OS の PTY（同梱物なし） |
 
-**Ghostel の置き換え候補として並べて入れてある**（Ghostel は比べる間 `C-c S`）。
+**Ghostel（`C-c S`）の置き換えとして入れ、並べて使って評価したうえで 2026-11-16 に Ghostel を撤去した**
+（経緯は [docs/pty/ghostel.md](docs/pty/ghostel.md)）。
 配布物（module・embterm.el・ConPTY・シェル統合）は `~/.emacs.d/embterm/`（git の管理外）に置く。
 **無ければ何もしない。** シェルは Windows が `M-x shell` と同じ pwsh（`my-shell.el`）、
 macOS が `$SHELL` のログインシェル。フォントの大きさは本文に合わせてある
@@ -503,7 +486,6 @@ machine 192.168.1.5 port 5432 login postgres password ********
 | `C-c !` | flymake（`n` / `p` 移動、`l` / `P` 一覧、`h` hydra） |
 | `C-c p` | projectile（`s` は検索 dwim） |
 | `C-c s` | EmbTerm の端末（`s` 開く / `n` 新規 / `p` プロジェクト / `b` 一覧） |
-| `C-c S` | Ghostel の端末（同じ割り当て。EmbTerm と比べる間だけ） |
 | `C-c T` | 翻訳（`t` リージョン／段落 / `c` コメントを overlay で / `m` markdown を構造ごと / `h` `*Help*` の散文 / `x` コメントの訳を消す / `s` サーバの状態 / `k` サーバ停止。`C-u` で丁寧なモデル） |
 | `C-x i` | yasnippet（`TAB` expand / `i` insert / `n` new / `v` visit / `l` tables / `g` reload） |
 | `C-x t` | タブ（`0` 閉じる / `1` 他を閉じる / `2` 新規 / `RET` 選択 / `u` 戻す / `r` 改名。組み込み） |

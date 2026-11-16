@@ -26,8 +26,9 @@
 ;;   M-x claude-resume          claude -r で開く (過去の会話を claude 自身に
 ;;                              一覧させて選ぶ。C-u で -c = 直近を継ぐ)
 ;;
-;; **Ghostel の置き換え候補として並べて入れてある** (EmbTerm の TODO T-057)。
-;; 評価の間、Ghostel は `C-c S' に退かせてある (`my-ghostel.el')。
+;; **Ghostel の置き換えとして入れた** (EmbTerm の TODO T-057)。並べて使って
+;; 評価した結果、2026-11-16 に Ghostel (`my-ghostel.el'、`C-c S') は撤去した
+;; (EmbTerm の Issue #3)。経緯は docs/pty/ghostel.md。
 ;;
 ;; 配布物は `M-x my:embterm-update' で入れる (README の「EmbTerm の端末」)。
 ;; EmbTerm のリポジトリ (`my:embterm-source-directory') で `cargo xtask dist'
@@ -122,8 +123,8 @@ UTF-8 への固定は要らない (ロケールが UTF-8)。こちらから読�
 
 $SHELL が無ければ nil (embterm.el の既定 = $SHELL、無ければ /bin/sh)。
 
-`my-ghostel.el' の `my:ghostel--default-shell' と同じ中身。Ghostel を
-外すとき (EmbTerm の TODO T-058) にあちらを消す。"
+もとは `my-ghostel.el' の `my:ghostel--default-shell' と同じ中身で、
+Ghostel の撤去 (2026-11-16。EmbTerm の Issue #3) でこちらだけが残った。"
   (if (not (eq system-type 'windows-nt))
       (when-let* ((shell (or (getenv "SHELL") (executable-find "zsh"))))
         (list shell "-l"))
