@@ -325,6 +325,26 @@ Emacs 31.1 の `user-lisp/` は、既定では `package-activate-all` の直後�
 nil であることと `C-M-x` で評価しながら書く運用が噛み合わなくなる。
 → 実測: [docs/refactoring/no-bytecompile.md](docs/refactoring/no-bytecompile.md)
 
+### 【重要】`eval-when-compile` は「読み込み時に走らない」ことの保証にならない
+
+バイトコンパイルしない方針なので、`user-lisp/` のコードは**常にインタプリタで
+読まれる**。`eval-when-compile` はそのとき **`progn` と同じ**で、body が
+ロード時にそのまま走る。「重いライブラリをコンパイル時だけ見せる」という
+よくある書き方は、**この設定では何も遅延しない**（2026-11-16 に `my-htnblog` で
+実測して踏んだ。`(eval-when-compile (require 'url))` を置いても
+`(featurep 'url)` は t）。
+
+ロードせずにバイトコンパイル（= flymake）だけ黙らせたいなら、**宣言を置く**。
+
+| 対象 | 書き方 |
+|---|---|
+| 関数・defsubst | `(declare-function f "ライブラリ" (引数))` |
+| 動的束縛したい変数 | **値を伴わない `(defvar VAR)`** |
+
+値を伴わない `defvar` は「このファイルの中では special」という意味なので、
+**そのライブラリが未ロードのまま `let` しても動的束縛になる**
+（`lexical-binding` が t でも安全）。実体は使う関数の入口で `require` する。
+
 モジュールを追加した場合は `init.el` の `require` 列に加える。
 
 ---
@@ -1430,6 +1450,16 @@ EmbTerm（`my:embterm-source-directory`。設計と決定事項はあちらの `
 
 → [docs/htnblog/my-htnblog.md](docs/htnblog/my-htnblog.md)
 
+- **`url` / `url-http` / `xml` はトップレベルで `require` しない**（2026-11-16）。
+  3 つで **120〜130 ms** かかり（素の `emacs -Q` で実測）、起動が実測で
+  1.305 → 1.222 秒になった。要るのは `M-x htnblog` を使うときだけなので、
+  url / xml を直接触る 5 つの関数の入口で `my:htnblog--load-libraries` が読む。
+  **`eval-when-compile` では遅延しない**（§1「`eval-when-compile` は
+  「読み込み時に走らない」ことの保証にならない」）。宣言は
+  `declare-function` と値を伴わない `defvar` で置いてある
+- **【重要】`my:htnblog--load-libraries` は `url-request-*` を `let` する前に呼ぶ。**
+  値を伴わない `defvar` を置いてあるので動的束縛にはなるが、`url-retrieve` /
+  `xml-parse-region` は実体が無いと `void-function` になる
 - **`url-request-data` は unibyte にする**（`encode-coding-string` を通さないと化ける）
 - **CDATA に `]]>` が現れたら分割する**（`]]]]><![CDATA[>`）。本文は自由に書くので
   必ず起こりうる

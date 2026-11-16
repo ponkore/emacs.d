@@ -33,14 +33,47 @@
 
 (require 'seq)
 (require 'subr-x)
-(require 'url)
-(require 'url-http)
-(require 'xml)
+;; url / url-http / xml は起動時に読まない。3 つ合わせて 120〜130 ms かかるが
+;; (素の emacs -Q で実測)、要るのは M-x htnblog を使うときだけ。使う関数の
+;; 入口で `my:htnblog--load-libraries' が読む。
+;;
+;; 【重要】ここで `eval-when-compile' を使ってはいけない。あれは
+;; 「バイトコンパイルするなら compile 時に評価」であって、インタプリタで
+;; 読むと `progn' と同じく body がそのまま走る。この設定は user-lisp/ を
+;; バイトコンパイルしない (CLAUDE.md の決定事項) ので、それでは起動時に
+;; url が読まれてしまう (実測で踏んだ)。宣言だけを置く。
 (require 'my-core)   ; my:day-of-week-name
 
-;; url-http.el の (defvar url-http-response-status) は値を伴わないため、
+;; url.el / xml.el をロードせずに書くための宣言。値を伴わない defvar は
+;; 「このファイルの中では special」という意味なので、url が未ロードのまま
+;; let しても動的束縛になる (lexical-binding が t でも安全)。
+;; url-http.el の (defvar url-http-response-status) も値を伴わないため、
 ;; special 宣言がそのファイルの中でしか効かない。こちらでも宣言しておく。
+(defvar url-debug)
+(defvar url-request-method)
+(defvar url-request-extra-headers)
+(defvar url-request-data)
 (defvar url-http-response-status)
+
+(declare-function url-retrieve "url"
+                  (url callback &optional cbargs silent inhibit-cookies))
+(declare-function xml-escape-string "xml" (string &optional noerror))
+(declare-function xml-parse-region "xml"
+                  (&optional beg end buffer parse-dtd parse-ns))
+(declare-function xml-get-children "xml" (node child-name))
+(declare-function xml-node-children "xml" (node))
+(declare-function xml-node-attributes "xml" (node))
+
+(defun my:htnblog--load-libraries ()
+  "url / xml を、使う直前にロードする。
+
+【重要】`url-request-*' を let で束縛する前に呼ぶこと。このファイルは
+lexical-binding が t なので、special 宣言が無いまま let するとレキシカル
+変数になり、束縛した値が url.el に届かない (エラーは出ないので、
+認証ヘッダも POST の本文も黙って無視される)。"
+  (require 'url)
+  (require 'url-http)
+  (require 'xml))
 
 ;;; --------------------------------------------------
 ;;; カスタマイズ
@@ -242,6 +275,7 @@ htnblog コマンドが使うものと同じ。userid / endpointurl / apikey を
 
 (defun my:htnblog--entry-xml (title body categories draft)
   "投稿する Atom entry の XML を文字列で返す。"
+  (my:htnblog--load-libraries)
   (concat
    "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
    "<entry xmlns=\"http://www.w3.org/2005/Atom\"\n"
@@ -263,6 +297,7 @@ CDATA は `xml-parse-region' が複数のノードに分けて返すことがあ
 (defun my:htnblog--entry-url (xml)
   "応答の XML から記事の URL (link rel=\"alternate\") を取り出す。
 取れなければ nil。表示に使うだけなので、失敗しても投稿の成否には関わらない。"
+  (my:htnblog--load-libraries)
   (condition-case nil
       (let ((entry (with-temp-buffer
                      (insert xml)
@@ -330,6 +365,7 @@ echo area に出す説明。CALLBACK は必ず 1 回だけ呼ばれる。
 `url-retrieve' には `url-retrieve-synchronously' の TIMEOUT に当たる引数が
 ないので、`my:htnblog-timeout' は自前のタイマーで見る。応答とタイムアウトの
 どちらが先に来ても CALLBACK が 2 回呼ばれないよう DONE で閉じる。"
+  (my:htnblog--load-libraries)
   (let* ((url-debug nil)                ; apikey をログに残さない
          (url-request-method method)
          (url-request-extra-headers (my:htnblog--auth-headers config))
@@ -415,6 +451,7 @@ echo area に出す説明。CALLBACK は必ず 1 回だけ呼ばれる。
 (defun my:htnblog--feed-latest-entry (response)
   "feed の XML RESPONSE から最新の公開記事を plist (:title :date :body) で返す。
 下書きは飛ばす。取れなければ nil。"
+  (my:htnblog--load-libraries)
   (condition-case nil
       (let* ((feed (with-temp-buffer
                      (insert response)
@@ -449,6 +486,7 @@ echo area に出す説明。CALLBACK は必ず 1 回だけ呼ばれる。
 (GUI 実測で 15.4 秒。TCP 0.02 / TLS 0.06 / DNS 0.01 秒なので Emacs 側では
 なくサーバ側の揺らぎ)。参考として貼るだけのものに `M-x htnblog' を
 待たせる価値はない。"
+  (my:htnblog--load-libraries)
   (let ((url-debug nil)                 ; apikey をログに残さない
         (url-request-method "GET")
         (url-request-extra-headers (my:htnblog--auth-headers config))
