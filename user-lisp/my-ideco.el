@@ -1,12 +1,19 @@
-;;; my-ideco.el --- iDeCo の日次サマリを psql で見る  -*- lexical-binding: t -*-
+;;; my-ideco.el --- iDeCo の資産状況を ideco_server の API で見る  -*- lexical-binding: t -*-
 ;;; Commentary:
 ;; 毎朝スクレイピングして PostgreSQL に溜めている iDeCo の資産状況を
 ;; 罫線の表にして見る。`M-x check-ideco'。表は 2 つ。
 ;;
-;; - 直近 10 日分の推移 (ideco_daily_summary)
-;; - 最新の日の銘柄別状況 (ideco_item_data + ideco_item_master)
+;; - 直近 10 日分の推移
+;; - 最新の日の銘柄別状況
 ;;
-;; 見出しの時刻は最新の行の created_at を JST にしたもの (DB は UTC)。
+;; **DB は直接引かない。** ideco_server (FastAPI) の
+;; `GET /api/v1/ideco/status?days=N' が返す JSON を表にする。つなぎ先は
+;; `my:ideco-api-base-url'。以前は psql を起こして SQL を 3 本流していたが、
+;; 2026-11-17 に API 経由にした。おかげでパスワード (auth-source) も
+;; WSL の psql も CSV のパースも要らなくなっている。
+;;
+;; 見出しの時刻は最新の行を取り込んだ時刻。**JST への変換は API 側**
+;; (DB には UTC で入っている)。
 ;;
 ;;   ┌────────────┬────────────┬────────────┬────────────┬────────────┐
 ;;   │ 日付       │   資産残高 │ 拠出金累計 │       損益 │     前日比 │
@@ -14,91 +21,84 @@
 ;;   │ 2026-11-10 │ 12,914,906 │ 10,265,130 │  2,649,776 │ ↑   83,556 │
 ;;   │ 2026-11-09 │ 12,831,350 │ 10,265,130 │  2,566,220 │ →        0 │
 ;;
-;; 前日比は損益の「1 つ前の行」との差で、↑ は赤・↓ は緑・→ (変化なし) は灰色
+;; 前日比は損益の「1 つ前の日」との差で、↑ は赤・↓ は緑・→ (変化なし) は灰色
 ;; (国内の証券会社の慣習)。資産残高で比べないのは、拠出日に相場が下がっても
 ;; 拠出の分だけ増えて ↑ になるため (実測で 2026-09-15 は資産残高 +7,255 /
-;; 損益 -15,745)。
+;; 損益 -15,745)。**差を出すのは API の仕事** (`soneki_diff')。
 ;;
-;; `psql' を 1 回起こすだけ (同期)。Windows では WSL の psql を使う。
+;; 同期で 1 回 GET するだけ (`my:ideco-api-timeout' 秒で諦める)。
 ;; 見終わったら `q' でバッファごと消える。`g' で取り直す。
 ;;
-;; パスワードは `auth-source' (`~/.authinfo.gpg') から引き、無ければ訊く。
-;; 書いておくなら次の 1 行。
-;;
-;;   machine 192.168.1.5 port 5432 login postgres password ********
+;; 認証は無い (ideco_server は LAN の中にある)。
 ;;
 ;;; Code:
 
-(require 'auth-source)
 (require 'seq)
 (require 'subr-x)
 
+;; url は `my:ideco--fetch' でだけ要るので、トップレベルでは読まない
+;; (my-htnblog / my-translate と同じ。CLAUDE.md §1「`eval-when-compile' は
+;; 読み込み時に走らないことの保証にならない」。宣言だけ置く)。
+(defvar url-http-response-status)
+(declare-function url-retrieve-synchronously "url"
+                  (url &optional silent inhibit-cookies timeout))
+
 (defgroup my:ideco nil
-  "iDeCo の日次サマリを見る。"
+  "iDeCo の資産状況を見る。"
   :group 'tools
   :prefix "my:ideco-")
 
 ;;; [1] 設定
 
-(defcustom my:ideco-psql-command
-  (if (eq system-type 'windows-nt)
-      '("wsl.exe" "-e" "psql")
-    '("psql"))
-  "psql をどう起こすか。先頭が実行ファイルで、残りは前置きの引数。
+(defcustom my:ideco-api-base-url "http://taigei.local:9001"
+  "ideco_server の URL (スキームとホストまで)。
 
-Windows には PostgreSQL のクライアントを入れていないので WSL の psql を
-使う (`wsl.exe -e psql')。実測で起動は 0.16 秒。"
-  :type '(repeat string))
-
-(defcustom my:ideco-host "192.168.1.5"
-  "PostgreSQL のホスト。"
+既定は ideco_server を動かしているマシン (taigei) の mDNS 名。
+Windows の Emacs からも同じ設定で届くのでここに書いてある。
+別のマシンに移したときは custom で上書きする。"
   :type 'string)
 
-(defcustom my:ideco-port 5432
-  "PostgreSQL のポート。"
-  :type 'integer)
+(defcustom my:ideco-api-timeout 5
+  "API の応答を何秒待つか。
 
-(defcustom my:ideco-database "ideco_db"
-  "データベース名。"
-  :type 'string)
-
-(defcustom my:ideco-user "postgres"
-  "接続するユーザー。"
-  :type 'string)
-
-(defcustom my:ideco-table "ideco_daily_summary"
-  "日次サマリのテーブル。"
-  :type 'string)
+同期で取るので、ここを長くすると**待っている間 Emacs が止まる**。
+サーバが落ちていたら待たずに諦めてほしいので短くしてある。"
+  :type 'number)
 
 (defcustom my:ideco-rows 10
   "既定で何行出すか。1 日 1 行なので、既定は直近 10 日ぶん。
-前置引数で変えられる (`C-u 30 M-x check-ideco')。"
+前置引数で変えられる (`C-u 30 M-x check-ideco')。
+
+API 側の上限は 365 (それを超えると 422 が返る)。"
   :type 'integer)
 
 (defcustom my:ideco-buffer-name "*ideco*"
   "表を出すバッファの名前。"
   :type 'string)
 
-(defconst my:ideco--columns
-  '(("summary_date"       "日付"       left  my:ideco--format-date)
-    ("shisan_zandaka"     "資産残高"   right my:ideco--format-number)
-    ("kyoshutukin_ruikei" "拠出金累計" right my:ideco--format-number)
-    ("soneki"             "損益"       right my:ideco--format-number))
-  "(列名 見出し 寄せ 整形関数) の並び。
+(defconst my:ideco--status-path "/api/v1/ideco/status"
+  "資産状況を返す API のパス。")
 
-**クエリも表もここから作る**ので、見る列を変えるならここ 1 か所でよい。
-`created_at' / `updated_at' と `ideco_summary_id' は見ないので入れていない。")
+(defconst my:ideco--columns
+  '((summary_date       "日付"       left  my:ideco--format-date)
+    (shisan_zandaka     "資産残高"   right my:ideco--format-number)
+    (kyoshutukin_ruikei "拠出金累計" right my:ideco--format-number)
+    (soneki             "損益"       right my:ideco--format-number))
+  "(JSON のキー 見出し 寄せ 整形関数) の並び。
+
+**表はここから作る**ので、見る列を変えるならここ 1 か所でよい
+ (キーは API の `summaries' の要素のキー)。`created_at' は見出しに出すので
+表には入れない。")
 
 (defconst my:ideco--null "-"
-  "NULL と空欄に出す文字。")
+  "値が無いときに出す文字 (JSON の null と空文字)。")
 
-(defconst my:ideco--diff-column "soneki"
-  "前日比を出す列 (`my:ideco--columns' の列名)。
+(defconst my:ideco--diff-column 'soneki
+  "前日比を出す列 (`my:ideco--columns' のキー)。
 表ではこの列の直後に「前日比」の列を挟む。
 
-資産残高ではなく損益で比べる。資産残高は拠出金が入った日に、相場が
-下がっていても拠出の分だけ増えて `↑' になる。損益 (= 資産残高 −
-拠出金累計) なら運用だけの増減が出る。")
+値そのものは API が `soneki_diff' で返す。資産残高ではなく損益で
+比べる理由は Commentary に書いてある。")
 
 ;; 色は国内の証券会社の慣習に合わせて「上昇＝赤、下落＝緑」。
 (defface my:ideco-up '((t :inherit error :weight normal))
@@ -119,7 +119,7 @@ Windows には PostgreSQL のクライアントを入れていないので WSL �
   "表ごとの見出し (「直近 10 日分の推移」「銘柄別状況」)。")
 
 (defcustom my:ideco-normalize-item-names t
-  "非 nil なら銘柄名の全角英数と全角空白を半角にする (NFKC)。
+  "非 nil なら銘柄名の全角英数と全角空白を半角にする (NFKC + NFC)。
 DB には `ｅＭＡＸＩＳ　Ｓｌｉｍ　国内株式（ＴＯＰＩＸ）' と全角で入っていて、
 そのままだと銘柄名の列だけで 46 桁ある。NFKC で
 `eMAXIS Slim 国内株式(TOPIX)' (28 桁) になる。カタカナは変わらない。"
@@ -127,11 +127,28 @@ DB には `ｅＭＡＸＩＳ　Ｓｌｉｍ　国内株式（ＴＯＰＩＸ）
 
 ;;; [2] 値の整形
 
+(defun my:ideco--string (value)
+  "JSON の VALUE を表に出す文字列にする。
+
+整形関数 (`my:ideco--columns' の 4 番目) は文字列を受けるので、数も
+nil もここで文字列に揃える。JSON の null は nil で来るので空文字にする
+ (`my:ideco--cell' が `my:ideco--null' に直す)。
+
+小数は、小数部が無ければ整数として書く。API は表に出す列を整数で
+返すのでここは保険 (DB の `soneki' は Double)。"
+  (cond ((null value) "")
+        ((integerp value) (number-to-string value))
+        ((floatp value)
+         (let ((i (round value)))
+           (if (= i value) (number-to-string i) (number-to-string value))))
+        ((stringp value) value)
+        (t (format "%s" value))))
+
 (defun my:ideco--format-date (s)
   "YYYYMMDD を YYYY-MM-DD にする。想定外の形なら素通し。
 
-`summary_date' は文字列の列 (psql の出力が左詰めなので判る) なので、
-ここで見た目だけ整える。並び順は YYYYMMDD の辞書順 = 日付順。"
+`summary_date' は API でも文字列 (DB の列が `character(8)')。
+並び順は YYYYMMDD の辞書順 = 日付順。"
   (if (string-match "\\`\\([0-9]\\{4\\}\\)\\([0-9]\\{2\\}\\)\\([0-9]\\{2\\}\\)\\'" s)
       (format "%s-%s-%s" (match-string 1 s) (match-string 2 s) (match-string 3 s))
     s))
@@ -149,19 +166,31 @@ DB には `ｅＭＡＸＩＳ　Ｓｌｉｍ　国内株式（ＴＯＰＩＸ）
         (concat (if neg "-" "") digits out))
     s))
 
-(defun my:ideco--cell (value spec)
-  "VALUE を列 SPEC に従って整形する。空なら `my:ideco--null'。"
-  (let ((s (string-trim (or value ""))))
+(defun my:ideco--format-timestamp (s)
+  "API の `created_at' (ISO 8601) を `YYYY/MM/DD HH:MM:SS' にする。
+読めない形なら素通し。nil なら nil。
+
+**時刻の変換はしない。並べ替えるだけ。** API が JST (`+09:00') で返す。
+`date-to-time' + `format-time-string' にゾーン `Asia/Tokyo' を渡す手も
+あるが、**Windows には tz database が無い**のでマシンによって狂う。"
+  (if (and (stringp s)
+           (string-match
+            "\\`\\([0-9]\\{4\\}\\)-\\([0-9]\\{2\\}\\)-\\([0-9]\\{2\\}\\)[T ]\\([0-9]\\{2\\}:[0-9]\\{2\\}:[0-9]\\{2\\}\\)"
+            s))
+      (format "%s/%s/%s %s"
+              (match-string 1 s) (match-string 2 s) (match-string 3 s)
+              (match-string 4 s))
+    s))
+
+(defun my:ideco--cell (row spec)
+  "ROW (1 行ぶんの alist) から列 SPEC のセルを作る。
+値が無ければ `my:ideco--null'。"
+  (let ((s (string-trim (my:ideco--string (alist-get (nth 0 spec) row)))))
     (if (string-empty-p s)
         my:ideco--null
       (funcall (nth 3 spec) s))))
 
 ;;; [2.5] 前日比
-
-(defun my:ideco--int (s)
-  "S が整数なら数にして返す。そうでなければ nil。"
-  (let ((s (string-trim (or s ""))))
-    (and (string-match-p "\\`-?[0-9]+\\'" s) (string-to-number s))))
 
 (defun my:ideco--diff-index ()
   "`my:ideco--diff-column' が `my:ideco--columns' の何番目か。"
@@ -172,19 +201,6 @@ DB には `ｅＭＡＸＩＳ　Ｓｌｉｍ　国内株式（ＴＯＰＩＸ）
 見出し・寄せ・各行のセルのどれにも同じ位置で差し込むために使う。"
   (let ((i (1+ (my:ideco--diff-index))))
     (append (seq-take list i) (list value) (seq-drop list i))))
-
-(defun my:ideco--diff-cells (data)
-  "DATA (新しい順に並んだ生のセル) の各行について前日比のセルを返す。
-
-比べる相手は**次の行** (= 1 つ前の日)。だから呼ぶ側は表に出す行数より
-1 行多く取ること。最後の行は相手が無いので `my:ideco--null'。"
-  (let* ((i (my:ideco--diff-index))
-         (vals (mapcar (lambda (r) (my:ideco--int (nth i r))) data)))
-    (my:ideco--delta-cells
-     (seq-map-indexed (lambda (v k)
-                        (let ((p (nth (1+ k) vals)))
-                          (and v p (- v p))))
-                      vals))))
 
 (defun my:ideco--delta-cells (deltas)
   "DELTAS (整数か nil) を前日比のセルにする。nil は `my:ideco--null'。
@@ -210,6 +226,15 @@ DB には `ｅＭＡＸＩＳ　Ｓｌｉｍ　国内株式（ＴＯＰＩＸ）
            (propertize (concat arrow " " (my:ideco--pad s w 'right))
                        'face face))))
      deltas texts)))
+
+(defun my:ideco--diffs (rows)
+  "ROWS (alist の並び) の `soneki_diff' を取り出してセルにする。
+
+**差は API が計算して返す。** psql を引いていたころは「表に出す行数より
+1 行多く取って自分で引く」をやっていたが、API は `lag()' で出すので
+いちばん古い行にも本当の前日比が入っている。"
+  (my:ideco--delta-cells
+   (mapcar (lambda (r) (alist-get 'soneki_diff r)) rows)))
 
 ;;; [3] 罫線の表
 
@@ -271,225 +296,130 @@ ambiguous を幅 1 に倒す端末では `rw' が 1 になるので何も広げ�
                       (funcall line footer 'bold)))
             (funcall rule "└" "┴" "┘"))))
 
-;;; [4] psql
+;;; [4] API
 
-(defun my:ideco--wsl-p ()
-  "psql を WSL 経由で起こすなら非 nil。"
-  (string-match-p "\\`wsl\\(\\.exe\\)?\\'"
-                  (downcase (file-name-nondirectory
-                             (or (car my:ideco-psql-command) "")))))
+(defun my:ideco--status-url (days)
+  "資産状況の API の URL。DAYS 日分を頼む。"
+  (format "%s%s?days=%d"
+          (string-trim-right my:ideco-api-base-url "/+")
+          my:ideco--status-path days))
 
-(defun my:ideco--password ()
-  "`auth-source' を引き、無ければ訊く。**保存はしない** (my-oracle と同じ)。
+(defun my:ideco--response-body ()
+  "応答バッファの本文を UTF-8 で復号して返す (my-translate と同じ)。
 
-【重要】引けなかったときは**プロンプトにそう書く**。黙って `read-passwd' に
-落ちると、`~/.authinfo.gpg' を書いたのに訊かれたときに「書式が悪いのか・
-復号に失敗したのか・そもそも見ていないのか」が区別できない (実際に詰まった)。
-`auth-sources' のファイルが 1 つも無いときは普通のプロンプトのままにする
- (auth-source を使っていないなら、毎回そう書かれても邪魔なだけ)。"
-  (let* ((port (number-to-string my:ideco-port))
-         (found (car (auth-source-search :host my:ideco-host
-                                         :user my:ideco-user
-                                         :port port :max 1)))
-         (secret (plist-get found :secret)))
-    (if secret
-        (if (functionp secret) (funcall secret) secret)
-      (let ((files (seq-filter #'file-exists-p
-                               (mapcar #'expand-file-name
-                                       (seq-filter #'stringp auth-sources)))))
-        (when files
-          (message "auth-source は %s@%s:%s を見つけられなかった (見たのは %s)"
-                   my:ideco-user my:ideco-host port (string-join files " ")))
-        (read-passwd (format "%s@%s のパスワード%s: "
-                             my:ideco-user my:ideco-host
-                             (if files " [auth-source では見つからず]" "")))))))
+ヘッダと本文の境界は `\\r\\n\\r\\n' だが、`\\n\\n' のサーバもあるので両方見る。"
+  (save-excursion
+    (goto-char (point-min))
+    (let ((start (or (save-excursion
+                       (and (search-forward "\r\n\r\n" nil t) (point)))
+                     (save-excursion
+                       (and (search-forward "\n\n" nil t) (point))))))
+      (if start
+          (decode-coding-string
+           (buffer-substring-no-properties start (point-max)) 'utf-8)
+        ""))))
 
-(defun my:ideco--environment (password)
-  "PASSWORD を `PGPASSWORD' で渡すための `process-environment' を返す。
+(defun my:ideco--fetch (days)
+  "API から資産状況を取って alist で返す。DAYS 日分の推移を頼む。
 
-コマンドラインには載せない (`ps' から見えるため)。
+同期で 1 回 GET する (`url-retrieve-synchronously' の TIMEOUT を渡すので、
+サーバが黙っていても `my:ideco-api-timeout' 秒で諦める。渡さないと
+**応答が来るまで Emacs が止まる**)。
 
-【重要】WSL 経由のときは `WSLENV' に名前を書かないと Linux 側のプロセスに
-渡らない (実測で確認した)。既存の `WSLENV' は壊さず後ろに残す。
-フラグ (`/u' など) は付けない —— 素の名前で渡ることを実測した形にしてある。"
-  (let ((env (cons (concat "PGPASSWORD=" password) process-environment)))
-    (if (my:ideco--wsl-p)
-        (let ((old (getenv "WSLENV")))
-          (cons (concat "WSLENV=PGPASSWORD"
-                        (if (and old (not (string-empty-p old)))
-                            (concat ":" old)
-                          ""))
-                env))
-      env)))
+【重要】HTTP のステータスを先に見る。ideco_server は入力が不正なとき
+**空の本文で 422 を返す** (`main.py' の例外ハンドラ) ので、本文だけ見ると
+「JSON が読めない」としか言えない。
 
-(defun my:ideco--queries (rows)
-  "バッファ 1 枚ぶんの SELECT 文のリスト。直近 ROWS 行の推移を取る。
-
-**psql は 1 回しか起こさない**ので、全部を `-c' で並べて流す。結果は
-続けて出てくるだけで切れ目が分からないので、**各行の先頭にタグを
-付けて**どの問い合わせの行かを見分ける (`my:ideco--tag-columns')。
-1 回にまとめるのは、WSL 経由だと psql を起こすだけで 0.16 秒かかるため。
-
-- `H' 見出しの時刻。最新の行の `created_at' を JST にしたもの。
-  【重要】`created_at' は **UTC** で入っている (`timestamp without
-  time zone' なので値だけ見ても分からない。2026-11-10 分の行が
-  `2026-11-09 23:29' だった)。`at time zone' を 2 回当てて
-  「UTC として読み、JST で書く」
-- `S' 推移の表。前日比のために 1 行多く取るのは呼ぶ側の仕事
-- `I' 銘柄別。最新の日の銘柄と、その 1 つ前の日の同じ銘柄の損益
-  (前日比用。前の日に無い銘柄は NULL = 空欄) を並べる。名前は
-  `,' を含みうるので最後の列に置く (`my:ideco--split-csv' が解く)
-
-【重要】SQL に改行を入れない。引数は `wsl.exe' を通って Linux 側へ渡る。"
-  (list
-   (format "select 'H', to_char((created_at at time zone 'UTC') at time zone 'Asia/Tokyo', 'YYYY/MM/DD HH24:MI:SS') from %s order by summary_date desc limit 1"
-           my:ideco-table)
-   (format "select 'S', %s from %s order by summary_date desc limit %d"
-           (mapconcat #'car my:ideco--columns ", ")
-           my:ideco-table rows)
-   (format "with s as (select ideco_summary_id, row_number() over (order by summary_date desc) as rn from %s order by summary_date desc limit 2) select 'I', d.ideco_item_id, d.shisan_zandaka, d.soneki, p.soneki, m.unyo_shohin_name from s join ideco_item_data d on d.ideco_summary_id = s.ideco_summary_id join ideco_item_master m on m.ideco_item_id = d.ideco_item_id left join s s2 on s2.rn = 2 left join ideco_item_data p on p.ideco_summary_id = s2.ideco_summary_id and p.ideco_item_id = d.ideco_item_id where s.rn = 1 order by d.ideco_item_id"
-           my:ideco-table)))
-
-(defun my:ideco--tag-columns (tag)
-  "TAG の行がタグを除いて何列あるか。知らないタグなら nil。"
-  (pcase tag
-    ("H" 1)
-    ("S" (length my:ideco--columns))
-    ("I" 5)))
-
-(defun my:ideco--psql (sqls)
-  "SQLS (SELECT 文のリスト) を 1 回の psql で流し、タグごとに分けた結果を返す。
-戻り値は ((タグ . 行のリスト) ...)。行はタグを除いたセルのリスト。
-
-オプションには理由がある。**どれも外してはいけない。**
-
-- `-w' 【重要】これが無いと psql は**パスワードを stdin から読もうとして
-  待ち続ける**。`call-process' は stdin を与えないので、Emacs ごと
-  固まったように見える (実測)。`-w' なら 0.18 秒で認証エラーを返す
-- `-X' `~/.psqlrc' を読まない (出力形式を変えられると壊れる)
-- `-t --csv' 見出しと行数のフッタを出さない機械可読の形
-- `-v ON_ERROR_STOP=1' 失敗を終了コードで返させる
-
-【重要】stderr は**一時ファイルに分ける**。psql 16 からサーバ 18 に繋ぐと
-`WARNING: psql major version 16, server major version 18' が stderr に出る
-ので、`call-process' の出力先を 1 つにすると**この警告が CSV に混ざって
-パースが壊れる**。終了コードは 0 なので気づけない。"
-  (let* ((password (my:ideco--password))
-         (program (car my:ideco-psql-command))
-         (args (append (cdr my:ideco-psql-command)
-                       (list "-w" "-X" "-q" "-t" "--csv"
-                             "-v" "ON_ERROR_STOP=1"
-                             "-h" my:ideco-host
-                             "-p" (number-to-string my:ideco-port)
-                             "-U" my:ideco-user
-                             "-d" my:ideco-database)
-                       (mapcan (lambda (sql) (list "-c" sql)) sqls)))
-         (process-environment (my:ideco--environment password))
-         ;; 出力は UTF-8。引数は ASCII だけなので書き込み側は問わない
-         ;; (CLAUDE.md「文字コード」。日本語を渡すようになったら要検証)。
-         (coding-system-for-read 'utf-8-unix)
-         (errfile (make-temp-file "ideco-psql-")))
+JSON は alist / リストで受ける。`:array-type' を既定 (vector) のままに
+すると、表を組む `my:ideco--table' の `(cons footer rows)' が improper list
+になって `mapconcat' が通らない。"
+  (require 'url)
+  (let* ((url (my:ideco--status-url days))
+         (buffer (condition-case err
+                     (url-retrieve-synchronously url t nil my:ideco-api-timeout)
+                   (error
+                    (user-error "ideco_server に繋がらない (%s): %s"
+                                url (error-message-string err))))))
+    (unless buffer
+      (user-error "ideco_server が %s 秒で応答しない (%s)"
+                  my:ideco-api-timeout url))
     (unwind-protect
-        (with-temp-buffer
-          (let ((status (apply #'call-process program nil (list t errfile)
-                               nil args)))
-            (unless (eq status 0)
-              (user-error "psql が失敗した (%s): %s" status
-                          (my:ideco--first-line errfile)))
-            (my:ideco--parse (buffer-string))))
-      (ignore-errors (delete-file errfile)))))
-
-(defun my:ideco--first-line (file)
-  "FILE の 1 行目を返す (エラーメッセージ用)。
-
-**全部は出さない。** psql は接続の試行ごとに同じ内容を繰り返すことがあり、
-認証に失敗したときは 2 行出て 2 行目は 1 行目の末尾と同じだった (実測)。
-1 行目にいちばん情報があるので、それだけ出す。"
-  (with-temp-buffer
-    (let ((coding-system-for-read 'utf-8-unix))
-      (ignore-errors (insert-file-contents file)))
-    (or (car (split-string (string-trim (buffer-string)) "\n" t))
-        "(stderr は空)")))
-
-(defun my:ideco--split-csv (line)
-  "LINE (psql の `--csv' の 1 行) をセルのリストにする。
-
-psql は `,' や `\"' を含む値だけを `\"' で囲み、中の `\"' を `\"\"' にする。
-銘柄名は自由な文字列なのでこれを解く。値の中の改行は扱わない
- (行で切ってから呼ぶため。銘柄名に改行は現れない)。"
-  (let ((i 0) (n (length line)) cells)
-    (while (<= i n)
-      (if (and (< i n) (eq (aref line i) ?\"))
-          (let ((j (1+ i)) chars)
-            (catch 'closed
-              (while (< j n)
-                (let ((c (aref line j)))
-                  (cond ((not (eq c ?\")) (push c chars) (setq j (1+ j)))
-                        ((and (< (1+ j) n) (eq (aref line (1+ j)) ?\"))
-                         (push ?\" chars) (setq j (+ j 2)))
-                        (t (setq j (1+ j)) (throw 'closed nil))))))
-            (push (concat (nreverse chars)) cells)
-            (setq i (1+ j)))            ; 閉じ引用符の次の `,' を飛ばす
-        (let ((j (or (string-search "," line i) n)))
-          (push (substring line i j) cells)
-          (setq i (1+ j)))))
-    (nreverse cells)))
-
-(defun my:ideco--parse (text)
-  "psql の `-t --csv' の出力を ((タグ . 行のリスト) ...) にする。
-行の順は出てきた順のまま。列数がタグの想定と違えば止める。"
-  (let (acc)
-    (dolist (line (split-string text "\n" t "\r+"))
-      (let* ((cells (my:ideco--split-csv line))
-             (want (my:ideco--tag-columns (car cells))))
-        (unless (and want (= (length (cdr cells)) want))
-          (user-error "psql の出力を読めない: %s" line))
-        (push (cdr cells) (alist-get (car cells) acc nil nil #'equal))))
-    (mapcar (lambda (e) (cons (car e) (nreverse (cdr e)))) acc)))
+        (with-current-buffer buffer
+          (let ((status (and (boundp 'url-http-response-status)
+                             url-http-response-status))
+                (body (my:ideco--response-body)))
+            (unless (integerp status)
+              ;; 接続を断られたときは `url-retrieve-synchronously' がエラーを
+              ;; 出さずに、ステータスの無いバッファを返してくる (実測。
+              ;; サーバが起動していないときがこれ)。
+              (user-error "ideco_server に繋がらない (%s)" url))
+            (unless (and (<= 200 status) (< status 300))
+              (user-error "ideco_server が %s を返した (%s)%s"
+                          status url
+                          (if (string-empty-p (string-trim body))
+                              ""
+                            (format ": %s" (string-trim body)))))
+            (condition-case err
+                (json-parse-string body
+                                   :object-type 'alist
+                                   :array-type 'list
+                                   :null-object nil
+                                   :false-object nil)
+              (error (user-error "ideco_server の応答を読めない (%s): %s"
+                                 url (error-message-string err))))))
+      (when (buffer-live-p buffer)
+        (kill-buffer buffer)))))
 
 ;;; [4.5] 銘柄別
 
 (defun my:ideco--item-name (s)
-  "銘柄名 S を表に出す形にする (`my:ideco-normalize-item-names')。"
-  (let ((s (string-trim s)))
+  "銘柄名 S を表に出す形にする (`my:ideco-normalize-item-names')。
+
+【重要】NFKC のあとに NFC をかける。DB の銘柄名には**半角の濁点**
+ (U+FF9E) が入っていて、`ucs-normalize-NFKC-string' はこれを結合文字の
+濁点 (U+3099) にするだけで `テ' と合成してくれない (実測。50 文字のまま
+U+3099 が残る)。結合文字が残ると**桁の数え方が 2 通りになる**:
+`char-width' の総和は 73 なのに、合成を見る `string-width' は 71 を返す
+ (しかもバッファによって違う。display table のあるバッファでは 73)。
+表は `string-width' で桁を数えるので、濁点を含む行だけ 2 桁短くなって
+罫線が揃わなくなる (実測で 122 桁の表の 3 行が 120 桁)。NFC を通すと
+`デ' (U+30C7) に合成され、どの数え方でも 71 で一致する。"
+  (let ((s (string-trim (or s ""))))
     (if my:ideco-normalize-item-names
         (progn (require 'ucs-normalize)
-               (ucs-normalize-NFKC-string s))
+               (ucs-normalize-NFC-string (ucs-normalize-NFKC-string s)))
       s)))
 
 (defun my:ideco--items-table (items)
-  "ITEMS (`I' の行。id 資産残高 損益 前日の損益 銘柄名) を表の文字列にする。
+  "ITEMS (API の `items') を表の文字列にする。
 
 前日比は推移の表と同じく**損益**の差で、表記も同じ
- (`my:ideco--delta-cells')。
+ (`my:ideco--delta-cells')。前の日に無かった銘柄は API が null を返すので
+空欄になる。
 
 【重要】合計行には資産残高しか出さない。銘柄の損益は「資産残高 − 購入
 金額」で、日次サマリの損益 (「資産残高 − 拠出金累計」) とは基準が違う。
 足しても推移の表の損益と合わず (2026-11-10 で 2,704,054 対 2,649,776)、
 同じ画面に 2 つの「損益の合計」が並ぶことになる。資産残高は一致する。
 運営管理機関の画面も合計は資産残高だけ。"
-  (let* ((num (lambda (r i) (my:ideco--int (nth i r))))
-         (fmt (lambda (n) (if n
-                              (my:ideco--format-number (number-to-string n))
-                            my:ideco--null)))
-         (zan (mapcar (lambda (r) (funcall num r 1)) items))
-         (diffs (my:ideco--delta-cells
-                 (mapcar (lambda (r)
-                           (let ((now (funcall num r 2))
-                                 (prev (funcall num r 3)))
-                             (and now prev (- now prev))))
-                         items))))
+  (let* ((fmt (lambda (v)
+                (let ((s (my:ideco--string v)))
+                  (if (string-empty-p s)
+                      my:ideco--null
+                    (my:ideco--format-number s)))))
+         (zan (mapcar (lambda (r) (alist-get 'shisan_zandaka r)) items))
+         (diffs (my:ideco--diffs items)))
     (my:ideco--table
      '("運用商品名" "資産残高" "損益" "前日比")
      (seq-mapn (lambda (r z d)
-                 (list (my:ideco--item-name (nth 4 r))
+                 (list (my:ideco--item-name (alist-get 'unyo_shohin_name r))
                        (funcall fmt z)
-                       (funcall fmt (funcall num r 2))
+                       (funcall fmt (alist-get 'soneki r))
                        d))
                items zan diffs)
      '(left right right right)
      (list "合計"
-           (funcall fmt (and (not (memq nil zan)) (apply #'+ zan)))
+           (funcall fmt (and (seq-every-p #'numberp zan) (apply #'+ zan)))
            "" ""))))
 
 ;;; [5] バッファ
@@ -502,7 +432,7 @@ psql は `,' や `\"' を含む値だけを `\"' で囲み、中の `\"' を `\"
   "そのバッファを作ったときの行数。`g' で取り直すときに使う。")
 
 (define-derived-mode my:ideco-mode special-mode "iDeCo"
-  "iDeCo の日次サマリを見るモード。
+  "iDeCo の資産状況を見るモード。
 `q' でバッファごと閉じ、`g' で取り直す。"
   ;; 【重要】バッファローカルにしたいものは `setq-local' で書く
   ;; (CLAUDE.md §1)。`truncate-lines' は自動バッファローカルだが、
@@ -528,25 +458,25 @@ psql は `,' や `\"' を含む値だけを `\"' で囲み、中の `\"' を `\"
   "iDeCo の資産状況を出す。直近 ROWS 日の推移と、最新の日の銘柄別。
 
 ROWS の既定は `my:ideco-rows'。前置引数で行数を指定できる
- (`C-u 30 M-x check-ideco')。`M-x check-ideco' はこれの別名。"
+ (`C-u 30 M-x check-ideco')。`M-x check-ideco' はこれの別名。
+
+値は ideco_server の API から取る (`my:ideco-api-base-url')。"
   (interactive (list (if current-prefix-arg
                          (prefix-numeric-value current-prefix-arg)
                        my:ideco-rows)))
   (let* ((rows (max 1 (or rows my:ideco-rows)))
-         ;; 1 行多く取る。いちばん古い行の前日比を出す相手 (表には出さない)。
-         (result (my:ideco--psql (my:ideco--queries (1+ rows))))
-         (get (lambda (tag) (alist-get tag result nil nil #'equal)))
-         (stamp (car (car (funcall get "H"))))
-         (items (funcall get "I"))
-         (data (funcall get "S"))
-         (diffs (seq-take (my:ideco--diff-cells data) rows))
+         (status (my:ideco--fetch rows))
+         (stamp (my:ideco--format-timestamp (alist-get 'created_at status)))
+         (latest (alist-get 'summary_date status))
+         (data (alist-get 'summaries status))
+         (items (alist-get 'items status))
+         (diffs (my:ideco--diffs data))
          (cells (seq-mapn (lambda (row diff)
                             (my:ideco--with-diff
-                             (seq-map-indexed
-                              (lambda (spec i) (my:ideco--cell (nth i row) spec))
-                              my:ideco--columns)
+                             (mapcar (lambda (spec) (my:ideco--cell row spec))
+                                     my:ideco--columns)
                              diff))
-                          (seq-take data rows) diffs))
+                          data diffs))
          (buf (get-buffer-create my:ideco-buffer-name)))
     (with-current-buffer buf
       (let ((inhibit-read-only t))
@@ -571,9 +501,8 @@ ROWS の既定は `my:ideco-rows'。前置引数で行数を指定できる
         (insert "\n")
         (my:ideco--insert-heading
          (concat "銘柄別状況"
-                 (if data
-                     (format " (%s)" (my:ideco--cell (car (car data))
-                                                     (car my:ideco--columns)))
+                 (if latest
+                     (format " (%s)" (my:ideco--format-date latest))
                    ""))
          'my:ideco-heading)
         (insert (if items
@@ -581,8 +510,8 @@ ROWS の既定は `my:ideco-rows'。前置引数で行数を指定できる
                   "該当する行が無い。\n"))
         (insert "\n")
         (insert (propertize
-                 (format "%s / %s@%s / %d 行 (%s 取得)\n"
-                         my:ideco-table my:ideco-database my:ideco-host
+                 (format "%s / %d 行 (%s 取得)\n"
+                         (my:ideco--status-url rows)
                          (length cells)
                          (format-time-string "%Y-%m-%d %H:%M:%S"))
                  'face 'shadow))
@@ -592,7 +521,7 @@ ROWS の既定は `my:ideco-rows'。前置引数で行数を指定できる
       (setq-local my:ideco--rows rows)
       (setq-local revert-buffer-function #'my:ideco--revert))
     (pop-to-buffer buf)
-    (message "%s: %d 行" my:ideco-table (length cells))))
+    (message "iDeCo: %d 行" (length cells))))
 
 ;;;###autoload
 (defalias 'check-ideco #'my:ideco-check

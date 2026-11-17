@@ -1527,57 +1527,62 @@ zoxide、なかでも nvm だけで 282 ms。`zsh -l` なら 13 ms だが、**�
 - `brew install` や `.zshrc` の編集をすぐ反映したいときは
   **`M-x my:shell-env-refresh`**（次の起動を待ってもよい）
 
-## `my-ideco` — iDeCo の日次サマリ（`M-x check-ideco`）
+## `my-ideco` — iDeCo の資産状況（`M-x check-ideco`）
 
-psql を 1 回起こして、`ideco_daily_summary` の直近の推移と、最新の日の
-銘柄別（`ideco_item_data` + `ideco_item_master`）を罫線の表にする
-（600 行）。`docs/` は無い。推移の表の列・見出し・寄せ・整形は
-`my:ideco--columns` の 1 か所に書いてあり、クエリも表もそこから作る。
+**DB は直接引かない。** ideco_server（FastAPI）の
+`GET /api/v1/ideco/status?days=N` が返す JSON を、直近の推移と最新の日の
+銘柄別の 2 つの表にする（510 行）。つなぎ先は `my:ideco-api-base-url`
+（既定 `http://taigei.local:9001`）。`docs/` は無い。推移の表の列・見出し・
+寄せ・整形は `my:ideco--columns` の 1 か所に書いてあり、表はそこから作る。
 
-- **【重要】`created_at` は UTC で入っている**（`timestamp without time zone`
-  なので値からは分からない。2026-11-10 分が `2026-11-09 23:29`）。
-  見出しの時刻は SQL の `at time zone` を 2 回当てて JST にしている
+**2026-11-17 に psql 直叩きから API 経由へ移した。** それまでここにあった
+psql 固有の罠（`-w` が無いと stdin で止まる・stderr を分けないと
+バージョン警告が CSV に混ざる・WSL には `WSLENV` が要る・`auth-source` から
+パスワードを引く）は**どれも無くなった**。同じことを API 側で再発明しないこと。
+
+- **前日比の計算は API の仕事**（`soneki_diff`）。psql のころは「表に出す
+  行数より 1 行多く取って自分で引く」をやっていたが、API は `lag()` で
+  出すので**いちばん古い行にも本当の前日比が入る**。Emacs 側は
+  `my:ideco--delta-cells` で描くだけ
+- **資産残高ではなく損益で比べる**のは、拠出があった日は相場が下がっても
+  拠出の分だけ資産残高が増えて `↑` になるため（実測で 2026-09-15 は
+  資産残高 +7,255 / 損益 -15,745）
+- **【重要】`created_at` の UTC → JST の変換も API 側**（DB の列は
+  `timestamp without time zone` だが入っている値は UTC。2026-11-17 分の行が
+  `2026-11-16 23:46:05`）。Emacs 側（`my:ideco--format-timestamp`）は
+  `2026-11-17T08:46:05+09:00` を並べ替えるだけで、**時刻の計算をしない**。
+  `format-time-string` にゾーン `Asia/Tokyo` を渡す手もあるが、
+  **Windows には tz database が無い**のでマシンによって狂う
+- **【重要】銘柄名は NFKC のあとに NFC をかける**（`my:ideco--item-name`）。
+  DB の銘柄名には**半角の濁点**（U+FF9E）が入っていて、
+  `ucs-normalize-NFKC-string` はこれを結合文字の濁点（U+3099）にするだけで
+  `テ` と合成しない（実測）。結合文字が残ると**桁の数え方が 2 通りになる**
+  （`char-width` の総和 73 に対し、合成を見る `string-width` は 71。しかも
+  display table のあるバッファでは 73 を返す）ので、**濁点を含む行だけ
+  2 桁短くなって罫線が揃わない**（実測で 122 桁の表の 3 行が 120 桁）。
+  NFC を通すと `デ`（U+30C7）に合成されてどの数え方でも一致する
+- **【重要】HTTP のステータスを本文より先に見る。** ideco_server は入力が
+  不正なとき**空の本文（`{}`）で 422 を返す**（`main.py` の例外ハンドラ）ので、
+  本文だけ見ると「JSON が読めない」としか言えない。**接続を断られたときは
+  `url-retrieve-synchronously` がエラーを出さず、ステータスの無いバッファを
+  返す**（実測。サーバが起きていないときがこれ）ので、`integerp` で分ける
+- **`url-retrieve-synchronously` の TIMEOUT を必ず渡す**
+  （`my:ideco-api-timeout`、既定 5 秒）。同期で取るので、渡さないと
+  **応答が来るまで Emacs が止まる**
+- **`json-parse-string` は `:array-type 'list` で受ける。** 既定（vector）の
+  ままだと、表を組む `my:ideco--table` の `(cons footer rows)` が
+  improper list になって `mapconcat` が通らない
+- **`url` はトップレベルで `require` しない**（`my-htnblog` / `my-translate`
+  と同じ。§1「`eval-when-compile` は読み込み時に走らないことの保証に
+  ならない」）。`my:ideco--fetch` の入口で読む。宣言は `declare-function` と
+  値を伴わない `defvar`
 - **銘柄の損益と日次サマリの損益は基準が違う**（銘柄は「残高 − 購入金額」、
   サマリは「残高 − 拠出金累計」）。足しても合わないので、**銘柄別の
   合計行には資産残高しか出さない**
-- 問い合わせは `-c` を並べて 1 回の psql で流し、**各行の先頭のタグ**
-  （`H` / `S` / `I`）で見分ける。銘柄名は自由な文字列なので最後の列に置き、
-  CSV の引用符を `my:ideco--split-csv` で解く
-
-- **【重要】psql に `-w` を必ず付ける。** 無いと psql は**パスワードを
-  stdin から読もうとして待ち続ける**。`call-process` は stdin を与えないので、
-  **Emacs が固まったようにしか見えない**（実測で踏んだ）。`-w` なら
-  0.18 秒で認証エラーを返す。`-X`（`~/.psqlrc` を読まない）も外さない
-- **【重要】stderr は stdout と別に取る**（`call-process` の DESTINATION を
-  `(t ERRFILE)` にする）。psql 16 からサーバ 18 に繋ぐと
-  `WARNING: psql major version 16, server major version 18` が stderr に出るので、
-  出力先を 1 つにすると**この警告が CSV に混ざってパースが壊れる**。
-  **終了コードは 0** なので気づけない
-- **【重要】WSL 経由では `WSLENV` に名前を書かないと環境変数が渡らない**
-  （実測）。`PGPASSWORD` は `ps` から見えるコマンドラインに載せたくないので
-  環境変数で渡しており、`WSLENV=PGPASSWORD` が無いと Linux 側の psql に
-  届かず `no password supplied` になる。**渡っているかは
-  「`password authentication failed` が返るか」で見る**（`no password
-  supplied` なら届いていない）
 - 罫線の桁は my-claude と同じ罠（`─` `│` は 1 文字 2 桁）。列幅を
   「w+2 が罫線 1 文字の桁数の倍数」になるまで広げてある。検算は
-  **全行の `string-width` が同一か**（GUI 実測で 58 桁・464 px）
-- **auth-source から引けなかったら、プロンプトにそう書く**
-  （`[auth-source では見つからず]`）。黙って `read-passwd` に落ちると、
-  `~/.authinfo.gpg` を書いたのに訊かれたときに**書式が悪いのか・復号に
-  失敗したのか・そもそも見ていないのか**が区別できない（実際に詰まった）。
-  `*Messages*` には見に行ったファイル名も残す。**`auth-sources` のファイルが
-  1 つも無いときは普通のプロンプトのまま**にする
-- **`auth-source` が `.gpg` を読んだかは `*Messages*` の `Decrypting …` で
-  分かる。** 出ていなければファイルに触っていない（キャッシュに当たったか、
-  そのファイルを見ていない）。**「訊かれた」だけでは区別がつかない**ので、
-  まずここを見る
-- **検証で `epg-pinentry-mode` を `loopback` にしてはいけない。** 復号は
-  プロセスフィルタの中で進むので、`ec.sh`（`inhibit-interaction`）だと
-  `epa-passphrase-callback-function: User interaction while inhibited` が
-  **フィルタの中で**出て、呼び出し側は gpg の応答を待ったまま返らない
-  （実測。Emacs は固まらないが emacsclient がタイムアウトする）。
-  パスフレーズは Windows の pinentry に出させる
+  **全行の `string-width` が同一か**と、GUI の `string-pixel-width`
+  （実測で推移の表 72 桁 = 576 px、銘柄別 120 桁 = 960 px でそれぞれ一致）
 
 ### PostgreSQL MCP（`.mcp.json` の `ideco-postgres`、2026-11-10）
 
