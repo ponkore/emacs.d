@@ -61,7 +61,8 @@ git clone git@github.com:ponkore/emacs.d.git ~/.emacs.d
 | **`~/Projects` の実体** | bookmark をマシン間で共有 | Windows はジャンクション（`C:\Projects` へ）、他は symlink か実ディレクトリ |
 | **`claude-environments.el`** | Claude Code のアカウント（`CLAUDE_CONFIG_DIR`）の選択肢 | `claude-environments.el.sample` をリポジトリ直下にコピーして要るものだけ残す。**無ければ既定の `~/.claude` 1 つ**（聞かれない） |
 | **`~/.htnblog`** | はてなブログ投稿 | `userid` / `endpointurl` / `apikey` を書く |
-| **ideco_server** | iDeCo の資産状況（`M-x check-ideco`） | `ideco-server` リポジトリの `ideco_server/` で `docker compose up -d`。既定のつなぎ先は `http://taigei.local:9001`。**パスワードは要らない** |
+| **ideco_server** | iDeCo の資産状況（`M-x check-ideco`） | `ideco-server` リポジトリの `ideco_server/` で `docker compose up -d`。既定のつなぎ先は `http://taigei.local:9001`。**LAN の外から使うなら `local.el` で上書きする**。**パスワードは要らない** |
+| **`local.el`** | このマシンだけの設定（公開リポジトリに書けないホスト名、そのマシンにしか無いパス） | `local.el.sample` をリポジトリ直下にコピーして要るものだけ残す。**無ければ何もしない** |
 | **Docker + `~/.authinfo.gpg`** | Claude Code から ideco DB を引く MCP（`.mcp.json` の `ideco-postgres`。読み取り専用） | Docker Desktop を起動しておくだけ。パスワードは `~/.authinfo.gpg` の `machine 192.168.1.5 port 5432 login postgres` の行 |
 | **llama.cpp + PLaMo 3 Translate** | ローカル翻訳（`C-c T`） | 下の[外部依存](#外部依存)の表。**無ければコマンドがそう言うだけ** |
 | **EmbTerm の配布物** | Emacs の中の端末（`C-c s s`）。Windows / macOS | EmbTerm のリポジトリで `cargo xtask dist` → `C-u M-x my:embterm-update`（[手順](#embterm-の端末c-c-s-s)）。Rust と zig 0.17 が要る |
@@ -82,6 +83,7 @@ git clone git@github.com:ponkore/emacs.d.git ~/.emacs.d
 | `init.el` | ブートストラップと読み込み順の宣言のみ |
 | `user-lisp/` | **設定本体。27 モジュール**（[下表](#user-lisp-のモジュール)） |
 | `custom.el` | `customize` が自動生成する。手で書かない（[設計方針](#設計方針)） |
+| `local.el` | **このマシンだけの設定。git 管理外**（雛形は `local.el.sample`）。公開リポジトリに書けないホスト名などを置く |
 | `site-lisp/` | パッケージマネージャで入手できないローカルベンダの Emacs Lisp |
 | `etc/` | 文字を目で選ぶための一覧（emoji / Nerd Font）と、その生成スクリプト |
 | `fonts/` | `NFM.ttf` のみ。OS 側へのインストールが別途要る |
@@ -92,7 +94,7 @@ git clone git@github.com:ponkore/emacs.d.git ~/.emacs.d
 
 ## 読み込み順
 
-`early-init.el` → `init.el` の順で、`init.el` の中は次の 7 段。
+`early-init.el` → `init.el` の順で、`init.el` の中は次の 8 段。
 
 1. straight.el のブートストラップ
 2. 組み込みを使うパッケージの宣言（`org` / `transient` を `:type built-in`）
@@ -101,9 +103,14 @@ git clone git@github.com:ponkore/emacs.d.git ~/.emacs.d
 5. `(prepare-user-lisp t)` — **バイトコンパイルはしない**（[根拠](docs/refactoring/no-bytecompile.md)）
 6. `custom.el` の読み込み
 7. `user-lisp/` 各モジュールの `require`
+8. `local.el` の読み込み（**このマシンだけの設定。git 管理外**）
 
 **`custom.el` より `user-lisp/` のほうが後**なので、同じ変数を両方で設定すると
 `user-lisp/` 側が勝つ。モジュールを追加したら `init.el` の `require` 列に加える。
+
+**`local.el` は全モジュールより後**なので、ここでの設定は必ず勝つ。
+**マシン固有の値は `custom.el` ではなくこちらに置く**（`custom.el` は
+git 管理下なので、書いたものがそのまま公開される）。
 
 ## `user-lisp/` のモジュール
 
@@ -424,8 +431,10 @@ iDeCo 資産状況 (2026/11/10 08:29:08 時点)
 `C-u 30 M-x check-ideco` で行数を変えられる（API 側の上限は 365 日）。
 
 同期で 1 回 GET するだけ。つなぎ先は `my:ideco-api-base-url`
-（既定は ideco_server を動かしているマシンの `http://taigei.local:9001`。
-マシンを移したら custom で上書きする）。応答を待つのは
+（既定は ideco_server を動かしているマシンの mDNS 名
+`http://taigei.local:9001` なので、**同じ LAN にいるときだけ届く**。
+外からも使うなら VPN 越しのホスト名を `local.el` に書く。マシンを移したときも
+同じ）。応答を待つのは
 `my:ideco-api-timeout` 秒まで（既定 5 秒）で、サーバが落ちていれば
 **待たずにそう言う**。認証は無いので `~/.authinfo.gpg` は要らない
 （2026-11-17 に psql 直叩きから API 経由へ移した。それまでは

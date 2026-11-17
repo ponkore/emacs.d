@@ -1,0 +1,28 @@
+;;; local.el.sample --- このマシンだけの設定の雛形 -*- lexical-binding: t -*-
+
+;;; Commentary:
+
+;; このファイルを `local.el' という名前でリポジトリ直下にコピーし、要るものだけ
+;; 残す。`local.el' は .gitignore してあるので、書いた内容は公開されない。
+;;
+;; 置くもの:
+;;
+;;   - 公開リポジトリに書けないもの (社内や tailnet のホスト名など)
+;;   - そのマシンにしか無いパス
+;;
+;; `custom.el' ではなくこちらに置く。custom.el は **git 管理下**なので、
+;; 書いたものがそのまま公開される。
+;;
+;; `init.el' の最後 (user-lisp/ の全モジュールを require した後) に読まれるので、
+;; ここでの設定はモジュール側の既定値に必ず勝つ。無ければ何もしない。
+
+;;; Code:
+
+;;; iDeCo (M-x check-ideco) のつなぎ先
+;;
+;; 既定は mDNS 名 (http://taigei.local:9001) なので、同じ LAN にいるときだけ
+;; 届く。外からも使うなら Tailscale の名前 (MagicDNS) を書く。
+;;
+;; (setq my:ideco-api-base-url "https://HOST.tailXXXXXX.ts.net:8443")
+
+;;; local.el.sample ends here

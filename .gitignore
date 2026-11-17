@@ -54,3 +54,8 @@
 # my:claude-environments の実体（アカウントはマシンごとに違う）。雛形は
 # claude-environments.el.sample
 /claude-environments.el
+
+# --- このマシンだけの設定 (2026-11) ---
+# 公開リポジトリに書けないもの（社内や tailnet のホスト名など）。雛形は
+# local.el.sample
+/local.el

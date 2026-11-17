@@ -405,6 +405,25 @@ nil であることと `C-M-x` で評価しながら書く運用が噛み合わ�
 `user-lisp/` の `use-package` を `macroexpand-1` して出てくる
 `customize-set-variable` と突き合わせればよい。
 
+### 【重要】マシン固有の値は `custom.el` ではなく `local.el` に書く
+
+**`custom.el` は git 管理下**（tracked）なので、書いたものはそのまま公開
+リポジトリに載る。ホスト名・社内や tailnet の名前・そのマシンにしか無いパスを
+置いてはいけない。置き場は **`local.el`**（git 管理外。雛形は
+`local.el.sample`、読むのは `init.el` の最後）。
+
+- **読まれるのは `user-lisp/` の全モジュールの後**なので、`local.el` の設定は
+  モジュールの `defcustom` の既定値に必ず勝つ。逆に `custom.el` は
+  モジュールより先なので、モジュール側が `:custom` / `setq` している変数には
+  負ける（**ただし誰も設定していない `defcustom` なら `custom.el` でも効く**。
+  `custom-set-variables` が先に値を入れていると、後から来た `defcustom` は
+  既定値で上書きしない。2026-11-17 に実測）
+- **既定値に特定のマシンのホスト名を書き戻さない。** 既定は「そのファイルが
+  無いマシンでの逃げ道」で、`my:claude-environments` と同じ扱い
+  （→ §3 `my-claude`）。実例: `my:ideco-api-base-url` は mDNS 名
+  `http://taigei.local:9001`（同じ LAN にいるときだけ届く）のままにして、
+  VPN 越しの名前は `local.el` で上書きする
+
 ---
 
 ## Windows 固有
@@ -1532,7 +1551,9 @@ zoxide、なかでも nvm だけで 282 ms。`zsh -l` なら 13 ms だが、**�
 **DB は直接引かない。** ideco_server（FastAPI）の
 `GET /api/v1/ideco/status?days=N` が返す JSON を、直近の推移と最新の日の
 銘柄別の 2 つの表にする（510 行）。つなぎ先は `my:ideco-api-base-url`
-（既定 `http://taigei.local:9001`）。`docs/` は無い。推移の表の列・見出し・
+（既定は mDNS 名 `http://taigei.local:9001`。**LAN の外から使うときの名前を
+既定値に書き戻さない** → §1「マシン固有の値は `custom.el` ではなく `local.el` に
+書く」）。`docs/` は無い。推移の表の列・見出し・
 寄せ・整形は `my:ideco--columns` の 1 か所に書いてあり、表はそこから作る。
 
 **2026-11-17 に psql 直叩きから API 経由へ移した。** それまでここにあった
