@@ -29,7 +29,10 @@
 ;; 同期で 1 回 GET するだけ (`my:ideco-api-timeout' 秒で諦める)。
 ;; 見終わったら `q' でバッファごと消える。`g' で取り直す。
 ;;
-;; 認証は無い (ideco_server は LAN の中にある)。
+;; **API キーが要る** (`my:ideco-api-key')。既定では auth-source から引くので、
+;; 鍵はこのリポジトリの外 (`~/.authinfo' か `~/.authinfo.gpg') に置く。
+;; つなぎ先 (`my:ideco-api-base-url') も鍵もマシン固有なので `local.el' に書く
+;; (このリポジトリは公開しているため)。
 ;;
 ;;; Code:
 
@@ -40,8 +43,15 @@
 ;; (my-htnblog / my-translate と同じ。CLAUDE.md §1「`eval-when-compile' は
 ;; 読み込み時に走らないことの保証にならない」。宣言だけ置く)。
 (defvar url-http-response-status)
+;; `let' で縛るので、url-vars が読まれる前でも special である必要がある
+;; (lexical-binding では、束縛の種類は評価時に決まる)。
+(defvar url-request-extra-headers)
+(defvar url-debug)
 (declare-function url-retrieve-synchronously "url"
                   (url &optional silent inhibit-cookies timeout))
+(declare-function url-generic-parse-url "url-parse" (url))
+(declare-function url-host "url-parse" (url))
+(declare-function auth-source-search "auth-source" (&rest spec))
 
 (defgroup my:ideco nil
   "iDeCo の資産状況を見る。"
@@ -50,12 +60,40 @@
 
 ;;; [1] 設定
 
-(defcustom my:ideco-api-base-url "http://taigei.local:9001"
+(defcustom my:ideco-api-base-url nil
   "ideco_server の URL (スキームとホストまで)。
 
-既定は ideco_server を動かしているマシン (taigei) の mDNS 名。
-Windows の Emacs からも同じ設定で届くのでここに書いてある。
-別のマシンに移したときは custom で上書きする。"
+**設定しないと使えない。** `local.el' に書く (git 管理外)。
+
+ideco_server のコンテナは taigei の `127.0.0.1:9001' にしか bind して
+いないので、LAN から平文で直接は届かない。tailscale serve 経由の HTTPS
+ (`https://HOST.tailXXXXXX.ts.net:8443') を書く。以前の mDNS 名
+ (`http://taigei.local:9001') はもう通らない。
+
+**tailnet のホスト名を既定値に書き戻さない。** このリポジトリは公開して
+いる (§1「マシン固有の値は `custom.el' ではなく `local.el' に書く」)。"
+  :type '(choice (const :tag "未設定" nil) (string :tag "URL")))
+
+(defcustom my:ideco-api-key nil
+  "ideco_server の `X-Api-Key' に送る鍵。
+
+nil なら auth-source から引く (既定)。`auth-sources' の順に
+`~/.authinfo' / `~/.authinfo.gpg' を見て、`my:ideco-api-base-url' の
+ホストと `my:ideco-api-key-user' の login が一致する行の password を使う。
+
+  machine HOST.tailXXXXXX.ts.net login ideco password <鍵>
+
+**鍵をこのリポジトリの中に置かない。** 文字列で直接書くなら `local.el'
+ (git 管理外)。`custom.el' は git 管理下なので書かない。
+
+関数を渡すと、呼んだ戻り値を鍵として使う
+ (例: (lambda () (getenv \"IDECO_API_KEY\")))。"
+  :type '(choice (const :tag "auth-source から引く" nil)
+                 (string :tag "鍵そのもの")
+                 (function :tag "鍵を返す関数")))
+
+(defcustom my:ideco-api-key-user "ideco"
+  "auth-source で鍵を引くときの login (authinfo の `login')。"
   :type 'string)
 
 (defcustom my:ideco-api-timeout 5
@@ -298,11 +336,50 @@ ambiguous を幅 1 に倒す端末では `rw' が 1 になるので何も広げ�
 
 ;;; [4] API
 
+(defun my:ideco--base-url ()
+  "つなぎ先の URL (末尾の / を落としたもの)。未設定なら教えて止まる。"
+  (let ((url (and (stringp my:ideco-api-base-url)
+                  (string-trim my:ideco-api-base-url))))
+    (if (and url (not (string-empty-p url)))
+        (string-trim-right url "/+")
+      (user-error "`my:ideco-api-base-url' が未設定。\
+local.el に tailscale serve の URL を書く (雛形は local.el.sample)"))))
+
+(defun my:ideco--host ()
+  "つなぎ先のホスト名。auth-source の `machine' に使う。"
+  (require 'url-parse)
+  (url-host (url-generic-parse-url (my:ideco--base-url))))
+
+(defun my:ideco--auth-source-key ()
+  "auth-source から API キーを引く。見つからなければ nil。
+
+`:secret' は関数で返ることがある (暗号化された `~/.authinfo.gpg' など)
+ので、関数なら呼んでから返す。"
+  (require 'auth-source)
+  (when-let* ((entry (car (auth-source-search :host (my:ideco--host)
+                                              :user my:ideco-api-key-user
+                                              :max 1)))
+              (secret (plist-get entry :secret)))
+    (if (functionp secret) (funcall secret) secret)))
+
+(defun my:ideco--api-key ()
+  "`X-Api-Key' に送る鍵を返す。見つからなければ教えて止まる。
+
+`my:ideco-api-key' が文字列ならそれ、関数なら呼んだ戻り値、nil なら
+auth-source から引く。"
+  (let ((key (cond ((functionp my:ideco-api-key) (funcall my:ideco-api-key))
+                   ((stringp my:ideco-api-key) my:ideco-api-key)
+                   (t (my:ideco--auth-source-key)))))
+    (if (and (stringp key) (not (string-empty-p key)))
+        key
+      (user-error "ideco_server の API キーが無い。\
+~/.authinfo に `machine %s login %s password <鍵>' を書くか、\
+local.el で `my:ideco-api-key' を設定する"
+                  (my:ideco--host) my:ideco-api-key-user))))
+
 (defun my:ideco--status-url (days)
   "資産状況の API の URL。DAYS 日分を頼む。"
-  (format "%s%s?days=%d"
-          (string-trim-right my:ideco-api-base-url "/+")
-          my:ideco--status-path days))
+  (format "%s%s?days=%d" (my:ideco--base-url) my:ideco--status-path days))
 
 (defun my:ideco--response-body ()
   "応答バッファの本文を UTF-8 で復号して返す (my-translate と同じ)。
@@ -335,6 +412,10 @@ JSON は alist / リストで受ける。`:array-type' を既定 (vector) のま
 になって `mapconcat' が通らない。"
   (require 'url)
   (let* ((url (my:ideco--status-url days))
+         ;; 【重要】鍵を url の内部ログに残さない (my-htnblog と同じ)。
+         (url-debug nil)
+         (url-request-extra-headers
+          (list (cons "X-Api-Key" (my:ideco--api-key))))
          (buffer (condition-case err
                      (url-retrieve-synchronously url t nil my:ideco-api-timeout)
                    (error
@@ -354,11 +435,25 @@ JSON は alist / リストで受ける。`:array-type' を既定 (vector) のま
               ;; サーバが起動していないときがこれ)。
               (user-error "ideco_server に繋がらない (%s)" url))
             (unless (and (<= 200 status) (< status 300))
-              (user-error "ideco_server が %s を返した (%s)%s"
-                          status url
-                          (if (string-empty-p (string-trim body))
-                              ""
-                            (format ": %s" (string-trim body)))))
+              ;; 認証まわりは「繋がらない」と区別がつかないと原因を探せないので
+              ;; 名指しで出す。どちらも取り直しては直らない。
+              (cond
+               ;; サーバは 403 を返す。401 だと `url' が
+               ;; `url-http-handle-authentication' でユーザー名を聞きに行き、
+               ;; 「応答が無い」と区別がつかなくなる (実測でプロンプトに入る)。
+               ((memq status '(401 403))
+                (user-error "ideco_server に API キーを拒否された (%s)。\
+~/.authinfo の machine %s login %s の password を確かめる"
+                            status (my:ideco--host) my:ideco-api-key-user))
+               ((= status 503)
+                (user-error "ideco_server 側で API キーが設定されていない (503)。\
+サーバの .env と compose.yml を見る (%s)" url))
+               (t
+                (user-error "ideco_server が %s を返した (%s)%s"
+                            status url
+                            (if (string-empty-p (string-trim body))
+                                ""
+                              (format ": %s" (string-trim body)))))))
             (condition-case err
                 (json-parse-string body
                                    :object-type 'alist

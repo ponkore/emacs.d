@@ -20,9 +20,23 @@
 
 ;;; iDeCo (M-x check-ideco) のつなぎ先
 ;;
-;; 既定は mDNS 名 (http://taigei.local:9001) なので、同じ LAN にいるときだけ
-;; 届く。外からも使うなら Tailscale の名前 (MagicDNS) を書く。
+;; **設定しないと使えない** (既定は nil)。ideco_server のコンテナは
+;; 127.0.0.1 にしか bind していないので、tailscale serve 経由の HTTPS を書く。
 ;;
 ;; (setq my:ideco-api-base-url "https://HOST.tailXXXXXX.ts.net:8443")
+
+;;; iDeCo の API キー
+;;
+;; **鍵はここに書かない。** local.el は git 管理外だが、平文でリポジトリの
+;; 中にある。既定では auth-source から引くので、リポジトリの外に置く:
+;;
+;;   ~/.authinfo (chmod 600) か ~/.authinfo.gpg に 1 行:
+;;     machine HOST.tailXXXXXX.ts.net login ideco password <鍵>
+;;
+;; login の名前を変えたいときだけ:
+;; (setq my:ideco-api-key-user "ideco")
+;;
+;; どうしても auth-source を使わないなら、環境変数から読む手もある:
+;; (setq my:ideco-api-key (lambda () (getenv "IDECO_API_KEY")))
 
 ;;; local.el.sample ends here

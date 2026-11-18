@@ -420,9 +420,14 @@ nil であることと `C-M-x` で評価しながら書く運用が噛み合わ�
   既定値で上書きしない。2026-11-17 に実測）
 - **既定値に特定のマシンのホスト名を書き戻さない。** 既定は「そのファイルが
   無いマシンでの逃げ道」で、`my:claude-environments` と同じ扱い
-  （→ §3 `my-claude`）。実例: `my:ideco-api-base-url` は mDNS 名
-  `http://taigei.local:9001`（同じ LAN にいるときだけ届く）のままにして、
-  VPN 越しの名前は `local.el` で上書きする
+  （→ §3 `my-claude`）。実例: `my:ideco-api-base-url` の既定は **nil**。
+  ideco_server は tailscale serve 経由でしか届かなくなったが、tailnet の
+  ホスト名は公開リポジトリに書けないので、既定値は空にして `local.el` で
+  設定させる（未設定なら `local.el` を名指しするエラーで止まる）
+- **鍵やパスワードは `local.el` にも書かない。** `local.el` は git 管理外だが
+  平文でリポジトリの中にある。置き場はリポジトリの外——auth-source
+  （`~/.authinfo` / `~/.authinfo.gpg`）か、`my-htnblog` のような専用の
+  設定ファイル（`~/.htnblog`）
 
 ---
 
@@ -1551,9 +1556,9 @@ zoxide、なかでも nvm だけで 282 ms。`zsh -l` なら 13 ms だが、**�
 **DB は直接引かない。** ideco_server（FastAPI）の
 `GET /api/v1/ideco/status?days=N` が返す JSON を、直近の推移と最新の日の
 銘柄別の 2 つの表にする（510 行）。つなぎ先は `my:ideco-api-base-url`
-（既定は mDNS 名 `http://taigei.local:9001`。**LAN の外から使うときの名前を
-既定値に書き戻さない** → §1「マシン固有の値は `custom.el` ではなく `local.el` に
-書く」）。`docs/` は無い。推移の表の列・見出し・
+（**既定は nil。`local.el` に書く**。tailnet のホスト名を既定値に書き戻さない
+→ §1「マシン固有の値は `custom.el` ではなく `local.el` に書く」）。`docs/` は
+無い。推移の表の列・見出し・
 寄せ・整形は `my:ideco--columns` の 1 か所に書いてあり、表はそこから作る。
 
 **2026-11-17 に psql 直叩きから API 経由へ移した。** それまでここにあった
@@ -1597,6 +1602,18 @@ psql 固有の罠（`-w` が無いと stdin で止まる・stderr を分けな�
   と同じ。§1「`eval-when-compile` は読み込み時に走らないことの保証に
   ならない」）。`my:ideco--fetch` の入口で読む。宣言は `declare-function` と
   値を伴わない `defvar`
+- **API キーが要る**（2026-11-18）。`X-Api-Key` ヘッダーに載せる。既定では
+  auth-source から引く（`machine <ホスト> login ideco password <鍵>`）。
+  **鍵は `local.el` にも置かない**（平文でリポジトリの中にあるため）。
+  `my:ideco-api-key` に文字列や関数を渡して上書きもできる
+- **【重要】サーバの拒否は 401 ではなく 403**。`url` は 401 を受けると
+  `url-http-handle-authentication` でユーザー名を聞きに行き、batch では
+  そのまま固まる（実測。`WWW-Authenticate` の有無は関係なく、リクエストに
+  `Authorization` が無ければプロンプトに入る → `url-http.el`）。
+  ideco_server 側を 403 にして回避してある。403 / 503 は素通しで受け取れる
+- **`url-request-extra-headers` は値を伴わない `defvar` で special にしてから
+  `let` で縛る**。lexical-binding では束縛の種類が評価時に決まるので、
+  `url-vars` が読まれる前だと lexical になってヘッダーが飛ばない
 - **銘柄の損益と日次サマリの損益は基準が違う**（銘柄は「残高 − 購入金額」、
   サマリは「残高 − 拠出金累計」）。足しても合わないので、**銘柄別の
   合計行には資産残高しか出さない**
