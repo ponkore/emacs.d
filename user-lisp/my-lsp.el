@@ -27,6 +27,25 @@
   ;; intelephense は特に応答が遅く、php ファイルは閉じるのも開き直すのも遅かった。
   ;; 落としたくなったら C-c l q (eglot-shutdown) で明示的に落とす。
   (eglot-autoshutdown nil)
+  ;; 自動再接続はしない。
+  ;;
+  ;; 既定値は 3 (= 前回の接続が 3 秒以上生きていたら再接続する)。これは
+  ;; 「たまに落ちるサーバ」を想定した値で、**決定論的に落ちるサーバでは
+  ;; 無限ループになる**。しかも eglot は再接続のたびに
+  ;; `*EGLOT ... stderr*' と `*EGLOT ... events*' を**新規に作り、古いものを
+  ;; kill しない** (名前が衝突するので ...stderr*-56147 のような乱数サフィックス
+  ;; が付いて積まれていく)。
+  ;;
+  ;; 実測 (2026-11-19、intelephense が JSON-RPC -32603 Internal error で
+  ;; 毎回 exit 1 していたとき):
+  ;;   EGLOT バッファ 324 本 / 678 MB、Emacs の実メモリ 874 MB
+  ;;   stderr 1 本あたり 4.4 MB (Node が minify 済み intelephense.js の
+  ;;   7 行目 = 約 4 MB の 1 行をエラー文脈として丸ごと吐くため)
+  ;;   おおよそ 10 秒ごとにクラッシュ → 放置するとひたすら増える
+  ;;
+  ;; nil にすると、落ちたときは *Messages* に一度出るだけで止まる。
+  ;; 直したら C-c l R (eglot-reconnect) で明示的に繋ぎ直す。
+  (eglot-autoreconnect nil)
   ;; イベントログはメモリを食うだけなので無効にする
   (eglot-events-buffer-config '(:size 0 :format full))
   ;; プロジェクト外のファイルへ飛んだ先でも eglot を効かせる
@@ -46,6 +65,21 @@
   ;;     並べたうえでプロジェクト側の重複ソースを足してある。同じクラスが
   ;;     二重定義になると補完もジャンプも濁る。_oldver は旧版のコピー、
   ;;     env.pisc は別環境向けの複製で、どちらも同名クラスを持つ。
+  ;;
+  ;;     同梱されたサードパーティも落とす。**重複を消すのが主目的で、
+  ;;     軽くなるのは副産物**。得意先EDI (Shaddy) での実測 (2026-11-19、
+  ;;     php ファイル 1078 本):
+  ;;       phpMyAdmin  409 本  アプリコードからの参照は grep で 0 件
+  ;;       mics/lib    194 本  PHPExcel の 2 部目 (lib/ と同一、2012-10-11 の 20k)
+  ;;       adminer     1 本    minify 済みの 1 行 PHP
+  ;;     計 604 本 (56%) が落ちて 474 本になる。
+  ;;
+  ;;     【PHPExcel を丸ごと除外してはいけない】アプリコードは PHPExcel の
+  ;;     クラスを 175 ファイルで参照している。両方消すと new PHPExcel() の
+  ;;     補完もジャンプも効かなくなる。**重複している mics/lib 側だけ**を
+  ;;     落として lib/ を残す。intelephense は require を辿らず
+  ;;     ワークスペース全体のインデックスで解決する (上記) ので、
+  ;;     mics 側のコードからも lib/ の 1 部で引ける。
   (eglot-workspace-configuration
    '(:intelephense
      (:files (:associations ["*.php" "*.phpm" "*.inc"]
@@ -55,7 +89,10 @@
                         "**/vendor/**/{Tests,tests}/**"
                         "**/.history/**" "**/vendor/**/vendor/**"
                         "**/_oldver/**"
-                        "**/env.pisc/**"]))
+                        "**/env.pisc/**"
+                        "**/phpMyAdmin/**"
+                        "**/adminer-*.php"
+                        "**/mics/lib/**"]))
      ;;
      ;; gopls:
      ;;   gofumpt      - 整形。gopls に内蔵されているので gofumpt の
