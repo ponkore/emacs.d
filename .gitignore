@@ -46,6 +46,11 @@
 # EmbTerm の配布物（M-x my:embterm-update が EmbTerm のリポジトリの target/dist から写す）
 /embterm/
 
+# --- genpreview (2026-11) ---
+# GenPreview の配布物（M-x my:genpreview-update が GenPreview のリポジトリの
+# target/dist/genpreview から写す）
+/genpreview/
+
 # --- shell-env cache (2026-11) ---
 # my-shell.el が書くログインシェルの環境変数のキャッシュ（マシン固有）
 /shell-env-cache.el

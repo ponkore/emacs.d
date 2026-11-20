@@ -144,7 +144,7 @@ git 管理下なので、書いたものがそのまま公開される）。
 | `my-htnblog` | はてなブログ AtomPub API へ投稿する（`M-x htnblog`） |
 | `my-embterm` | EmbTerm の端末を Emacs のウィンドウに重ねて動かす（`C-c s`）。Windows / macOS |
 | `my-ideco` | iDeCo の資産状況を ideco_server の API で見る（`M-x check-ideco`） |
-| `my-genpreview` | GenPreview でファイルをプレビューする（`M-x genpreview-open`、dired の `v`）。Windows のみ。**macOS では同じ `v` が Preview.app を開く** |
+| `my-genpreview` | GenPreview でファイルをプレビューする（`M-x genpreview-open`、dired の `v`）。Windows / macOS |
 | `my-translate` | ローカル LLM（PLaMo 3 Translate）で翻訳する（`C-c T`）。モデルが無ければ無効 |
 | `my-platform` | Windows / macOS 固有設定 |
 
@@ -296,6 +296,41 @@ starship は出さないため）。
 | `M-x nyagos` | 同上（Windows のシェル） |
 | `M-x claude` | プロジェクトで claude の TUI を開く（`*claude-term(プロジェクト名)*`）。アカウントは `C-c a a` と同じく選ぶ。**`C-c a a`（stream-json）と並べて評価中** |
 | `M-x claude-resume` | `claude -r` で開き、**claude 自身に過去のセッションを一覧させて選ぶ**（`C-u` で `-c` = 直近の会話をそのまま継ぐ）。端末が動いていても必ず新しく開く。ヘッダ行に `-r` が出る |
+
+### GenPreview のプレビュー（dired の `v`、`M-x genpreview-open`）
+
+**GenPreview**（`~/Projects/GenPreview`）は画像・SVG・PDF・Markdown・CSV を、OS の描画 API で
+描いた面を Emacs のウィンドウに重ねて見せるプレビューア。描画・スクロール・選択・検索の強調は
+module が持ち、Emacs はキーと isearch だけを受け持つ。**Windows と macOS で動く**
+（違いは下の 3 点だけで、どちらも genpreview.el が吸収する）。
+
+| | Windows | macOS |
+|---|---|---|
+| 重ねるもの | 子ウィンドウ（Direct2D） | `CALayer` を `EmacsView` に足す（CoreGraphics） |
+| module | `genpreview_module.dll` | `libgenpreview_module.dylib` |
+| 同梱物 | `pdfium.dll` + `heif.dll` + `libde265.dll` | `libpdfium.dylib` のみ（HEIC は ImageIO） |
+
+配布物は `~/.emacs.d/genpreview/`（git の管理外。Windows の既定は `C:/Apps/genpreview/`）に置く。
+**無ければ dired の `v` は素の `dired-view-file` のまま。**
+
+**セットアップ・更新の手順**（配布物は GenPreview のリポジトリで作る。`my:genpreview-source-directory`。
+既定は Windows が `C:/Projects/GenPreview`、他は `~/Projects/GenPreview`）:
+
+1. 初めてなら、GenPreview のリポジトリで部品を取る: `cargo xtask fetch-pdfium`
+   （Windows はさらに `cargo xtask fetch-libheif`。macOS は HEIC を OS が読むので要らない）
+2. Emacs で **`C-u M-x my:genpreview-update`**。リポジトリで `cargo xtask dist` を裏で走らせ
+   （出力は `*genpreview-dist*`）、できた `target/dist/genpreview/` を写す。
+   dist を自分で作ったときは `C-u` なしで写すだけ
+3. 初めて入れたときはその場で使えるようになる。**更新したときは Emacs を再起動する**
+   （module は unload できない）
+
+キーは `n` / `p`（`j` / `k`、`C-n` / `C-p`）でスクロール、`SPC` / `S-SPC` で 1 画面、`<` / `>` で先頭・末尾、
+`+` / `-` / `0` で倍率、`W` / `P` で幅・ページに合わせる、`]` / `[` で PDF のページ、`t` でテーマ、
+`w` でコピー、`g` で読み直し、`q` で閉じる。
+**検索はふつうの `C-s`**（バッファに入っている全文を isearch が探し、見つかった位置をビューアが強調する）。
+**ソースコードとプレーンテキストは `v` の対象にしていない**（Emacs で読んだほうが速く、`view-mode` のまま
+検索も移動もできる）。`C-u v` でいつでも素の `dired-view-file` に落とせる。
+外部アプリで開きたいときは `&`（`dired-do-async-shell-command`）に `open -b com.apple.Preview` などを渡す。
 
 ### dired の拡張
 
@@ -546,7 +581,7 @@ iDeCo 資産状況 (2026/11/10 08:29:08 時点)
 |---|---|
 | `.` | hydra |
 | `RET` / `f` / `e` | 開く（Excel なら OS の関連付けへ） |
-| `v` | プレビュー（PDF / 画像 / SVG / markdown / CSV は GenPreview。macOS では PDF と画像を Preview.app。`C-u` で `view-mode`） |
+| `v` | プレビュー（PDF / 画像 / SVG / markdown / CSV は GenPreview。`C-u` で `view-mode`） |
 | `TAB` / `S-TAB` | サブツリーの開閉 / 巡回 |
 | `V` | `dired-vc-status` |
 | `G` | ripgrep |
