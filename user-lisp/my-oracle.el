@@ -182,8 +182,25 @@ font-lock を `oracle' から流用しているので、どちらでも色は同
 
 ;;; [2] daemon
 
+(defconst my:oracle--daemon-name "oracled"
+  "daemon のプロセス名。
+jsonrpc.el はこの名前から隠しバッファ（` *NAME output*' /
+` *NAME stderr*'）を作るので、止めるときもここから名前を組む。")
+
+(defconst my:oracle--stderr-buffer-name
+  (format "*%s stderr*" my:oracle--daemon-name)
+  "daemon の stderr を受けるバッファ。
+【重要】この名前は `make-process' の `:stderr' と jsonrpc.el の
+取り決めで決まっている（jsonrpc 側が同名のバッファを掴んでから
+先頭に空白を付けた隠し名へ改名する）。変えると stderr が 2 つに割れる。")
+
 (defvar my:oracle--conn nil
   "daemon への `jsonrpc-process-connection'。")
+
+(defvar my:oracle--process nil
+  "daemon のプロセス。
+止めるときに出力バッファを消すために握っておく（jsonrpc.el の
+`jsonrpc--process' は内部 API なので使わない）。")
 
 (defvar my:oracle--sessions nil
   "session id → plist（:name :info）の alist。")
@@ -207,6 +224,24 @@ daemon を張り直すときに捨てるので、ここで宣言しておく。"
   "最後に自分で選んだ session id。
 【重要】送り先はこれで決める。`my-claude' で「取り直すとよその
 セッションに書き始める」事故があったので、暗黙に探さない。")
+
+(defvar my:oracle--last-result nil
+  "session id → plist（:columns :rows）。縦表示と書き出しに使う。
+daemon を張り直すときに捨てるので、ここで宣言しておく。")
+
+(defun my:oracle--forget-all ()
+  "daemon に紐づく札を全部捨てる。
+
+【重要】走っていた文とスクリプトの札も捨てる。残しておくと
+「まだ前の文が走っている」と言い続けて何も送れなくなる。"
+  (setq my:oracle--conn nil
+        my:oracle--process nil
+        my:oracle--sessions nil
+        my:oracle--last-session nil
+        my:oracle--pending nil
+        my:oracle--script nil
+        my:oracle--meta nil
+        my:oracle--last-result nil))
 
 (defun my:oracle--available-p ()
   "daemon のバイナリがあるか。"
@@ -237,34 +272,28 @@ daemon を張り直すときに捨てるので、ここで宣言しておく。"
   (unless (my:oracle--available-p)
     (user-error "oracled が無い。M-x my:oracle-build で作る"))
   (when (and my:oracle--conn (not (jsonrpc-running-p my:oracle--conn)))
-    ;; daemon が死んだら、走っていた文とスクリプトの札も捨てる。
-    ;; 残しておくと「まだ前の文が走っている」と言い続けて何も送れなくなる
-    (setq my:oracle--conn nil
-          my:oracle--sessions nil
-          my:oracle--last-session nil
-          my:oracle--pending nil
-          my:oracle--script nil
-          my:oracle--meta nil))
+    ;; daemon が死んだら札を全部捨てる（理由は `my:oracle--forget-all'）
+    (my:oracle--forget-all))
   (unless my:oracle--conn
     (let* ((default-directory (expand-file-name "~/"))
            (process
             (make-process
-             :name "oracled"
+             :name my:oracle--daemon-name
              :command (list my:oracle-executable)
              :connection-type 'pipe
              :coding 'utf-8-unix
              :noquery t
-             :stderr (get-buffer-create "*oracled stderr*"))))
+             :stderr (get-buffer-create my:oracle--stderr-buffer-name))))
+      (setq my:oracle--process process)
       (setq my:oracle--conn
             (make-instance 'jsonrpc-process-connection
-                           :name "oracled"
+                           :name my:oracle--daemon-name
                            :process process
                            :notification-dispatcher #'my:oracle--notify))
       (let* ((hello (jsonrpc-request my:oracle--conn 'initialize nil))
              (proto (plist-get hello :protocol)))
         (unless (equal proto my:oracle-protocol)
-          (jsonrpc-shutdown my:oracle--conn)
-          (setq my:oracle--conn nil)
+          (my:oracle--stop-daemon)
           (user-error "oracled のプロトコルが %s（期待 %s）。M-x my:oracle-build で作り直す"
                       proto my:oracle-protocol))
         (message "oracled %s (protocol %s, pid %s)"
@@ -274,6 +303,47 @@ daemon を張り直すときに捨てるので、ここで宣言しておく。"
 (defun my:oracle--request (method params)
   "同期で呼ぶ（DB を叩かない軽いものだけ）。"
   (jsonrpc-request (my:oracle--ensure-daemon) method params))
+
+(defun my:oracle--live-p ()
+  "daemon と話せる状態か。
+【重要】`my:oracle--request' は daemon が居なければ**起こしてしまう**。
+畳むときは必ずこれで見てから送る（でないと止めるために起こすことになる）。"
+  (and my:oracle--conn (jsonrpc-running-p my:oracle--conn)))
+
+(defun my:oracle--stop-daemon ()
+  "daemon を止めて札を捨て、daemon のバッファも消す。
+
+【重要】先に `shutdown' を頼む。daemon 側はそれで**全 session を
+明示 ROLLBACK してから exit する**（main.go）。`jsonrpc-shutdown' は
+プロセスが自分で死ぬのを**待つだけ**で殺さないので、頼まずに呼ぶと
+0.3 秒待った末に \"Sentinel for … still hasn't run, deleting it!\" と
+警告を出して `delete-process' する（jsonrpc.el）。
+
+【重要】`jsonrpc-shutdown' の CLEANUP（第 2 引数）は渡さない。中で
+`(kill-buffer (process-buffer PROC))' を呼ぶが、process-buffer が nil だと
+**`kill-buffer' は現在のバッファを殺す**。いまは jsonrpc が出力バッファを
+張るので nil にはならないが、そこに寄りかからない。バッファは自分で消す。"
+  (let ((conn my:oracle--conn)
+        (proc my:oracle--process))
+    (when (my:oracle--live-p)
+      (ignore-errors (jsonrpc-request conn 'shutdown nil :timeout 2)))
+    (when conn (ignore-errors (jsonrpc-shutdown conn)))
+    (when (process-live-p proc) (delete-process proc))
+    ;; daemon のバッファを消す。jsonrpc.el のバッファ名は connection の
+    ;; 名前から決まる（` *NAME output*' / ` *NAME stderr*' /
+    ;; `*NAME events*'）。
+    ;; 【重要】`jsonrpc-events-buffer' は**無ければ作る**ので呼ばない。
+    ;; `jsonrpc-shutdown' の CLEANUP も events バッファは消さない（実測で
+    ;; `*oracled events*' だけが残った）。
+    (dolist (buf (list (and proc (process-buffer proc))
+                       (and conn (ignore-errors (jsonrpc-stderr-buffer conn)))
+                       (get-buffer (format " *%s output*" my:oracle--daemon-name))
+                       (get-buffer (format " *%s stderr*" my:oracle--daemon-name))
+                       (get-buffer (format "*%s events*" my:oracle--daemon-name))
+                       ;; jsonrpc が改名する前に死んだとき用
+                       (get-buffer my:oracle--stderr-buffer-name)))
+      (when (buffer-live-p buf) (kill-buffer buf))))
+  (my:oracle--forget-all))
 
 ;;; [3] 接続
 
@@ -335,17 +405,82 @@ daemon を張り直すときに捨てるので、ここで宣言しておく。"
         (setf (plist-get (cdr (assoc id my:oracle--sessions)) :info) info)
         info))))
 
+(defun my:oracle--forget-session (id)
+  "session ID の札（一覧・メタ・最後の結果）を捨てる。"
+  (setq my:oracle--sessions (assoc-delete-all id my:oracle--sessions)
+        my:oracle--meta (assoc-delete-all id my:oracle--meta)
+        my:oracle--last-result (assoc-delete-all id my:oracle--last-result))
+  (when (equal id my:oracle--last-session)
+    (setq my:oracle--last-session (caar my:oracle--sessions))))
+
+(defun my:oracle--close-session (id)
+  "daemon 側の session ID を閉じて札を捨てる。
+daemon が死んでいるときは送らない（`my:oracle--live-p' 参照）。"
+  (when (my:oracle--live-p)
+    (my:oracle--request 'session/close (list :session id)))
+  (my:oracle--forget-session id))
+
 ;;;###autoload
 (defun my:oracle-disconnect (&optional id)
-  "session を閉じる（daemon 側で明示 ROLLBACK してから）。"
+  "session を閉じる（daemon 側で明示 ROLLBACK してから）。
+daemon とバッファは残す。まとめて畳むなら `my:oracle-quit'。"
   (interactive)
   (let ((id (or id my:oracle--last-session)))
     (unless id (user-error "繋がっていない"))
-    (my:oracle--request 'session/close (list :session id))
-    (setq my:oracle--sessions (assoc-delete-all id my:oracle--sessions))
-    (when (equal id my:oracle--last-session)
-      (setq my:oracle--last-session (caar my:oracle--sessions)))
+    (my:oracle--close-session id)
     (message "%s を閉じた" id)))
+
+(defun my:oracle--quit-confirm (id)
+  "畳んでよいか確かめる。進めるなら非 nil。
+
+未コミットの変更があるときだけ訊く。`session/close' も daemon の
+`shutdown' も**どちらも明示 ROLLBACK する**ので、黙って捨てると
+気づけないまま変更が消える。"
+  (let ((info (and (my:oracle--live-p) (ignore-errors (my:oracle--info id)))))
+    (or (not (eq (plist-get info :in_tx) t))
+        (pcase (read-char-choice
+                "未コミットの変更がある: (c) commit して終了 / (r) rollback して終了 / (q) やめる "
+                '(?c ?r ?q))
+          (?c (my:oracle--request 'tx/commit (list :session id)) t)
+          (?r t)                        ; 閉じる側が ROLLBACK する
+          (_ nil)))))
+
+;;;###autoload
+(defun my:oracle-quit (&optional id)
+  "session ID を閉じ、関連するバッファを消す。
+ほかに session が無ければ daemon（oracled）も止める。
+対話バッファで `exit' / `quit' と打ったときもここへ来る。
+
+畳んだら非 nil、やめたら nil を返す（呼んだ側がプロンプトを
+出し直すかを決められるように）。"
+  (interactive)
+  (let ((id (or id my:oracle--last-session)))
+    (unless id (user-error "繋がっていない"))
+    (when (my:oracle--quit-confirm id)
+      ;; 【重要】バッファと接続名は session を忘れる前に取る
+      (let* ((buffers (my:oracle--session-buffers id))
+             (name (or (plist-get (cdr (assoc id my:oracle--sessions)) :name) id))
+             (last-one (null (cdr my:oracle--sessions)))
+             (note ""))
+        (if last-one
+            ;; daemon の `shutdown' が全 session を ROLLBACK して閉じるので、
+            ;; `session/close' は送らない
+            (my:oracle--stop-daemon)
+          ;; 【重要】閉じられなくても畳む。ここで中断すると、札とバッファが
+          ;; 残ったまま「もう無い session」を抱え続けることになる（実測:
+          ;; daemon が知らない session に `session/close' を送るとエラーで、
+          ;; 以前はそこで畳むのをやめていた）
+          (condition-case e
+              (my:oracle--close-session id)
+            (error (my:oracle--forget-session id)
+                   (setq note (format "（session/close は失敗: %s）"
+                                      (error-message-string e))))))
+        (my:oracle--kill-buffers buffers)
+        (message "%s を閉じた%s%s" name
+                 (if last-one "。oracled も止めた"
+                   "（ほかに session があるので oracled は止めない）")
+                 note)
+        t))))
 
 ;;; [4] バッファ
 
@@ -374,6 +509,25 @@ daemon を張り直すときに捨てるので、ここで宣言しておく。"
 
 (defun my:oracle--log-buffer (id)
   (get-buffer-create (my:oracle--buffer-name id 'log)))
+
+(defun my:oracle--session-buffers (id)
+  "session ID に紐づく、生きているバッファのリスト。
+
+【重要】`my:oracle--buffer-name' は接続名を `my:oracle--sessions' から
+引くので、**session を忘れる前に**呼ぶこと。忘れた後だと名前が id に
+なって 1 つも見つからず、バッファが残る。"
+  (delq nil (mapcar (lambda (kind) (get-buffer (my:oracle--buffer-name id kind)))
+                    '(nil rows log desc plan))))
+
+(defun my:oracle--kill-buffers (buffers)
+  "BUFFERS を消す。
+対話バッファが握っているダミープロセス（`make-pipe-process'）も
+一緒に消える。`:noquery t' なので訊かれない。"
+  (dolist (buf buffers)
+    (when (buffer-live-p buf)
+      (when-let* ((proc (get-buffer-process buf)))
+        (delete-process proc))
+      (kill-buffer buf))))
 
 (defun my:oracle--log (text)
   "ログバッファに 1 行書く。"
@@ -826,6 +980,7 @@ NO-DISPLAY が非 nil ならウィンドウには出さない（対話バッフ�
 (define-key my:oracle-prefix-map "m" #'my:oracle-more)
 (define-key my:oracle-prefix-map "i" #'my:oracle-info)
 (define-key my:oracle-prefix-map "q" #'my:oracle-disconnect)
+(define-key my:oracle-prefix-map "Q" #'my:oracle-quit)
 
 ;;; [9] 対話バッファ（SQL> プロンプト）
 
@@ -839,6 +994,10 @@ NO-DISPLAY が非 nil ならウィンドウには出さない（対話バッフ�
 ;; `ielm' は同じ目的で hexl を起こすが、Windows のプロセス生成は 59〜76 ms
 ;; かかるうえ無駄な子が残る。pipe プロセスなら子は無い。
 ;; 実際の送信は `comint-input-sender' を差し替えて横取りする。
+;;
+;; `exit' / `quit' は daemon に送らず、`my:oracle-quit' で畳む
+;; （session を閉じ、`*oracle(名前)*' とその `:rows' / `:log' / `:desc' /
+;; `:plan' を kill し、ほかに session が無ければ oracled も止める）。
 
 (defvar my:oracle--prompt-regexp "^SQL\\*?> "
   "プロンプトの正規表現。
@@ -1043,10 +1202,41 @@ daemon には書かない（ダミープロセスに書くと取りこぼす）�
      (t
       (let* ((res (my:oracle--request 'sql/split (list :text text)))
              (statements (append (plist-get res :statements) nil)))
-        (if (null statements)
-            (my:oracle--repl-ready buffer)
-          ;; 複数の文が 1 回の入力に入っていたらスクリプトとして順に流す
-          (my:oracle--script-start statements "入力" buffer)))))))
+        (cond
+         ((null statements) (my:oracle--repl-ready buffer))
+         ;; `exit' / `quit' は session ごと畳む（daemon も止める）。
+         ;; 【重要】コマンドループに戻してから畳む。ここは
+         ;; `comint-send-input' の途中（保留を流すときは jsonrpc の
+         ;; プロセスフィルタの中）なので、その場でバッファを kill すると
+         ;; 戻り先が死ぬ。`jsonrpc-shutdown' をフィルタの中で呼ぶのも
+         ;; 自分の足を撃つ（自分の出力を待つことになる）
+         ((my:oracle--repl-quit-p statements)
+          (run-at-time 0 nil #'my:oracle--repl-quit buffer))
+         ;; 複数の文が 1 回の入力に入っていたらスクリプトとして順に流す
+         (t (my:oracle--script-start statements "入力" buffer))))))))
+
+(defun my:oracle--repl-quit-p (statements)
+  "STATEMENTS が `EXIT' / `QUIT' 1 つだけか。
+
+【重要】判定は daemon の `sql/split' の結果（`kind' と `command'）で
+行う。Emacs 側で正規表現を書くと lexer が 2 つになる。種類は
+文字列で来るので `my:oracle--kind' を通す。"
+  (and (null (cdr statements))
+       (eq (my:oracle--kind (car statements)) 'client)
+       (member (plist-get (car statements) :command) '("EXIT" "QUIT"))
+       t))
+
+(defun my:oracle--repl-quit (buffer)
+  "対話バッファ BUFFER の `exit' を捌く。
+やめた（`C-g' / `q'）ときはプロンプトを出し直す。入力はもう
+消費してしまっているので、出さないと打つ場所が無くなる。"
+  (when (buffer-live-p buffer)
+    (let ((id (buffer-local-value 'my:oracle--session-id buffer)))
+      (unless (condition-case err
+                  (my:oracle-quit id)
+                (quit nil)
+                (error (message "%s" (error-message-string err)) nil))
+        (my:oracle--repl-ready buffer)))))
 
 ;;;###autoload
 (defun my:oracle-repl ()
@@ -1203,6 +1393,10 @@ daemon には書かない（ダミープロセスに書くと取りこぼす）�
        (my:oracle--script-step))
       ((or "REM" "REMARK") (my:oracle--script-step))
       ((or "EXIT" "QUIT")
+       ;; 【重要】ここへ来るのは**スクリプトの中の** EXIT だけ。対話
+       ;; バッファに直に打った `exit' は `my:oracle--repl-sender' が
+       ;; 先に拾って session ごと畳む。スクリプトの EXIT で Emacs 側の
+       ;; session まで畳むと、`@file' を流しただけで接続が消える
        (my:oracle--script-note "EXIT でスクリプトを終了" nil)
        (setf (plist-get my:oracle--script :queue) nil)
        (my:oracle--script-step))
@@ -1547,8 +1741,7 @@ SQL の文字列として解釈されない（引用符を含む値でも壊れ�
 
 ;;; [14] 縦表示・書き出し・実行計画
 
-(defvar my:oracle--last-result nil
-  "session id → plist（:columns :rows）。縦表示と書き出しに使う。")
+;; `my:oracle--last-result' の宣言は [2]（daemon を張り直すときに捨てる）。
 
 (defun my:oracle--remember-result (id columns rows)
   (setf (alist-get id my:oracle--last-result nil nil #'equal)

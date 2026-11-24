@@ -961,7 +961,7 @@ REPL バッファは**バッファローカルに session を握る**（1 バッ
 | `@path` / `@@path` | `@@` は**実行中のスクリプトからの相対**。拡張子省略時は `.sql` を補う。ネストは深さ 8 まで |
 | `EXEC[UTE] foo(1)` | `BEGIN foo(1); END;` に包んで投げる（これだけは安いので訳す） |
 | `PROMPT text` | ログに出すだけ |
-| `EXIT` / `QUIT` | **スクリプトを終わる**（Emacs も session も終わらせない） |
+| `EXIT` / `QUIT` | **スクリプトを終わる**（Emacs も session も終わらせない）。プロンプトに直に打ったときだけは畳む → 下の「`exit` / `quit` は畳む」 |
 | `COMMIT` / `ROLLBACK` | 普通の文 |
 
 | 対応しない（**無視して報告**） | |
@@ -1012,6 +1012,49 @@ SQLcl 版で苦労した文字コードの話が、**ここ 1 か所に閉じる
 
 ---
 
+#### `exit` / `quit` は畳む（2026-11-24）
+
+プロンプトに直に `exit`（`quit`、末尾の `;` は付いていてもよい）と打ったら、
+**その session を閉じ、関連するバッファを消し、ほかに session が無ければ
+daemon も止める**（`my:oracle-quit`。`C-c q Q` でも同じ）。消すのは
+`*oracle(名前)*` と、その `:rows` / `:log` / `:desc` / `:plan`。
+
+| | |
+|---|---|
+| 判定 | `sql/split` の `kind` = `client` と `command` = `EXIT` / `QUIT`。**Emacs 側に正規表現を書かない**（lexer が 2 つになる） |
+| 最後の session | `shutdown` を送る。daemon が**全 session を明示 ROLLBACK してから** exit するので `session/close` は送らない |
+| ほかに session がある | その 1 本だけ `session/close`。daemon は止めない |
+| 未コミットの変更 | `(c) commit` / `(r) rollback` / `(q) やめる` を訊く。閉じる側は必ず ROLLBACK するので、黙って捨てない |
+| やめたとき | **プロンプトを出し直す**。入力はもう消費されているので、出さないと打つ場所が無くなる |
+
+**スクリプトの中の `EXIT` は従来どおりスクリプトを終わるだけ**（上の
+`@filename` の表）。`@file` を流しただけで接続が消えると困るので、
+直に打った `exit` だけを `my:oracle--repl-sender` が先に拾う。
+
+##### 【重要】畳むのはコマンドループに戻してから
+
+`my:oracle--repl-sender` が走っているのは `comint-send-input` の**途中**
+（保留していた入力を流すときは **jsonrpc のプロセスフィルタの中**）。
+その場でバッファを kill すると戻り先が死に、`jsonrpc-shutdown` を
+フィルタの中で呼ぶと自分の出力を待つことになる。`run-at-time` 0 で
+`my:oracle--repl-quit` に渡す。
+
+##### 【重要】`jsonrpc-shutdown` は殺さない。CLEANUP も渡さない
+
+`jsonrpc-shutdown` は**プロセスが自分で死ぬのを待つだけ**なので、先に
+`shutdown` を頼まないと 0.3 秒待った末に "Sentinel for … still hasn't run,
+deleting it!" と警告して `delete-process` する。また CLEANUP（第 2 引数）は
+`(kill-buffer (process-buffer PROC))` を呼ぶが、**process-buffer が nil だと
+`kill-buffer` は現在のバッファを殺す**。バッファは自分で名前から消す
+（` *oracled output*` / ` *oracled stderr*` / `*oracled events*`。
+**CLEANUP は events バッファを消さない**——実測でそれだけ残った）。
+
+##### 【重要】閉じられなくても畳む
+
+daemon が知らない session に `session/close` を送るとエラーになる。そこで
+中断すると**札とバッファが残ったまま「もう無い session」を抱え続ける**ので、
+失敗は報告だけして畳む（実測で踏んだ）。
+
 ### キーバインド案（`C-c q` プレフィクス = query）
 
 | | |
@@ -1026,6 +1069,7 @@ SQLcl 版で苦労した文字コードの話が、**ここ 1 か所に閉じる
 | `C-c q m` | 続きを取る（`rows/more`） |
 | `C-c q x` | 縦表示トグル |
 | `C-c q w` | 結果を CSV / TSV / JSON で書き出す |
+| `C-c q q` / `C-c q Q` | session を閉じる / **閉じてバッファも畳む**（最後の 1 本なら daemon も止める。対話バッファの `exit` と同じ） |
 
 ### 点（スピナー）と状態表示
 
