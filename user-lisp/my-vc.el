@@ -15,6 +15,25 @@
   ;; magit-status-internal は magit 4.x で削除済み。
   ;; git-commit-mode-hook はコマンドではなく変数なので :commands から外す。
   :commands magit-status-setup-buffer git-commit-mode
+  ;; --------------------------------------------------
+  ;; ログの右マージンを絶対日時にする
+  ;;
+  ;; `l l' (magit-log-current) の一覧で右端に出ているのはマージンで、
+  ;; 書式は `magit-log-margin' が持つ。既定の `age' は現在からの相対表示
+  ;; ("1 hour" / "4 days") なので、`format-time-string' の書式文字列を
+  ;; 与えて年月日に変える。
+  ;;
+  ;;   (INIT STYLE WIDTH AUTHOR AUTHOR-WIDTH)
+  ;;
+  ;; WIDTH の `magit-log-margin-width' は桁数を計算する**関数**で、
+  ;; STYLE から幅を出すので触らない (docstring に「変えるな」とある)。
+  ;; AUTHOR の t が作者名の表示、18 がその幅。
+  ;;
+  ;; **一時的に戻したいだけなら `L l' (Cycle style)** で
+  ;; age -> age-abbreviated -> この書式 を巡回できる (バッファローカル)。
+  ;; status や refs などのマージンは別変数 (`magit-status-margin' ほか)。
+  :custom
+  (magit-log-margin '(t "%Y/%m/%d %H:%M:%S " magit-log-margin-width t 18))
   ;; leaf の :advice は init 時にインライン展開される (eval-after-load に
   ;; 包まれない) ので :init に置く。advice-add は対象が未定義でも登録でき、
   ;; magit のロード時に有効になる。
