@@ -19,6 +19,6 @@
 ;; 実際の subscriptionType とアカウントを見せる。
 
 (("personal" . nil)
- ("jighead"  . "~/.claude-config/jighead")
- ;; ("ESC-Web" . "~/.claude-config/ESC-Web")
+ ("work"     . "~/.claude-config/work")
+ ;; ("client" . "~/.claude-config/client")
  )

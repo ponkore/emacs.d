@@ -459,7 +459,7 @@ metadata で並べ替えを止めている (素のリストを渡すと履歴順
 
 ;; Emacs 30 で本体に入った (:straight は付けない。org / transient と同じ扱い)。
 ;; .editorconfig があるディレクトリでだけ効くので、実質の効き先は
-;; RINSETSU/AdjacentAreaTool/AdjacentAreaTool/ (C#) と、php-mode の repo や
+;; 社内の C# プロジェクトと、php-mode の repo や
 ;; node_modules など他所のリポジトリ。範囲を絞る defcustom は**同梱版には無い**
 ;; (MELPA 版の editorconfig-exclude-regexps は本体に入るときに落ちた)。
 ;;

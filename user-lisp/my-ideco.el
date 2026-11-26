@@ -65,10 +65,10 @@
 
 **設定しないと使えない。** `local.el' に書く (git 管理外)。
 
-ideco_server のコンテナは taigei の `127.0.0.1:9001' にしか bind して
-いないので、LAN から平文で直接は届かない。tailscale serve 経由の HTTPS
- (`https://HOST.tailXXXXXX.ts.net:8443') を書く。以前の mDNS 名
- (`http://taigei.local:9001') はもう通らない。
+ideco_server のコンテナは動かしているマシンの `127.0.0.1:9001' にしか
+bind していないので、LAN から平文で直接は届かない。tailscale serve 経由の
+HTTPS (`https://HOST.tailXXXXXX.ts.net:8443') を書く。以前の mDNS 名
+ (`http://HOST.local:9001') はもう通らない。
 
 **tailnet のホスト名を既定値に書き戻さない。** このリポジトリは公開して
 いる (§1「マシン固有の値は `custom.el' ではなく `local.el' に書く」)。"

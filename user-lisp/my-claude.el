@@ -61,8 +61,8 @@
 `read' で読む (評価はしない) ので `;' で選択肢を一時的に外せる。
 
   ((\"personal\" . nil)
-   (\"jighead\"  . \"~/.claude-config/jighead\")
-   ;; (\"ESC-Web\" . \"~/.claude-config/ESC-Web\")
+   (\"work\"     . \"~/.claude-config/work\")
+   ;; (\"client\" . \"~/.claude-config/client\")
    )
 
 ファイルが無ければ `my:claude-environments' の既定 (既定の環境 1 つ) の

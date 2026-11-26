@@ -150,11 +150,19 @@ SET は何も出力しないが、コマンド 1 つにつきプロンプトが 
   :type '(choice directory (const nil))
   :group 'SQL)
 
-(defcustom my:sql-sqlcl-connection "WebCoreDB_main"
+(defcustom my:sql-sqlcl-connection nil
   "既定の接続先 (SQLcl の connmgr に保存した名前)。
+
+**値は `local.el'（git 管理外）に書く。** 業務 DB の接続名は公開
+リポジトリに載せられないので既定は nil。
+
+nil でも困らない。ミニバッファの初期値が空になるだけで、候補は
+`my:sql-sqlcl-connections-directory' の保存済みの接続から読む
+\(`my:sql-sqlcl--connection-names')。
+
 `my:sql-sqlcl' は `sql-database' が空のときだけこれを入れる。
 以後はミニバッファの初期値が前回の接続先になる。"
-  :type 'string
+  :type '(choice (const :tag "入れない" nil) string)
   :group 'SQL)
 
 (defcustom my:sql-sqlcl-login-params

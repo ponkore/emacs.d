@@ -56,14 +56,23 @@
   "daemon と一致していないといけないプロトコル版。
 不一致なら機能を無効化して `M-x my:oracle-build' を促す（gitd と同じ）。")
 
-(defcustom my:oracle-connections
-  '(("XEPDB1" :host "192.168.66.101" :port 1521 :service "XEPDB1"
-     :user "TEST2TAX"))
+(defcustom my:oracle-connections nil
   "接続定義。名前 → 接続先。
+
+**実際の値は `local.el'（git 管理外）に書く。** 業務 DB のホスト名と
+スキーマ名は公開リポジトリに載せられないので、既定は空にしてある。
+未設定なら `my:oracle--read-connection' が `local.el' を名指しして止まる。
+
+  (setq my:oracle-connections
+        \\='((\"DEV\" :host \"HOST\" :port 1521 :service \"SERVICE\"
+                 :user \"USER\")
+          (\"本番\" :host \"HOST\" :service \"SERVICE\" :user \"USER\"
+                 :confirm-write t)))
 
 【重要】パスワードはここに書かない。`auth-source'（`~/.authinfo.gpg'）
 から引き、無ければミニバッファで訊く。daemon へは stdio の RPC で渡すので
-コマンドラインにも環境変数にも出ない。
+コマンドラインにも環境変数にも出ない。**`local.el' にも書かない**
+（git 管理外だが平文でリポジトリの中にある）。
 
 `:confirm-write' が非 nil なら、書き込む文を送る前に確認する（本番 DB 用）。"
   :type '(alist :key-type string :value-type plist))
@@ -358,12 +367,23 @@ daemon を張り直すときに捨てるので、ここで宣言しておく。"
         (if (functionp secret) (funcall secret) secret)
       (read-passwd (format "%s@%s のパスワード: " user host)))))
 
+(defun my:oracle--read-connection (&optional default)
+  "`my:oracle-connections' から接続名を 1 つ読む。DEFAULT は初期値。
+
+【重要】**空のまま `completing-read' に渡してはいけない。** 候補が 0 件で
+REQUIRE-MATCH が t だと、`RET' も `C-g' 以外の抜け道も無い入力待ちになり、
+「繋がらない」ではなく「ミニバッファから出られない」形で詰まる。既定値は
+空なので (定義は `local.el' に置く)、未設定はふつうに起こりうる。"
+  (unless my:oracle-connections
+    (user-error "接続定義が無い。local.el で my:oracle-connections を設定する"))
+  (completing-read "接続: " (mapcar #'car my:oracle-connections) nil t
+                   nil nil default))
+
 ;;;###autoload
 (defun my:oracle-connect (name)
   "`my:oracle-connections' から選んで接続する。"
   (interactive
-   (list (completing-read "接続: " (mapcar #'car my:oracle-connections) nil t
-                          nil nil (caar my:oracle-connections))))
+   (list (my:oracle--read-connection (caar my:oracle-connections))))
   (let* ((spec (cdr (assoc name my:oracle-connections)))
          (_ (unless spec (user-error "接続定義が無い: %s" name)))
          (info (my:oracle--request
@@ -394,8 +414,7 @@ daemon を張り直すときに捨てるので、ここで宣言しておく。"
   (or (and my:oracle--last-session
            (assoc my:oracle--last-session my:oracle--sessions)
            my:oracle--last-session)
-      (my:oracle-connect
-       (completing-read "接続: " (mapcar #'car my:oracle-connections) nil t))))
+      (my:oracle-connect (my:oracle--read-connection))))
 
 (defun my:oracle--info (&optional id)
   "session の状態を取り直す。"

@@ -61,7 +61,7 @@ git clone git@github.com:ponkore/emacs.d.git ~/.emacs.d
 | **`~/Projects` の実体** | bookmark をマシン間で共有 | Windows はジャンクション（`C:\Projects` へ）、他は symlink か実ディレクトリ |
 | **`claude-environments.el`** | Claude Code のアカウント（`CLAUDE_CONFIG_DIR`）の選択肢 | `claude-environments.el.sample` をリポジトリ直下にコピーして要るものだけ残す。**無ければ既定の `~/.claude` 1 つ**（聞かれない） |
 | **`~/.htnblog`** | はてなブログ投稿 | `userid` / `endpointurl` / `apikey` を書く |
-| **ideco_server** | iDeCo の資産状況（`M-x check-ideco`） | `ideco-server` リポジトリの `ideco_server/` で `docker compose up -d`。既定のつなぎ先は `http://taigei.local:9001`。**LAN の外から使うなら `local.el` で上書きする**。**パスワードは要らない** |
+| **ideco_server** | iDeCo の資産状況（`M-x check-ideco`） | `ideco-server` リポジトリの `ideco_server/` で `docker compose up -d`。**つなぎ先（`my:ideco-api-base-url`）を `local.el` に書く**（既定は nil）。API キーは `~/.authinfo` に置く |
 | **`local.el`** | このマシンだけの設定（公開リポジトリに書けないホスト名、そのマシンにしか無いパス、`C-c t` のワークスペースの候補） | `local.el.sample` をリポジトリ直下にコピーして要るものだけ残す。**無ければ何もしない** |
 | **Docker + `~/.authinfo.gpg`** | Claude Code から ideco DB を引く MCP（`.mcp.json` の `ideco-postgres`。読み取り専用） | Docker Desktop を起動しておくだけ。パスワードは `~/.authinfo.gpg` の `machine 192.168.1.5 port 5432 login postgres` の行 |
 | **llama.cpp + PLaMo 3 Translate** | ローカル翻訳（`C-c T`） | 下の[外部依存](#外部依存)の表。**無ければコマンドがそう言うだけ** |
@@ -466,14 +466,14 @@ iDeCo 資産状況 (2026/11/10 08:29:08 時点)
 `C-u 30 M-x check-ideco` で行数を変えられる（API 側の上限は 365 日）。
 
 同期で 1 回 GET するだけ。つなぎ先は `my:ideco-api-base-url`
-（既定は ideco_server を動かしているマシンの mDNS 名
-`http://taigei.local:9001` なので、**同じ LAN にいるときだけ届く**。
-外からも使うなら VPN 越しのホスト名を `local.el` に書く。マシンを移したときも
-同じ）。応答を待つのは
+（**既定は nil なので、`local.el` に書かないと使えない**。tailnet の
+ホスト名は公開リポジトリに書けないため。マシンを移したときも同じ）。
+応答を待つのは
 `my:ideco-api-timeout` 秒まで（既定 5 秒）で、サーバが落ちていれば
-**待たずにそう言う**。認証は無いので `~/.authinfo.gpg` は要らない
-（2026-11-17 に psql 直叩きから API 経由へ移した。それまでは
-`auth-source` からパスワードを引いていた）。前日比の計算も API 側。
+**待たずにそう言う**。API キーは auth-source から引く（`~/.authinfo` の
+`machine <ホスト> login ideco password <鍵>`）。前日比の計算も API 側
+（2026-11-17 に psql 直叩きから API 経由へ移し、2026-11-18 に API キーを
+足した）。
 
 ### その他
 
@@ -643,7 +643,7 @@ jsdoc / json / python / rust / toml / tsx / typescript / yaml の 17 個。
 | Git 付属の `bash.exe` | Windows の `shell-file-name`（あるときだけ設定） |
 | golangci-lint | `C-c C-l` |
 | SQLcl | `M-x my:sql-sqlcl`（`scoop install sqlcl`。接続は SQLcl の `connmgr` に登録しておく。Windows では `~/bin/sql.cmd` のラッパがあればそれを使う） |
-| ideco_server | `M-x check-ideco`。`ideco-server` リポジトリの FastAPI を Docker で起こしておく（`http://taigei.local:9001`）。**psql は要らない**（2026-11-17 に API 経由へ移した） |
+| ideco_server | `M-x check-ideco`。`ideco-server` リポジトリの FastAPI を Docker で起こし、URL を `local.el` に書く。**psql は要らない**（2026-11-17 に API 経由へ移した） |
 | llama.cpp | `C-c T` の翻訳。**Windows** は[リリース](https://github.com/ggml-org/llama.cpp/releases)の `llama-b*-bin-win-vulkan-x64.zip` を `~/.local/opt/llama.cpp-*/` へ展開する（ビルド不要）。**Intel の iGPU では `GGML_VK_DISABLE_COOPMAT=1` が無いと GPU が落ちる**（既定で付ける）。**macOS は `brew install llama.cpp`**（Metal。PATH から拾うので置き場の指定は要らない。coopmat は Metal に無いので既定で立てない） |
 | PLaMo 3 Translate | 同上。`pfnet/plamo-3-translate-{0.8b,2b}-GGUF` の Q4_K_M を `~/.local/share/plamo-models/` へ置く（計 2.2 GB）。**商用利用には[登録](https://forms.gle/mTL8tBLrMYXKNZD56)が要る**（無償） |
 

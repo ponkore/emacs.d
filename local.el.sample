@@ -58,4 +58,30 @@
 ;;         "~/.emacs.d/"
 ;;         "~/.config/"))
 
+;;; Oracle (M-x my:oracle-connect) の接続先
+;;
+;; **設定しないと使えない** (既定は空で、未設定なら user-error で止まる)。
+;; 業務 DB のホスト名・スキーマ名は公開リポジトリに書けないのでここに置く。
+;;
+;; **パスワードはここに書かない。** auth-source (~/.authinfo.gpg) の
+;;
+;;   machine HOST port 1521 login USER password <鍵>
+;;
+;; から引き、無ければミニバッファで訊く。
+;;
+;; :confirm-write を付けると、書き込む文を送る前に確認する (本番 DB 用)。
+;;
+;; (setq my:oracle-connections
+;;       '(("DEV"  :host "HOST" :port 1521 :service "SERVICE" :user "USER")
+;;         ("本番" :host "HOST" :service "SERVICE" :user "USER"
+;;                 :confirm-write t)))
+
+;;; SQLcl (M-x my:sql-sqlcl) の既定の接続先
+;;
+;; SQLcl の connmgr に保存した名前。無くても困らない (ミニバッファの
+;; 初期値が空になるだけで、候補は connmgr の保存先から読む)。
+;; 認証情報は SQLcl 側にあるので、ここには接続名しか書かない。
+;;
+;; (setq my:sql-sqlcl-connection "CONNECTION_NAME")
+
 ;;; local.el.sample ends here
