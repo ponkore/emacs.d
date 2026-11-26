@@ -62,7 +62,7 @@ git clone git@github.com:ponkore/emacs.d.git ~/.emacs.d
 | **`claude-environments.el`** | Claude Code のアカウント（`CLAUDE_CONFIG_DIR`）の選択肢 | `claude-environments.el.sample` をリポジトリ直下にコピーして要るものだけ残す。**無ければ既定の `~/.claude` 1 つ**（聞かれない） |
 | **`~/.htnblog`** | はてなブログ投稿 | `userid` / `endpointurl` / `apikey` を書く |
 | **ideco_server** | iDeCo の資産状況（`M-x check-ideco`） | `ideco-server` リポジトリの `ideco_server/` で `docker compose up -d`。既定のつなぎ先は `http://taigei.local:9001`。**LAN の外から使うなら `local.el` で上書きする**。**パスワードは要らない** |
-| **`local.el`** | このマシンだけの設定（公開リポジトリに書けないホスト名、そのマシンにしか無いパス） | `local.el.sample` をリポジトリ直下にコピーして要るものだけ残す。**無ければ何もしない** |
+| **`local.el`** | このマシンだけの設定（公開リポジトリに書けないホスト名、そのマシンにしか無いパス、`C-c t` のワークスペースの候補） | `local.el.sample` をリポジトリ直下にコピーして要るものだけ残す。**無ければ何もしない** |
 | **Docker + `~/.authinfo.gpg`** | Claude Code から ideco DB を引く MCP（`.mcp.json` の `ideco-postgres`。読み取り専用） | Docker Desktop を起動しておくだけ。パスワードは `~/.authinfo.gpg` の `machine 192.168.1.5 port 5432 login postgres` の行 |
 | **llama.cpp + PLaMo 3 Translate** | ローカル翻訳（`C-c T`） | 下の[外部依存](#外部依存)の表。**無ければコマンドがそう言うだけ** |
 | **EmbTerm の配布物** | Emacs の中の端末（`C-c s s`）。Windows / macOS | EmbTerm のリポジトリで `cargo xtask dist` → `C-u M-x my:embterm-update`（[手順](#embterm-の端末c-c-s-s)）。Rust と zig 0.17 が要る |
@@ -514,7 +514,7 @@ iDeCo 資産状況 (2026/11/10 08:29:08 時点)
 | `C-x C-;` | 日時を挿入（`2026/09/14 12:34:56`） |
 | `C-;` | 日付を挿入（`2026-09-14 (月)`） |
 | `C-S-a` | `embark-act` |
-| `C-c t` | ディレクトリを選んで**新しいタブ**で開く（タブ名に色付きの印） |
+| `C-c t` | ディレクトリを選んで**新しいタブ**で開く（タブ名に色付きの印）。候補（`my:tab-bar-directories`）は **`local.el` に書く**。既定は `~/.emacs.d/` と `~/.config/` の 2 つだけで、一覧の `<free>` からはいつでも任意のディレクトリを選べる |
 | `C-TAB` / `C-S-TAB` | タブ移動（`tab-next` / `tab-previous`。組み込み） |
 | `ESC ?` | `apropos` |
 | `<f1> b` | キーバインドの一覧表（`C-u` でモード固有のみ。元の `describe-bindings` は `<f1> C-b`） |

@@ -39,4 +39,23 @@
 ;; どうしても auth-source を使わないなら、環境変数から読む手もある:
 ;; (setq my:ideco-api-key (lambda () (getenv "IDECO_API_KEY")))
 
+;;; 疑似ワークスペース (C-c t) の候補
+;;
+;; `C-c t' が「新しいタブで開くディレクトリ」としてミニバッファに出す候補。
+;; my-editor.el の既定は `~/.emacs.d/' と `~/.config/' の 2 つだけなので、
+;; 仕事のプロジェクトはここで足す (**公開リポジトリには書けない**)。
+;;
+;; 書いた順に出る。候補に無いディレクトリは一覧の末尾の "<free>" から
+;; `C-x C-f' と同じように選べるので、ここに全部書く必要は無い。
+;;
+;; `~/Projects' は my-platform.el のジャンクション / symlink 越しに見ている
+;; ので、この書き方のまま mac / Linux でも通る (`c:/Projects' と書くと
+;; そのマシンでしか開けない)。
+;;
+;; (setq my:tab-bar-directories
+;;       '("~/Projects/FOO/"
+;;         "~/Projects/bar/BAZ/"
+;;         "~/.emacs.d/"
+;;         "~/.config/"))
+
 ;;; local.el.sample ends here

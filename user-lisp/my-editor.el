@@ -355,11 +355,21 @@ This affects both the echo area and the `*Messages*' buffer."
   :hook (tab-bar-tab-post-open-functions . my:tab-bar-clear-buffer-list)
   :preface
   (defcustom my:tab-bar-directories
-    '("~/Projects/ESC-Web/WebCoreSystem_v1/"
-      "~/Projects/nel/RINSETSU/"
-      "~/.emacs.d/"
-      "~/.config/")
+    '("~/.emacs.d/" "~/.config/")
     "`my:tab-bar-open-directory' がミニバッファに出すディレクトリ。
+
+**実際の値は `local.el' (git 管理外) に書く。** ここに書いてあるのは
+そのファイルが無いマシンでの逃げ道で、どのマシンにもあって公開しても
+困らない 2 つだけ。**仕事のプロジェクトのパスを既定値に書き戻さない**
+\(このリポジトリは公開しているので、社内のディレクトリ名がそのまま載る)。
+
+  (setq my:tab-bar-directories
+        \\='(\"~/Projects/FOO/\" \"~/Projects/bar/BAZ/\"
+          \"~/.emacs.d/\" \"~/.config/\"))
+
+`local.el' は user-lisp/ の全モジュールの後に読まれるので、この
+defcustom の既定値には必ず勝つ。マシンごとに数が違ってよい
+\(候補が 2 つでも 10 個でも `completing-read' は同じ)。
 
 `~/Projects' は my-platform.el のジャンクション / symlink 越しに見ている
 ので、この書き方のまま mac / Linux でも通る (c:/Projects と書くと
@@ -410,8 +420,8 @@ metadata で並べ替えを止めている (素のリストを渡すと履歴順
   (defun my:tab-bar-open-directory (dir)
     "DIR を新しいタブの dired で開き、タブ名を「印 + 末尾の名前」にする。
 
-印は `my:tab-bar--mark' が選ぶ。名前は `~/Projects/nel/RINSETSU/' なら
-\"RINSETSU\"。"
+印は `my:tab-bar--mark' が選ぶ。名前は `~/Projects/foo/BAR/' なら
+\"BAR\"。"
     (interactive (list (my:tab-bar--read-directory)))
     (let* ((dir (file-name-as-directory (expand-file-name dir)))
            (base (file-name-nondirectory (directory-file-name dir)))
